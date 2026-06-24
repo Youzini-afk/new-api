@@ -182,6 +182,32 @@ func TestDiscordPreUserMutation_RegisterGatePassSetsResult(t *testing.T) {
 	assert.Equal(t, "refresh-token", decrypted)
 }
 
+func TestDiscordPreUserMutation_RegisterGatePassRequiresRefreshToken(t *testing.T) {
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGateEnabled = true
+		settings.LoginGateEnabled = false
+		settings.RegisterGate = discordGateConfig("guild-1", "role-1")
+	})
+	joinedAt := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+	withDiscordMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/users/@me/guilds/guild-1/member", r.URL.Path)
+		_, _ = w.Write([]byte(`{"roles":["role-1"],"joined_at":"` + joinedAt + `"}`))
+	})
+
+	result := &PreUserMutationResult{}
+	err := (&DiscordProvider{}).PreUserMutation(context.Background(), PreUserMutationContext{
+		Flow:   OAuthFlowCreate,
+		Token:  &OAuthToken{AccessToken: "access-token"},
+		Result: result,
+	})
+	require.Error(t, err)
+	var accessDenied *AccessDeniedError
+	require.ErrorAs(t, err, &accessDenied)
+	assert.Equal(t, discordGateReauthMessage, accessDenied.Message)
+	assert.False(t, result.HasDiscordGateUpdate)
+	assert.False(t, result.HasDiscordRefreshTokenUpdate)
+}
+
 func TestDiscordPreUserMutation_EnabledEmptyConfigFailsClosed(t *testing.T) {
 	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
 		settings.RegisterGateEnabled = true

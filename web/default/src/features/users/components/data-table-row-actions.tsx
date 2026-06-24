@@ -30,6 +30,9 @@ import {
   ShieldAlert,
   Link2,
   CreditCard,
+  RotateCcw,
+  UserX,
+  ShieldCheck,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -44,7 +47,14 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
-import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
+import {
+  forceUserDiscordGateReauth,
+  manageUser,
+  recheckUserDiscordGate,
+  resetUserPasskey,
+  resetUserTwoFA,
+  setUserDiscordGateExempt,
+} from '../api'
 import {
   USER_STATUS,
   USER_ROLE,
@@ -66,6 +76,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { setOpen, setCurrentRow, triggerRefresh } = useUsers()
   const [resetPasskeyOpen, setResetPasskeyOpen] = useState(false)
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
+  const [forceDiscordReauthOpen, setForceDiscordReauthOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
 
@@ -124,6 +135,55 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setResetTwoFAOpen(false)
+    }
+  }
+
+  const handleDiscordRecheck = async () => {
+    try {
+      const result = await recheckUserDiscordGate(user.id)
+      if (result.success) {
+        toast.success(t('Discord gate rechecked'))
+        triggerRefresh()
+      } else {
+        toast.error(result.message || t('Failed to recheck Discord gate'))
+      }
+    } catch (_error) {
+      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+    }
+  }
+
+  const handleForceDiscordReauth = async () => {
+    try {
+      const result = await forceUserDiscordGateReauth(user.id)
+      if (result.success) {
+        toast.success(t('Discord reauthorization required'))
+        triggerRefresh()
+      } else {
+        toast.error(result.message || t('Failed to force Discord reauth'))
+      }
+    } catch (_error) {
+      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+    } finally {
+      setForceDiscordReauthOpen(false)
+    }
+  }
+
+  const handleDiscordExempt = async () => {
+    const nextExempt = !user.discord_gate_exempt
+    try {
+      const result = await setUserDiscordGateExempt(user.id, nextExempt)
+      if (result.success) {
+        toast.success(
+          nextExempt
+            ? t('Discord exemption enabled')
+            : t('Discord exemption disabled')
+        )
+        triggerRefresh()
+      } else {
+        toast.error(result.message || t('Failed to update Discord exemption'))
+      }
+    } catch (_error) {
+      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     }
   }
 
@@ -222,6 +282,37 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
           <DropdownMenuSeparator />
 
+          <DropdownMenuItem onClick={handleDiscordRecheck} disabled={isRoot}>
+            {t('Recheck Discord gate')}
+            <DropdownMenuShortcut>
+              <RotateCcw size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault()
+              setForceDiscordReauthOpen(true)
+            }}
+            disabled={isRoot}
+          >
+            {t('Force Discord reauth')}
+            <DropdownMenuShortcut>
+              <UserX size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={handleDiscordExempt} disabled={isRoot}>
+            {user.discord_gate_exempt
+              ? t('Unmark Discord exempt')
+              : t('Mark Discord exempt')}
+            <DropdownMenuShortcut>
+              <ShieldCheck size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
           <DropdownMenuItem
             onSelect={(event) => {
               event.preventDefault()
@@ -267,8 +358,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         open={resetPasskeyOpen}
         onOpenChange={setResetPasskeyOpen}
         title={t('Reset Passkey')}
-        desc={`Reset Passkey for ${user.username}? The user will need to register a new Passkey before using passwordless login.`}
-        confirmText='Reset Passkey'
+        desc={t(
+          'Reset Passkey for {{username}}? The user will need to register a new Passkey before using passwordless login.',
+          { username: user.username }
+        )}
+        confirmText={t('Reset Passkey')}
         handleConfirm={handleResetPasskey}
       />
 
@@ -276,9 +370,24 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         open={resetTwoFAOpen}
         onOpenChange={setResetTwoFAOpen}
         title={t('Reset Two-Factor Authentication')}
-        desc={`Reset 2FA for ${user.username}? The user must set up 2FA again to continue using it.`}
-        confirmText='Reset 2FA'
+        desc={t(
+          'Reset 2FA for {{username}}? The user must set up 2FA again to continue using it.',
+          { username: user.username }
+        )}
+        confirmText={t('Reset 2FA')}
         handleConfirm={handleResetTwoFA}
+      />
+
+      <ConfirmDialog
+        open={forceDiscordReauthOpen}
+        onOpenChange={setForceDiscordReauthOpen}
+        title={t('Force Discord reauth')}
+        desc={t(
+          'Force Discord reauthorization for {{username}}? The user must reconnect Discord before passing the gate again.',
+          { username: user.username }
+        )}
+        confirmText={t('Force Discord reauth')}
+        handleConfirm={handleForceDiscordReauth}
       />
 
       <UserBindingDialog

@@ -26,6 +26,12 @@ func applyPreMutationResultToUser(user *model.User, result *oauth.PreUserMutatio
 	if result.HasDiscordGateUpdate {
 		user.DiscordGatePassed = result.DiscordGatePassed
 	}
+	if result.HasDiscordCheckUpdate {
+		user.DiscordLastCheckAt = result.DiscordLastCheckAt
+		user.DiscordLastCheckResult = result.DiscordLastCheckResult
+		user.DiscordLastCheckReason = result.DiscordLastCheckReason
+		user.DiscordGateMessage = result.DiscordGateMessage
+	}
 	if result.HasDiscordRefreshTokenUpdate {
 		user.DiscordRefreshToken = result.EncryptedDiscordRefreshToken
 	}
@@ -37,6 +43,12 @@ func addPreMutationResultUpdates(updates map[string]interface{}, result *oauth.P
 	}
 	if result.HasDiscordGateUpdate {
 		updates["discord_gate_passed"] = result.DiscordGatePassed
+	}
+	if result.HasDiscordCheckUpdate {
+		updates["discord_last_check_at"] = result.DiscordLastCheckAt
+		updates["discord_last_check_result"] = result.DiscordLastCheckResult
+		updates["discord_last_check_reason"] = result.DiscordLastCheckReason
+		updates["discord_gate_message"] = result.DiscordGateMessage
 	}
 	if result.HasDiscordRefreshTokenUpdate {
 		updates["discord_refresh_token"] = result.EncryptedDiscordRefreshToken

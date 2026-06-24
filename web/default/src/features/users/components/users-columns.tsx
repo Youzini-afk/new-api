@@ -30,7 +30,7 @@ import {
 import { BadgeCell } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { LongText } from '@/components/long-text'
-import { StatusBadge } from '@/components/status-badge'
+import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import {
   USER_STATUS,
@@ -45,6 +45,25 @@ function getQuotaProgressColor(percentage: number): string {
   if (percentage <= 10) return '[&_[data-slot=progress-indicator]]:bg-rose-500'
   if (percentage <= 30) return '[&_[data-slot=progress-indicator]]:bg-amber-500'
   return '[&_[data-slot=progress-indicator]]:bg-emerald-500'
+}
+
+function getDiscordGateStatus(user: User): {
+  labelKey: string
+  variant: StatusVariant
+} {
+  if (!user.discord_id) {
+    return { labelKey: 'Not linked', variant: 'neutral' }
+  }
+  if (user.discord_gate_exempt) {
+    return { labelKey: 'Exempt', variant: 'info' }
+  }
+  if (user.discord_gate_passed) {
+    return { labelKey: 'Passed', variant: 'success' }
+  }
+  if (user.discord_last_check_result) {
+    return { labelKey: 'Failed', variant: 'danger' }
+  }
+  return { labelKey: 'Not checked', variant: 'warning' }
 }
 
 export function useUsersColumns(): ColumnDef<User>[] {
@@ -160,6 +179,60 @@ export function useUsersColumns(): ColumnDef<User>[] {
       },
       enableSorting: false,
       size: 120,
+      meta: { mobileBadge: true },
+    },
+    {
+      id: 'discord_gate',
+      header: t('Discord Gate'),
+      cell: ({ row }) => {
+        const user = row.original
+        const status = getDiscordGateStatus(user)
+
+        return (
+          <Tooltip>
+            <TooltipTrigger render={<div className='-ml-1.5 cursor-help' />}>
+              <div className='flex max-w-[180px] flex-col gap-1'>
+                <StatusBadge
+                  label={t(status.labelKey)}
+                  variant={status.variant}
+                  copyable={false}
+                />
+                {user.discord_last_check_result && (
+                  <span className='text-muted-foreground truncate text-xs'>
+                    {user.discord_last_check_result}
+                  </span>
+                )}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <div className='space-y-1 text-xs'>
+                <div>
+                  {t('Discord linked:')} {user.discord_id ? t('Yes') : t('No')}
+                </div>
+                <div>
+                  {t('Last check:')}{' '}
+                  {user.discord_last_check_at
+                    ? formatTimestamp(user.discord_last_check_at)
+                    : t('Never')}
+                </div>
+                <div>
+                  {t('Result:')} {user.discord_last_check_result || t('Not checked')}
+                </div>
+                <div>
+                  {t('Reason:')} {user.discord_last_check_reason || t('None')}
+                </div>
+                {user.discord_gate_message && (
+                  <div>
+                    {t('Message:')} {user.discord_gate_message}
+                  </div>
+                )}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
+      enableSorting: false,
+      size: 160,
       meta: { mobileBadge: true },
     },
     {

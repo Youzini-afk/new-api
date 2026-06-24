@@ -24,6 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TitledCard } from '@/components/ui/titled-card'
 import type { UserProfile } from '../types'
+import { DiscordGateStatusCard } from './discord-gate-status-card'
 import { AccountBindingsTab } from './tabs/account-bindings-tab'
 import { NotificationTab } from './tabs/notification-tab'
 
@@ -93,6 +94,10 @@ export function ProfileSettingsCard({
 
         <TabsContent value='bindings' className='mt-4 sm:mt-6'>
           <AccountBindingsTab profile={profile} onUpdate={onProfileUpdate} />
+          <DiscordGateStatusCard
+            profile={profile}
+            onProfileUpdate={onProfileUpdate}
+          />
         </TabsContent>
 
         <TabsContent value='settings' className='mt-4 sm:mt-6'>

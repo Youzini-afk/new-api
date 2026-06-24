@@ -36,6 +36,7 @@ export const userSchema = z.object({
   display_name: z.string(),
   password: z.string().optional(),
   github_id: z.string().optional(),
+  discord_id: z.string().optional(),
   oidc_id: z.string().optional(),
   wechat_id: z.string().optional(),
   telegram_id: z.string().optional(),
@@ -55,6 +56,12 @@ export const userSchema = z.object({
   created_at: z.number().optional(),
   updated_at: z.number().optional(),
   last_login_at: z.number().optional(),
+  discord_gate_passed: z.boolean().optional(),
+  discord_gate_exempt: z.boolean().optional(),
+  discord_last_check_at: z.number().optional(),
+  discord_last_check_result: z.string().optional(),
+  discord_last_check_reason: z.string().optional(),
+  discord_gate_message: z.string().optional(),
   DeletedAt: z.any().nullable().optional(),
   remark: z.string().optional(),
 })
@@ -123,6 +130,17 @@ export interface ManageUserQuotaPayload {
   action: 'add_quota'
   mode: QuotaAdjustMode
   value: number
+}
+
+export interface DiscordGateRecheckOutcome {
+  user_id: number
+  username: string
+  result: string
+  reason: string
+  message: string
+  checked_at: number
+  gate_passed: boolean
+  exempt: boolean
 }
 
 // ============================================================================

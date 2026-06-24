@@ -82,6 +82,7 @@ func SetApiRouter(router *gin.Engine) {
 			{
 				selfRoute.GET("/self/groups", controller.GetUserGroups)
 				selfRoute.GET("/self", controller.GetSelf)
+				selfRoute.POST("/discord_gate/recheck", controller.RecheckSelfDiscordGate)
 				selfRoute.GET("/models", controller.GetUserModels)
 				selfRoute.PUT("/self", controller.UpdateSelf)
 				selfRoute.DELETE("/self", controller.DeleteSelf)
@@ -131,6 +132,10 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/topup", controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
 				adminRoute.GET("/search", controller.SearchUsers)
+				adminRoute.POST("/discord_gate/recheck_batch", controller.AdminRecheckDiscordGateBatch)
+				adminRoute.POST("/:id/discord_gate/recheck", controller.AdminRecheckDiscordGate)
+				adminRoute.POST("/:id/discord_gate/force_reauth", controller.AdminForceDiscordGateReauth)
+				adminRoute.PUT("/:id/discord_gate/exempt", controller.AdminSetDiscordGateExempt)
 				adminRoute.GET("/:id/oauth/bindings", controller.GetUserOAuthBindingsByAdmin)
 				adminRoute.DELETE("/:id/oauth/bindings/:provider_id", controller.UnbindCustomOAuthByAdmin)
 				adminRoute.DELETE("/:id/bindings/:binding_type", controller.AdminClearUserBinding)

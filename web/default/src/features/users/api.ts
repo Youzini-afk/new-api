@@ -26,6 +26,7 @@ import type {
   ManageUserAction,
   ManageUserQuotaPayload,
   ApiResponse,
+  DiscordGateRecheckOutcome,
 } from './types'
 
 // ============================================================================
@@ -138,6 +139,37 @@ export async function resetUserPasskey(id: number): Promise<ApiResponse> {
  */
 export async function resetUserTwoFA(id: number): Promise<ApiResponse> {
   const res = await api.delete(`/api/user/${id}/2fa`)
+  return res.data
+}
+
+/**
+ * Recheck user's Discord gate eligibility
+ */
+export async function recheckUserDiscordGate(
+  id: number
+): Promise<ApiResponse<DiscordGateRecheckOutcome>> {
+  const res = await api.post(`/api/user/${id}/discord_gate/recheck`)
+  return res.data
+}
+
+/**
+ * Force user to reauthorize Discord before passing the gate again
+ */
+export async function forceUserDiscordGateReauth(
+  id: number
+): Promise<ApiResponse<DiscordGateRecheckOutcome>> {
+  const res = await api.post(`/api/user/${id}/discord_gate/force_reauth`)
+  return res.data
+}
+
+/**
+ * Toggle user's Discord gate exemption
+ */
+export async function setUserDiscordGateExempt(
+  id: number,
+  exempt: boolean
+): Promise<ApiResponse<DiscordGateRecheckOutcome>> {
+  const res = await api.put(`/api/user/${id}/discord_gate/exempt`, { exempt })
   return res.data
 }
 

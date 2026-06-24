@@ -246,15 +246,36 @@ func (p *DiscordProvider) PreUserMutation(ctx context.Context, preCtx PreUserMut
 	if !discordGateAllowsFlow(preCtx.Flow, preCtx.CurrentUser, gateResult) {
 		return &AccessDeniedError{Message: discordGateUserMessage(gateResult, cfg)}
 	}
+	if discordGateNeedsRefreshToken(preCtx) && strings.TrimSpace(preCtx.Token.RefreshToken) == "" {
+		logger.LogError(ctx, "[OAuth-Discord] gate passed but refresh token was not returned; offline_access scope may be missing")
+		return &AccessDeniedError{Message: discordGateReauthMessage}
+	}
 
 	if gateResult.Decision == discordGateDecisionPass && preCtx.Result != nil {
 		preCtx.Result.DiscordGatePassed = true
 		preCtx.Result.HasDiscordGateUpdate = true
 	}
+	if preCtx.Result != nil {
+		preCtx.Result.DiscordLastCheckAt = time.Now().Unix()
+		preCtx.Result.DiscordLastCheckResult = string(gateResult.Decision)
+		preCtx.Result.DiscordLastCheckReason = truncateRunes(gateResult.Reason, discordGateReasonMaxRunes)
+		preCtx.Result.DiscordGateMessage = truncateRunes(discordGateUserMessage(gateResult, cfg), discordGateMessageMaxRunes)
+		if gateResult.Decision == discordGateDecisionPass {
+			preCtx.Result.DiscordGateMessage = ""
+		}
+		preCtx.Result.HasDiscordCheckUpdate = true
+	}
 	if err := fillDiscordRefreshTokenResult(preCtx.Token, preCtx.Result); err != nil {
 		return err
 	}
 	return nil
+}
+
+func discordGateNeedsRefreshToken(preCtx PreUserMutationContext) bool {
+	if preCtx.Flow == OAuthFlowCreate || preCtx.Flow == OAuthFlowBind {
+		return true
+	}
+	return preCtx.CurrentUser == nil || strings.TrimSpace(preCtx.CurrentUser.DiscordRefreshToken) == ""
 }
 
 func fillDiscordRefreshTokenResult(token *OAuthToken, result *PreUserMutationResult) error {

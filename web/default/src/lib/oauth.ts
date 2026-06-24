@@ -40,10 +40,12 @@ export function buildDiscordOAuthUrl(clientId: string, state: string): string {
     `${window.location.origin}/oauth/discord`
   )
   url.searchParams.set('response_type', 'code')
-  // identify + openid for normal login; guilds.members.read is required for
-  // the Phase 6.1 Discord gate contract so the scope is available when the
-  // gate evaluator is wired in. URLSearchParams encodes spaces as "+".
-  url.searchParams.set('scope', 'identify openid guilds.members.read')
+  // offline_access is required so Discord returns a refresh token for manual
+  // gate rechecks after the initial OAuth login/bind flow.
+  url.searchParams.set(
+    'scope',
+    'identify openid guilds.members.read offline_access'
+  )
   url.searchParams.set('state', state)
   return url.toString()
 }

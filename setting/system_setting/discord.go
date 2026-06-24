@@ -2,11 +2,10 @@ package system_setting
 
 import "github.com/QuantumNous/new-api/setting/config"
 
-// DiscordSettings holds Discord OAuth credentials and the Phase 6.1 Discord
-// gate contract. The gate toggles are persisted here so the contract is
-// stable across restarts, but no real gate evaluator is wired in this phase:
-// when a gate is enabled the Discord provider fails closed (returns a clear
-// error) rather than silently passing users through.
+// DiscordSettings holds Discord OAuth credentials and the Discord gate
+// contract. Register/login gate toggles share the nested RegisterGate rule set;
+// runtime OAuth checks and manual rechecks fail closed when the gate is enabled
+// but the rule set or refresh-token state is invalid.
 type DiscordSettings struct {
 	Enabled      bool   `json:"enabled"`
 	ClientId     string `json:"client_id"`

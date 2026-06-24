@@ -75,6 +75,18 @@ export interface UserProfile {
   github_id?: string
   /** Discord ID (OAuth) */
   discord_id?: string
+  /** Whether Discord gate is currently passed */
+  discord_gate_passed?: boolean
+  /** Whether Discord gate exemption is enabled */
+  discord_gate_exempt?: boolean
+  /** Last Discord gate check timestamp */
+  discord_last_check_at?: number
+  /** Last Discord gate check result */
+  discord_last_check_result?: string
+  /** Last Discord gate check reason */
+  discord_last_check_reason?: string
+  /** Last Discord gate user-facing message */
+  discord_gate_message?: string
   /** OIDC ID (OAuth) */
   oidc_id?: string
   /** Telegram ID (OAuth) */
@@ -165,6 +177,17 @@ export interface BindingItem {
   isBound: boolean
   isEnabled: boolean
   onBind: () => void
+}
+
+export interface DiscordGateRecheckOutcome {
+  user_id: number
+  username: string
+  result: string
+  reason: string
+  message: string
+  checked_at: number
+  gate_passed: boolean
+  exempt: boolean
 }
 
 /**

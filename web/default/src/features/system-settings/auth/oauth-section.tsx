@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
@@ -60,6 +61,9 @@ const oauthSchema = z.object({
     enabled: z.boolean(),
     client_id: z.string(),
     client_secret: z.string(),
+    register_gate_enabled: z.boolean(),
+    register_gate: z.string(),
+    login_gate_enabled: z.boolean(),
   }),
   oidc: z.object({
     enabled: z.boolean(),
@@ -92,6 +96,9 @@ type FlatOAuthDefaults = {
   'discord.enabled': boolean
   'discord.client_id': string
   'discord.client_secret': string
+  'discord.register_gate_enabled': boolean
+  'discord.register_gate': string
+  'discord.login_gate_enabled': boolean
   'oidc.enabled': boolean
   'oidc.client_id': string
   'oidc.client_secret': string
@@ -123,6 +130,9 @@ const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormValues => ({
     enabled: defaults['discord.enabled'],
     client_id: defaults['discord.client_id'] ?? '',
     client_secret: defaults['discord.client_secret'] ?? '',
+    register_gate_enabled: defaults['discord.register_gate_enabled'],
+    register_gate: defaults['discord.register_gate'] ?? '',
+    login_gate_enabled: defaults['discord.login_gate_enabled'],
   },
   oidc: {
     enabled: defaults['oidc.enabled'],
@@ -153,6 +163,9 @@ const normalizeFormValues = (values: OAuthFormValues): FlatOAuthDefaults => ({
   'discord.enabled': values.discord.enabled,
   'discord.client_id': values.discord.client_id,
   'discord.client_secret': values.discord.client_secret,
+  'discord.register_gate_enabled': values.discord.register_gate_enabled,
+  'discord.register_gate': values.discord.register_gate,
+  'discord.login_gate_enabled': values.discord.login_gate_enabled,
   'oidc.enabled': values.oidc.enabled,
   'oidc.client_id': values.oidc.client_id,
   'oidc.client_secret': values.oidc.client_secret,
@@ -445,6 +458,90 @@ export function OAuthSection(props: OAuthSectionProps) {
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control}
+                  name='discord.register_gate_enabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem>
+                      <SettingsSwitchContent>
+                        <FormLabel>{t('Register Gate Enabled')}</FormLabel>
+                        <FormDescription>
+                          {t('Require new Discord signups and bindings to pass Discord Gate')}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='discord.register_gate'
+                  render={({ field }) => (
+                    <FormItem className='lg:col-span-2'>
+                      <FormLabel>{t('Register Gate Config')}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder={t('{"groups":[{"rules":[{"guild_id":"...","role_ids":["..."],"role_match":"any","min_join_hours":0}]}]}')}
+                          className='min-h-28 font-mono text-xs'
+                          value={field.value ?? ''}
+                          onChange={(event) =>
+                            field.onChange(event.target.value)
+                          }
+                          name={field.name}
+                          onBlur={field.onBlur}
+                          ref={field.ref}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t('Nested config supports groups, ban_groups, role_match, min_join_hours')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='discord.login_gate_enabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem>
+                      <SettingsSwitchContent>
+                        <FormLabel>{t('Login Gate Enabled')}</FormLabel>
+                        <FormDescription>
+                          {t('Require existing Discord users to pass Discord Gate during login')}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+
+                <div className='text-muted-foreground space-y-2 rounded-lg border p-3 text-sm lg:col-span-2'>
+                  <p className='font-medium text-foreground'>
+                    {t('Discord Gate runtime notes')}
+                  </p>
+                  <p>
+                    {t('Login Gate uses the same Discord Gate config as Register Gate. Existing users who previously passed may continue when Discord returns a temporary unknown result.')}
+                  </p>
+                  <p>
+                    {t('Invite restriction has no separate backend option in this version.')}
+                  </p>
+                  <p>
+                    {t('The server Crypto Secret must stay stable because it encrypts stored Discord refresh tokens.')}
+                  </p>
+                </div>
               </TabsContent>
 
               <TabsContent value='oidc' className={oauthTabContentClassName}>

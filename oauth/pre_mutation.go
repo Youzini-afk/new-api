@@ -46,8 +46,13 @@ type PreUserMutationContext struct {
 // login persistence stays easy to audit.
 type PreUserMutationResult struct {
 	DiscordGatePassed            bool
+	DiscordLastCheckAt           int64
+	DiscordLastCheckResult       string
+	DiscordLastCheckReason       string
+	DiscordGateMessage           string
 	EncryptedDiscordRefreshToken string
 	HasDiscordGateUpdate         bool
+	HasDiscordCheckUpdate        bool
 	HasDiscordRefreshTokenUpdate bool
 }
 

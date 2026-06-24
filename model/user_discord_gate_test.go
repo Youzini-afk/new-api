@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // TestUser_DiscordGateFields_JSONNoRefreshLeak verifies that the Discord
@@ -15,12 +17,16 @@ import (
 // a marshalled user payload must not leak the refresh token.
 func TestUser_DiscordGateFields_JSONNoRefreshLeak(t *testing.T) {
 	u := User{
-		Id:                    42,
-		Username:              "discord_user",
-		DiscordId:             "111222333",
-		DiscordRefreshToken:   "super-secret-refresh-token-must-not-leak",
-		DiscordGatePassed:     true,
-		DiscordGateExempt:     false,
+		Id:                     42,
+		Username:               "discord_user",
+		DiscordId:              "111222333",
+		DiscordRefreshToken:    "super-secret-refresh-token-must-not-leak",
+		DiscordGatePassed:      true,
+		DiscordGateExempt:      false,
+		DiscordLastCheckAt:     123456789,
+		DiscordLastCheckResult: "pass",
+		DiscordLastCheckReason: "allow_group_matched",
+		DiscordGateMessage:     "",
 	}
 
 	data, err := common.Marshal(u)
@@ -36,6 +42,10 @@ func TestUser_DiscordGateFields_JSONNoRefreshLeak(t *testing.T) {
 	// The gate boolean contract fields ARE exposed to the frontend.
 	assert.Contains(t, body, `"discord_gate_passed":true`)
 	assert.Contains(t, body, `"discord_gate_exempt":false`)
+	assert.Contains(t, body, `"discord_last_check_at":123456789`)
+	assert.Contains(t, body, `"discord_last_check_result":"pass"`)
+	assert.Contains(t, body, `"discord_last_check_reason":"allow_group_matched"`)
+	assert.Contains(t, body, `"discord_gate_message":""`)
 }
 
 // TestUser_DiscordGateFields_JSONNoRefreshLeak_EmptyToken also asserts no
@@ -70,4 +80,25 @@ func TestUser_DiscordGateFields_NotIgnoredByORM(t *testing.T) {
 	assert.True(t, strings.Contains(body, "discord_gate_exempt"))
 	// Ensure the refresh token value did not leak.
 	assert.NotContains(t, body, "\"rt\"")
+}
+
+func TestUser_DiscordGateFields_AutoMigrateColumns(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&User{}))
+
+	columns, err := db.Migrator().ColumnTypes(&User{})
+	require.NoError(t, err)
+	names := make(map[string]struct{}, len(columns))
+	for _, column := range columns {
+		names[column.Name()] = struct{}{}
+	}
+
+	assert.Contains(t, names, "discord_refresh_token")
+	assert.Contains(t, names, "discord_gate_passed")
+	assert.Contains(t, names, "discord_gate_exempt")
+	assert.Contains(t, names, "discord_last_check_at")
+	assert.Contains(t, names, "discord_last_check_result")
+	assert.Contains(t, names, "discord_last_check_reason")
+	assert.Contains(t, names, "discord_gate_message")
 }
