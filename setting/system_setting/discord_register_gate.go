@@ -7,37 +7,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 )
 
-// DiscordRegisterGateConfig is the typed Phase 6.1 Discord gate configuration.
-// It carries only Discord-gate semantics ported from the gy gate config — no
-// ban_sync / AutoBanSync / external-bot fields.
-//
-// This config is a data contract only: the gate evaluator itself is NOT
-// implemented in this phase. When RegisterGateEnabled is true the Discord
-// provider fails closed with a clear error rather than evaluating these rules.
-type DiscordRegisterGateConfig struct {
-	// Groups are the allow-list rules: a user must satisfy the role-match
-	// condition across these (guild, role) entries.
-	Groups []DiscordGateGroupRule `json:"groups"`
-	// BanGroups are guild IDs in which any member is rejected outright.
-	BanGroups []string `json:"ban_groups"`
-	// RoleMatch is "any" (default) or "all": whether a user must match any one
-	// rule or all rules in Groups. Empty is treated as "any".
-	RoleMatch string `json:"role_match"`
-	// MinJoinHours is the minimum account age (in hours) the Discord user must
-	// have before passing the gate. 0 means no minimum.
-	MinJoinHours int `json:"min_join_hours"`
-	// FailMessage is shown to the user when the gate rejects them.
-	FailMessage string `json:"fail_message"`
-	// BanMessage is shown when the user is rejected via BanGroups.
-	BanMessage string `json:"ban_message"`
-}
-
-// DiscordGateGroupRule pairs a Discord guild with the role IDs that satisfy it.
-type DiscordGateGroupRule struct {
-	GuildID string   `json:"guild_id"`
-	RoleIDs []string `json:"role_ids"`
-}
-
 const (
 	discordGateRoleMatchAny = "any"
 	discordGateRoleMatchAll = "all"
@@ -47,6 +16,38 @@ const (
 	// discordGateMinAuditBatch is the smallest non-zero audit batch size.
 	discordGateMinAuditBatch = 1
 )
+
+// DiscordRegisterGateConfig is the Discord OAuth gate configuration ported
+// from gy, without ban_sync / external-bot coupling.
+//
+// Semantics:
+//   - A group passes when all of its rules pass.
+//   - The allow-list passes when any group in Groups passes.
+//   - The deny-list hits when any group in BanGroups passes, and ban wins
+//     before allow-list evaluation.
+//
+// An entirely empty config is valid for option persistence. Runtime evaluators
+// must fail closed when a gate is enabled but no rules are configured.
+type DiscordRegisterGateConfig struct {
+	FailMessage string             `json:"fail_message"`
+	BanMessage  string             `json:"ban_message"`
+	Groups      []DiscordGateGroup `json:"groups"`
+	BanGroups   []DiscordGateGroup `json:"ban_groups"`
+}
+
+// DiscordGateGroup is a named conjunction of Discord membership rules.
+type DiscordGateGroup struct {
+	Name  string            `json:"name,omitempty"`
+	Rules []DiscordGateRule `json:"rules"`
+}
+
+// DiscordGateRule describes one guild membership condition.
+type DiscordGateRule struct {
+	GuildID      string   `json:"guild_id"`
+	RoleIDs      []string `json:"role_ids,omitempty"`
+	RoleMatch    string   `json:"role_match,omitempty"`
+	MinJoinHours int      `json:"min_join_hours,omitempty"`
+}
 
 // ParseDiscordRegisterGate decodes a JSON string into a
 // DiscordRegisterGateConfig. An empty string yields the zero config (no error).
@@ -66,94 +67,112 @@ func ParseDiscordRegisterGate(raw string) (DiscordRegisterGateConfig, error) {
 // idempotent and never returns an error: callers that need to reject invalid
 // input (e.g. an unknown role_match value like "foo") must use
 // ValidateDiscordRegisterGate.
-//
-// role_match handling:
-//   - empty / whitespace -> "any" (the documented default)
-//   - "any"/"all" in any case / with surrounding whitespace -> canonical "any"/"all"
-//   - any other non-empty value (e.g. "foo") is left UNCHANGED here so that
-//     ValidateDiscordRegisterGate can surface it as an error rather than
-//     silently coercing it to "any". This prevents illegal values from being
-//     persisted through the no-error Normalize path.
-//
-// It does NOT clamp min_join_hours — negative values are left for
-// ValidateDiscordRegisterGate to reject, so invalid input is surfaced rather
-// than silently hidden.
 func NormalizeDiscordRegisterGate(cfg *DiscordRegisterGateConfig) {
 	if cfg == nil {
 		return
 	}
-	trimmed := strings.ToLower(strings.TrimSpace(cfg.RoleMatch))
-	switch trimmed {
-	case "":
-		cfg.RoleMatch = discordGateRoleMatchAny
-	case discordGateRoleMatchAny, discordGateRoleMatchAll:
-		cfg.RoleMatch = trimmed
-	default:
-		// Unknown non-empty value: leave it in place (lowercased) so Validate
-		// can reject it. Do NOT silently coerce to "any".
-		cfg.RoleMatch = trimmed
-	}
 	cfg.FailMessage = strings.TrimSpace(cfg.FailMessage)
 	cfg.BanMessage = strings.TrimSpace(cfg.BanMessage)
+	normalizeDiscordGateGroups(cfg.Groups)
+	normalizeDiscordGateGroups(cfg.BanGroups)
 }
 
-// ValidateDiscordRegisterGate checks the gate config for invalid entries:
-// empty guild/role, negative min_join_hours, or illegal role_match. An empty
-// config (no rules) is valid — it means "no gate rules configured".
-//
-// The cfg argument is normalized in place semantics only for this call's
-// local copy (it is passed by value); to obtain the normalized config use
-// ParseAndValidateDiscordRegisterGate.
+func normalizeDiscordGateGroups(groups []DiscordGateGroup) {
+	for groupIndex := range groups {
+		group := &groups[groupIndex]
+		group.Name = strings.TrimSpace(group.Name)
+		for ruleIndex := range group.Rules {
+			rule := &group.Rules[ruleIndex]
+			rule.GuildID = strings.TrimSpace(rule.GuildID)
+			rule.RoleMatch = normalizeDiscordGateRoleMatch(rule.RoleMatch)
+			rule.RoleIDs = dedupeDiscordGateStrings(normalizeDiscordGateStrings(rule.RoleIDs))
+		}
+	}
+}
+
+func normalizeDiscordGateRoleMatch(raw string) string {
+	switch roleMatch := strings.ToLower(strings.TrimSpace(raw)); roleMatch {
+	case "":
+		return discordGateRoleMatchAny
+	case discordGateRoleMatchAny, discordGateRoleMatchAll:
+		return roleMatch
+	default:
+		// Unknown non-empty value: leave it lowercased so Validate can reject it.
+		return roleMatch
+	}
+}
+
+func normalizeDiscordGateStrings(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func dedupeDiscordGateStrings(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		result = append(result, item)
+	}
+	return result
+}
+
+// ValidateDiscordRegisterGate checks the gate config for invalid entries. An
+// empty config (no groups and no ban groups) is valid for option persistence;
+// runtime evaluators must fail closed if a gate is enabled with no rules.
 func ValidateDiscordRegisterGate(cfg DiscordRegisterGateConfig) error {
 	NormalizeDiscordRegisterGate(&cfg)
-
-	// role_match must be empty (normalized to "any") or one of the two
-	// canonical values. Unknown non-empty values are rejected so they cannot
-	// be persisted through the validator.
-	switch cfg.RoleMatch {
-	case discordGateRoleMatchAny, discordGateRoleMatchAll:
-		// ok
-	default:
-		return fmt.Errorf("discord register gate: role_match must be \"any\" or \"all\", got %q", cfg.RoleMatch)
+	if err := validateDiscordGateGroups("groups", cfg.Groups, false); err != nil {
+		return err
 	}
-
-	if cfg.MinJoinHours < 0 {
-		return fmt.Errorf("discord register gate: min_join_hours must not be negative")
+	if err := validateDiscordGateGroups("ban_groups", cfg.BanGroups, true); err != nil {
+		return err
 	}
+	return nil
+}
 
-	seenGuilds := make(map[string]struct{}, len(cfg.Groups))
-	for i, rule := range cfg.Groups {
-		guild := strings.TrimSpace(rule.GuildID)
-		if guild == "" {
-			return fmt.Errorf("discord register gate: groups[%d].guild_id must not be empty", i)
+func validateDiscordGateGroups(field string, groups []DiscordGateGroup, isBan bool) error {
+	for groupIndex, group := range groups {
+		if len(group.Rules) == 0 {
+			return fmt.Errorf("discord register gate: %s[%d].rules must not be empty", field, groupIndex)
 		}
-		if _, dup := seenGuilds[guild]; dup {
-			return fmt.Errorf("discord register gate: duplicate guild_id %q in groups", guild)
-		}
-		seenGuilds[guild] = struct{}{}
-
-		if len(rule.RoleIDs) == 0 {
-			return fmt.Errorf("discord register gate: groups[%d].role_ids must not be empty (guild %s)", i, guild)
-		}
-		for j, rid := range rule.RoleIDs {
-			if strings.TrimSpace(rid) == "" {
-				return fmt.Errorf("discord register gate: groups[%d].role_ids[%d] must not be empty (guild %s)", i, j, guild)
+		for ruleIndex, rule := range group.Rules {
+			if strings.TrimSpace(rule.GuildID) == "" {
+				return fmt.Errorf("discord register gate: %s[%d].rules[%d].guild_id must not be empty", field, groupIndex, ruleIndex)
+			}
+			if rule.RoleMatch != discordGateRoleMatchAny && rule.RoleMatch != discordGateRoleMatchAll {
+				return fmt.Errorf("discord register gate: %s[%d].rules[%d].role_match must be \"any\" or \"all\", got %q", field, groupIndex, ruleIndex, rule.RoleMatch)
+			}
+			if rule.MinJoinHours < 0 {
+				return fmt.Errorf("discord register gate: %s[%d].rules[%d].min_join_hours must not be negative", field, groupIndex, ruleIndex)
+			}
+			if isBan {
+				if rule.MinJoinHours != 0 {
+					return fmt.Errorf("discord register gate: ban_groups[%d].rules[%d].min_join_hours must be 0", groupIndex, ruleIndex)
+				}
+				continue
+			}
+			if len(rule.RoleIDs) == 0 && rule.MinJoinHours == 0 {
+				return fmt.Errorf("discord register gate: groups[%d].rules[%d] must configure role_ids or min_join_hours", groupIndex, ruleIndex)
 			}
 		}
 	}
-
-	seenBan := make(map[string]struct{}, len(cfg.BanGroups))
-	for i, gid := range cfg.BanGroups {
-		guild := strings.TrimSpace(gid)
-		if guild == "" {
-			return fmt.Errorf("discord register gate: ban_groups[%d] must not be empty", i)
-		}
-		if _, dup := seenBan[guild]; dup {
-			return fmt.Errorf("discord register gate: duplicate guild_id %q in ban_groups", guild)
-		}
-		seenBan[guild] = struct{}{}
-	}
-
 	return nil
 }
 
@@ -177,18 +196,13 @@ func ValidateDiscordAuditSettings(intervalMinutes, batchSize int) error {
 }
 
 // ParseAndValidateDiscordRegisterGate parses, normalizes and validates a raw
-// JSON config string. On success it returns the NORMALIZED config (empty
-// role_match becomes "any"; whitespace/case canonicalized) so callers that
-// persist the value store the canonical form. On validation error (including
-// an unknown role_match like "foo") it returns the zero config and the error,
-// so an illegal value can never be persisted through this path.
+// JSON config string. On success it returns the normalized config; on error it
+// returns the zero config and the error.
 func ParseAndValidateDiscordRegisterGate(raw string) (DiscordRegisterGateConfig, error) {
 	cfg, err := ParseDiscordRegisterGate(raw)
 	if err != nil {
 		return DiscordRegisterGateConfig{}, err
 	}
-	// Normalize first so role_match empty -> "any" etc. happen on the value
-	// we return, then validate the normalized form.
 	NormalizeDiscordRegisterGate(&cfg)
 	if err := ValidateDiscordRegisterGate(cfg); err != nil {
 		return DiscordRegisterGateConfig{}, err

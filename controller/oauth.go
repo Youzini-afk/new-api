@@ -19,6 +19,46 @@ func providerParams(name string) map[string]any {
 	return map[string]any{"Provider": name}
 }
 
+func applyPreMutationResultToUser(user *model.User, result *oauth.PreUserMutationResult) {
+	if user == nil || result == nil {
+		return
+	}
+	if result.HasDiscordGateUpdate {
+		user.DiscordGatePassed = result.DiscordGatePassed
+	}
+	if result.HasDiscordRefreshTokenUpdate {
+		user.DiscordRefreshToken = result.EncryptedDiscordRefreshToken
+	}
+}
+
+func addPreMutationResultUpdates(updates map[string]interface{}, result *oauth.PreUserMutationResult) {
+	if result == nil {
+		return
+	}
+	if result.HasDiscordGateUpdate {
+		updates["discord_gate_passed"] = result.DiscordGatePassed
+	}
+	if result.HasDiscordRefreshTokenUpdate {
+		updates["discord_refresh_token"] = result.EncryptedDiscordRefreshToken
+	}
+}
+
+func persistPreMutationResult(user *model.User, result *oauth.PreUserMutationResult) error {
+	if user == nil || user.Id == 0 || result == nil {
+		return nil
+	}
+	updates := map[string]interface{}{}
+	addPreMutationResultUpdates(updates, result)
+	if len(updates) == 0 {
+		return nil
+	}
+	if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Updates(updates).Error; err != nil {
+		return err
+	}
+	applyPreMutationResultToUser(user, result)
+	return model.InvalidateUserCache(user.Id)
+}
+
 // GenerateOAuthCode generates a state code for OAuth CSRF protection
 func GenerateOAuthCode(c *gin.Context) {
 	session := sessions.Default(c)
@@ -172,14 +212,16 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 		return
 	}
 
-	// Phase 6.1 — optional pre-mutation hook (bind to current user).
-	// Non-hook providers no-op; hook errors block before the binding write.
+	preMutationResult := &oauth.PreUserMutationResult{}
+	// Optional pre-mutation hook (bind to current user). Non-hook providers no-op;
+	// hook errors block before the binding write.
 	if err := oauth.RunPreUserMutation(c.Request.Context(), provider, oauth.PreUserMutationContext{
 		ProviderName: provider.GetName(),
 		Flow:         oauth.OAuthFlowBind,
 		Token:        token,
 		OAuthUser:    oauthUser,
 		CurrentUser:  &user,
+		Result:       preMutationResult,
 	}); err != nil {
 		handleOAuthError(c, err)
 		return
@@ -196,8 +238,24 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 	} else {
 		// Built-in provider: update user record directly
 		provider.SetProviderUserID(&user, oauthUser.ProviderUserID)
-		err = user.Update(false)
+		updates := map[string]interface{}{
+			"github_id":   user.GitHubId,
+			"discord_id":  user.DiscordId,
+			"oidc_id":     user.OidcId,
+			"linux_do_id": user.LinuxDOId,
+			"wechat_id":   user.WeChatId,
+			"telegram_id": user.TelegramId,
+		}
+		addPreMutationResultUpdates(updates, preMutationResult)
+		err = model.DB.Transaction(func(tx *gorm.DB) error {
+			return tx.Model(&model.User{}).Where("id = ?", user.Id).Updates(updates).Error
+		})
 		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		applyPreMutationResultToUser(&user, preMutationResult)
+		if err = model.InvalidateUserCache(user.Id); err != nil {
 			common.ApiError(c, err)
 			return
 		}
@@ -222,15 +280,20 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		if user.Id == 0 {
 			return nil, &OAuthUserDeletedError{}
 		}
-		// Phase 6.1 — optional pre-mutation hook (login of existing user).
-		// Non-hook providers no-op; hook errors block before session setup.
+		preMutationResult := &oauth.PreUserMutationResult{}
+		// Optional pre-mutation hook (login of existing user). Non-hook providers
+		// no-op; hook errors block before session setup.
 		if err := oauth.RunPreUserMutation(c.Request.Context(), provider, oauth.PreUserMutationContext{
 			ProviderName: provider.GetName(),
 			Flow:         oauth.OAuthFlowLogin,
 			Token:        token,
 			OAuthUser:    oauthUser,
 			CurrentUser:  user,
+			Result:       preMutationResult,
 		}); err != nil {
+			return nil, err
+		}
+		if err := persistPreMutationResult(user, preMutationResult); err != nil {
 			return nil, err
 		}
 		return user, nil
@@ -261,13 +324,15 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		return nil, &OAuthRegistrationDisabledError{}
 	}
 
-	// Phase 6.1 — optional pre-mutation hook (new user registration).
-	// Non-hook providers no-op; hook errors block before the create txn.
+	preMutationResult := &oauth.PreUserMutationResult{}
+	// Optional pre-mutation hook (new user registration). Non-hook providers
+	// no-op; hook errors block before the create txn.
 	if err := oauth.RunPreUserMutation(c.Request.Context(), provider, oauth.PreUserMutationContext{
 		ProviderName: provider.GetName(),
 		Flow:         oauth.OAuthFlowCreate,
 		Token:        token,
 		OAuthUser:    oauthUser,
+		Result:       preMutationResult,
 	}); err != nil {
 		return nil, err
 	}
@@ -296,6 +361,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	}
 	user.Role = common.RoleCommonUser
 	user.Status = common.UserStatusEnabled
+	applyPreMutationResultToUser(user, preMutationResult)
 
 	// Handle affiliate code
 	affCode := session.Get("aff")

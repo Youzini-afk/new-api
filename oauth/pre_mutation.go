@@ -34,6 +34,21 @@ type PreUserMutationContext struct {
 	OAuthUser *OAuthUser
 	// CurrentUser is the local user for bind/login flows; nil for create.
 	CurrentUser *model.User
+	// Result is an optional explicit output channel for providers that need to
+	// persist gate side effects after the hook returns. Non-hook providers ignore
+	// it, and hook implementations must tolerate nil.
+	Result *PreUserMutationResult
+}
+
+// PreUserMutationResult carries provider-specific updates that must be applied
+// by the controller in the same DB operation as the OAuth mutation. It is kept
+// explicit rather than using context values or OAuthUser.Extra so create/bind/
+// login persistence stays easy to audit.
+type PreUserMutationResult struct {
+	DiscordGatePassed            bool
+	EncryptedDiscordRefreshToken string
+	HasDiscordGateUpdate         bool
+	HasDiscordRefreshTokenUpdate bool
 }
 
 // PreUserMutationValidator is an OPTIONAL side-interface that OAuth providers
