@@ -167,6 +167,52 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "discord.register_gate":
+		// Phase 6.1 — validate the typed gate config JSON before persisting.
+		// No ban_sync semantics: only groups/ban_groups/role_match/min_join_hours.
+		if _, err := system_setting.ParseAndValidateDiscordRegisterGate(option.Value.(string)); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "discord.login_gate_audit_interval_minutes":
+		// Phase 6.1 — audit interval sanity check. Zero = not configured.
+		// Batch is passed as 0 so only the interval is validated here.
+		intVal, err := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "Discord 登录门禁审计间隔必须为整数",
+			})
+			return
+		}
+		if err := system_setting.ValidateDiscordAuditSettings(intVal, 0); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "discord.login_gate_audit_batch_size":
+		// Phase 6.1 — audit batch sanity check. Zero = not configured.
+		// Interval is passed as 0 so only the batch is validated here.
+		intVal, err := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "Discord 登录门禁审计批量必须为整数",
+			})
+			return
+		}
+		if err := system_setting.ValidateDiscordAuditSettings(0, intVal); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	case "oidc.enabled":
 		if option.Value == "true" && system_setting.GetOIDCSettings().ClientId == "" {
 			c.JSON(http.StatusOK, gin.H{

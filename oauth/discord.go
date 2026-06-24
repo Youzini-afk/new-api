@@ -170,3 +170,41 @@ func (p *DiscordProvider) SetProviderUserID(user *model.User, providerUserID str
 func (p *DiscordProvider) GetProviderPrefix() string {
 	return "discord_"
 }
+
+// PreUserMutation implements the optional PreUserMutationValidator
+// side-interface for the Phase 6.1 Discord gate skeleton.
+//
+// Contract (fail-closed):
+//   - When neither RegisterGateEnabled nor LoginGateEnabled is set, the hook
+//     is a no-op (nil) so normal OAuth create/bind/login proceeds unchanged.
+//   - When RegisterGateEnabled is true and the flow is create/bind, or when
+//     LoginGateEnabled is true and the flow is login/existing, the hook
+//     returns a clear error because the gate evaluator is not available yet.
+//     This prevents an admin enabling a gate from silently passing users
+//     through (no false positives) until the real evaluator is wired in.
+//
+// No refresh token is persisted and no Discord member fetch is performed.
+func (p *DiscordProvider) PreUserMutation(ctx context.Context, preCtx PreUserMutationContext) error {
+	settings := system_setting.GetDiscordSettings()
+	registerGate := settings.RegisterGateEnabled
+	loginGate := settings.LoginGateEnabled
+	if !registerGate && !loginGate {
+		return nil
+	}
+
+	switch preCtx.Flow {
+	case OAuthFlowCreate, OAuthFlowBind:
+		if registerGate {
+			return &AccessDeniedError{
+				Message: "Discord register gate is enabled but the evaluator is not available yet",
+			}
+		}
+	case OAuthFlowLogin, OAuthFlowExisting:
+		if loginGate {
+			return &AccessDeniedError{
+				Message: "Discord login gate is enabled but the evaluator is not available yet",
+			}
+		}
+	}
+	return nil
+}

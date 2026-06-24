@@ -104,7 +104,7 @@ func HandleOAuth(c *gin.Context) {
 	}
 
 	// 7. Find or create user
-	user, err := findOrCreateOAuthUser(c, provider, oauthUser, session)
+	user, err := findOrCreateOAuthUser(c, provider, oauthUser, token, session)
 	if err != nil {
 		switch err.(type) {
 		case *OAuthUserDeletedError:
@@ -172,6 +172,19 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 		return
 	}
 
+	// Phase 6.1 — optional pre-mutation hook (bind to current user).
+	// Non-hook providers no-op; hook errors block before the binding write.
+	if err := oauth.RunPreUserMutation(c.Request.Context(), provider, oauth.PreUserMutationContext{
+		ProviderName: provider.GetName(),
+		Flow:         oauth.OAuthFlowBind,
+		Token:        token,
+		OAuthUser:    oauthUser,
+		CurrentUser:  &user,
+	}); err != nil {
+		handleOAuthError(c, err)
+		return
+	}
+
 	// Handle binding based on provider type
 	if genericProvider, ok := provider.(*oauth.GenericOAuthProvider); ok {
 		// Custom provider: use user_oauth_bindings table
@@ -196,7 +209,7 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 }
 
 // findOrCreateOAuthUser finds existing user or creates new user
-func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, session sessions.Session) (*model.User, error) {
+func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, token *oauth.OAuthToken, session sessions.Session) (*model.User, error) {
 	user := &model.User{}
 
 	// Check if user already exists with new ID
@@ -208,6 +221,17 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		// Check if user has been deleted
 		if user.Id == 0 {
 			return nil, &OAuthUserDeletedError{}
+		}
+		// Phase 6.1 — optional pre-mutation hook (login of existing user).
+		// Non-hook providers no-op; hook errors block before session setup.
+		if err := oauth.RunPreUserMutation(c.Request.Context(), provider, oauth.PreUserMutationContext{
+			ProviderName: provider.GetName(),
+			Flow:         oauth.OAuthFlowLogin,
+			Token:        token,
+			OAuthUser:    oauthUser,
+			CurrentUser:  user,
+		}); err != nil {
+			return nil, err
 		}
 		return user, nil
 	}
@@ -235,6 +259,17 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	// User doesn't exist, create new user if registration is enabled
 	if !common.RegisterEnabled {
 		return nil, &OAuthRegistrationDisabledError{}
+	}
+
+	// Phase 6.1 — optional pre-mutation hook (new user registration).
+	// Non-hook providers no-op; hook errors block before the create txn.
+	if err := oauth.RunPreUserMutation(c.Request.Context(), provider, oauth.PreUserMutationContext{
+		ProviderName: provider.GetName(),
+		Flow:         oauth.OAuthFlowCreate,
+		Token:        token,
+		OAuthUser:    oauthUser,
+	}); err != nil {
+		return nil, err
 	}
 
 	// Set up new user

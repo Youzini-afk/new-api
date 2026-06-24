@@ -142,6 +142,46 @@ func TestUpdateOption_SensitiveRegexValidation(t *testing.T) {
 	assert.Contains(t, resp.Message, "不能为空")
 }
 
+// TestUpdateOption_DiscordRegisterGateRoleMatch verifies the controller
+// persistence path for "discord.register_gate": an illegal role_match value
+// like "foo" must be rejected before it reaches the DB, while valid values
+// ("any"/"all"/empty) are accepted. This guards the Phase 6.1 contract that
+// invalid role_match values can never be persisted.
+func TestUpdateOption_DiscordRegisterGateRoleMatch(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+
+	// "foo" -> rejected by ParseAndValidate before persistence.
+	ctx, recorder := newOptionUpdateContext(t, "discord.register_gate", `{"role_match":"foo"}`)
+	UpdateOption(ctx)
+	resp := decodeLogScreeningResponse(t, recorder)
+	assert.False(t, resp.Success, "illegal role_match 'foo' must be rejected")
+	assert.Contains(t, resp.Message, "role_match must be \"any\" or \"all\"")
+
+	// Not persisted.
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Option{}).Where("key = ?", "discord.register_gate").Count(&count).Error)
+	assert.Equal(t, int64(0), count, "rejected role_match must not be persisted")
+
+	// Empty role_match -> accepted (normalized to "any").
+	ctx, recorder = newOptionUpdateContext(t, "discord.register_gate", `{"role_match":""}`)
+	UpdateOption(ctx)
+	resp = decodeLogScreeningResponse(t, recorder)
+	require.True(t, resp.Success, "empty role_match should be accepted: %s", resp.Message)
+
+	// "any" -> accepted.
+	ctx, recorder = newOptionUpdateContext(t, "discord.register_gate", `{"role_match":"any"}`)
+	UpdateOption(ctx)
+	resp = decodeLogScreeningResponse(t, recorder)
+	require.True(t, resp.Success, "role_match 'any' should be accepted: %s", resp.Message)
+
+	// "all" -> accepted.
+	ctx, recorder = newOptionUpdateContext(t, "discord.register_gate", `{"role_match":"all"}`)
+	UpdateOption(ctx)
+	resp = decodeLogScreeningResponse(t, recorder)
+	require.True(t, resp.Success, "role_match 'all' should be accepted: %s", resp.Message)
+}
+
 // TestUpdateOption_RejectsBanSyncKeysAtController verifies that even if a
 // ban_sync legacy key reaches the controller, model.UpdateOption silently
 // rejects it (no DB row, no OptionMap entry) without surfacing an error.

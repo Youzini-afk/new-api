@@ -53,6 +53,15 @@ type User struct {
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 	CreatedAt        int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	LastLoginAt      int64          `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+
+	// Phase 6.1 — Discord gate data contract. No default:true GORM tag: the
+	// business default (gate not passed / not exempt) is enforced by the zero
+	// value here. DiscordRefreshToken is never persisted in this phase (no
+	// reversible encryption available); the column exists so the schema is
+	// ready and so JSON marshalling never leaks it (json:"-").
+	DiscordRefreshToken string `json:"-" gorm:"column:discord_refresh_token;type:text"`
+	DiscordGatePassed   bool   `json:"discord_gate_passed" gorm:"column:discord_gate_passed"`
+	DiscordGateExempt   bool   `json:"discord_gate_exempt" gorm:"column:discord_gate_exempt"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
