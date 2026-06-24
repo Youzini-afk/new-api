@@ -50,6 +50,14 @@ func initCol() {
 	}
 }
 
+// InitColumnNames 重新计算方言相关的列名（commonGroupCol/commonKeyCol 等）。
+// 主要供测试场景在切换 common.SetDatabaseTypes 后显式刷新列名使用：
+// initCol 不会在单元测试的 TestMain 之外被调用，而 GetTokenByKey 等查询依赖
+// commonKeyCol 拼接 SQL，未初始化时会产生非法 SQL。调用方应在切换数据库类型后调用。
+func InitColumnNames() {
+	initCol()
+}
+
 var DB *gorm.DB
 
 var LOG_DB *gorm.DB

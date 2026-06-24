@@ -389,6 +389,35 @@ func SetApiRouter(router *gin.Engine) {
 			modelsRoute.DELETE("/:id", controller.DeleteModelMeta)
 		}
 
+		// Phase 3 read-only operations stats (admin only)
+		ipStatsRoute := apiRouter.Group("/ip_stats")
+		ipStatsRoute.Use(middleware.AdminAuth())
+		{
+			ipStatsRoute.GET("/conversation/rank", controller.GetIPStatsRank)
+			ipStatsRoute.GET("/conversation/users", controller.GetIPStatsUsers)
+		}
+
+		uaStatsRoute := apiRouter.Group("/ua_stats")
+		uaStatsRoute.Use(middleware.AdminAuth())
+		{
+			uaStatsRoute.GET("/rank", controller.GetUserAgentRank)
+			uaStatsRoute.GET("/users", controller.GetUserAgentUsers)
+		}
+
+		userLeaderboardRoute := apiRouter.Group("/user_leaderboard")
+		userLeaderboardRoute.Use(middleware.AdminAuth())
+		{
+			userLeaderboardRoute.GET("/rank", controller.GetUserLeaderboard)
+			userLeaderboardRoute.GET("/coverage", controller.GetUserCoverageLeaderboard)
+		}
+
+		keyLookupRoute := apiRouter.Group("/key_lookup")
+		keyLookupRoute.Use(middleware.AdminAuth())
+		{
+			keyLookupRoute.GET("", controller.LookupByKey)
+			keyLookupRoute.GET("/", controller.LookupByKey)
+		}
+
 		// Deployments (model deployment management)
 		deploymentsRoute := apiRouter.Group("/deployments")
 		deploymentsRoute.Use(middleware.AdminAuth())
