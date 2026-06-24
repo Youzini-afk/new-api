@@ -47,12 +47,14 @@ import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authent
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedOperationsStatsIndexRouteImport } from './routes/_authenticated/operations-stats/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
+import { Route as AuthenticatedLogScreeningIndexRouteImport } from './routes/_authenticated/log-screening/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
 import { Route as AuthenticatedOperationsStatsTabRouteImport } from './routes/_authenticated/operations-stats/$tab'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
+import { Route as AuthenticatedLogScreeningTabRouteImport } from './routes/_authenticated/log-screening/$tab'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
 import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
@@ -271,6 +273,12 @@ const AuthenticatedModelsIndexRoute =
     path: '/models/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedLogScreeningIndexRoute =
+  AuthenticatedLogScreeningIndexRouteImport.update({
+    id: '/log-screening/',
+    path: '/log-screening/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
   id: '/keys/',
   path: '/keys/',
@@ -304,6 +312,12 @@ const AuthenticatedModelsSectionRoute =
   AuthenticatedModelsSectionRouteImport.update({
     id: '/models/$section',
     path: '/models/$section',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedLogScreeningTabRoute =
+  AuthenticatedLogScreeningTabRouteImport.update({
+    id: '/log-screening/$tab',
+    path: '/log-screening/$tab',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedErrorsErrorRoute =
@@ -442,12 +456,14 @@ export interface FileRoutesByFullPath {
   '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/log-screening/$tab': typeof AuthenticatedLogScreeningTabRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/operations-stats/$tab': typeof AuthenticatedOperationsStatsTabRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
+  '/log-screening/': typeof AuthenticatedLogScreeningIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
   '/operations-stats/': typeof AuthenticatedOperationsStatsIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
@@ -503,12 +519,14 @@ export interface FileRoutesByTo {
   '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/log-screening/$tab': typeof AuthenticatedLogScreeningTabRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/operations-stats/$tab': typeof AuthenticatedOperationsStatsTabRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
+  '/log-screening': typeof AuthenticatedLogScreeningIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
   '/operations-stats': typeof AuthenticatedOperationsStatsIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
@@ -568,12 +586,14 @@ export interface FileRoutesById {
   '/_authenticated/chat/$chatId': typeof AuthenticatedChatChatIdRoute
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/_authenticated/log-screening/$tab': typeof AuthenticatedLogScreeningTabRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
   '/_authenticated/operations-stats/$tab': typeof AuthenticatedOperationsStatsTabRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
+  '/_authenticated/log-screening/': typeof AuthenticatedLogScreeningIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
   '/_authenticated/operations-stats/': typeof AuthenticatedOperationsStatsIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
@@ -632,12 +652,14 @@ export interface FileRouteTypes {
     | '/chat/$chatId'
     | '/dashboard/$section'
     | '/errors/$error'
+    | '/log-screening/$tab'
     | '/models/$section'
     | '/operations-stats/$tab'
     | '/usage-logs/$section'
     | '/channels/'
     | '/dashboard/'
     | '/keys/'
+    | '/log-screening/'
     | '/models/'
     | '/operations-stats/'
     | '/playground/'
@@ -693,12 +715,14 @@ export interface FileRouteTypes {
     | '/chat/$chatId'
     | '/dashboard/$section'
     | '/errors/$error'
+    | '/log-screening/$tab'
     | '/models/$section'
     | '/operations-stats/$tab'
     | '/usage-logs/$section'
     | '/channels'
     | '/dashboard'
     | '/keys'
+    | '/log-screening'
     | '/models'
     | '/operations-stats'
     | '/playground'
@@ -757,12 +781,14 @@ export interface FileRouteTypes {
     | '/_authenticated/chat/$chatId'
     | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
+    | '/_authenticated/log-screening/$tab'
     | '/_authenticated/models/$section'
     | '/_authenticated/operations-stats/$tab'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/keys/'
+    | '/_authenticated/log-screening/'
     | '/_authenticated/models/'
     | '/_authenticated/operations-stats/'
     | '/_authenticated/playground/'
@@ -1080,6 +1106,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedModelsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/log-screening/': {
+      id: '/_authenticated/log-screening/'
+      path: '/log-screening'
+      fullPath: '/log-screening/'
+      preLoaderRoute: typeof AuthenticatedLogScreeningIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/keys/': {
       id: '/_authenticated/keys/'
       path: '/keys'
@@ -1120,6 +1153,13 @@ declare module '@tanstack/react-router' {
       path: '/models/$section'
       fullPath: '/models/$section'
       preLoaderRoute: typeof AuthenticatedModelsSectionRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/log-screening/$tab': {
+      id: '/_authenticated/log-screening/$tab'
+      path: '/log-screening/$tab'
+      fullPath: '/log-screening/$tab'
+      preLoaderRoute: typeof AuthenticatedLogScreeningTabRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/errors/$error': {
@@ -1340,12 +1380,14 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedChatChatIdRoute: typeof AuthenticatedChatChatIdRoute
   AuthenticatedDashboardSectionRoute: typeof AuthenticatedDashboardSectionRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
+  AuthenticatedLogScreeningTabRoute: typeof AuthenticatedLogScreeningTabRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
   AuthenticatedOperationsStatsTabRoute: typeof AuthenticatedOperationsStatsTabRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
+  AuthenticatedLogScreeningIndexRoute: typeof AuthenticatedLogScreeningIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
   AuthenticatedOperationsStatsIndexRoute: typeof AuthenticatedOperationsStatsIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
@@ -1365,12 +1407,14 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedChatChatIdRoute: AuthenticatedChatChatIdRoute,
   AuthenticatedDashboardSectionRoute: AuthenticatedDashboardSectionRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
+  AuthenticatedLogScreeningTabRoute: AuthenticatedLogScreeningTabRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
   AuthenticatedOperationsStatsTabRoute: AuthenticatedOperationsStatsTabRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
+  AuthenticatedLogScreeningIndexRoute: AuthenticatedLogScreeningIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
   AuthenticatedOperationsStatsIndexRoute:
     AuthenticatedOperationsStatsIndexRoute,

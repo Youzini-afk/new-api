@@ -492,6 +492,18 @@ export const STATIC_I18N_KEYS = [
   'RPH',
   'Coverage',
   'Contains',
+
+  // Log Screening (Phase 5)
+  'Log Screening',
+  'Screening Records',
+  'Prompt Blocks',
+  'UA Blocks',
+  'Any',
+  'Critical',
+  'High',
+  'Medium',
+  'Low',
+  'Info',
   'Exact',
   'Top',
   'min',

@@ -51,6 +51,12 @@ func TestMain(m *testing.M) {
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&Option{},
+		// Phase 5 — log screening / interception records.
+		&LogScreeningRecord{},
+		&PromptBlockLog{},
+		&UABlockLog{},
+		&SuspiciousIPMark{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}

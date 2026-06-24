@@ -79,6 +79,11 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
+	// Phase 5 — record configured request params (admin-visible) under the
+	// shared request_params key. No relay control-flow change; this only adds
+	// a nested field to the log "other" map. No prompt/UA interception here.
+	params := BuildRequestParamsForLog(ctx, relayInfo.Request)
+	other = MergeRequestParamsToOther(other, params)
 	return other
 }
 

@@ -168,8 +168,22 @@ func InitOptionMap() {
 	common.OptionMap["SelfUseModeEnabled"] = strconv.FormatBool(operation_setting.SelfUseModeEnabled)
 	common.OptionMap["ModelRequestRateLimitEnabled"] = strconv.FormatBool(setting.ModelRequestRateLimitEnabled)
 	common.OptionMap["CheckSensitiveOnPromptEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnPromptEnabled)
+	// Phase 5 — Sensitive UA/Prompt extended settings.
+	// NOTE: CheckSensitiveAutoBanSyncEnabled / AutoBanSync are intentionally NOT
+	// registered here — ban_sync is deprecated for this branch.
+	common.OptionMap["CheckSensitiveOnUAEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnUAEnabled)
+	common.OptionMap["CheckSensitiveOnEmptyUAEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnEmptyUAEnabled)
+	common.OptionMap["CheckSensitiveOnEmptyUAAutoBanEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnEmptyUAAutoBanEnabled)
 	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
 	common.OptionMap["SensitiveWords"] = setting.SensitiveWordsToString()
+	common.OptionMap["SensitiveUABlockedRegexes"] = setting.UABlockedRegexesToString()
+	common.OptionMap["SensitivePromptRegexRules"] = setting.SensitivePromptRegexRulesToString()
+	common.OptionMap["SensitiveUARegexRules"] = setting.SensitiveUARegexRulesToString()
+	common.OptionMap["SensitivePromptBlockedMessage"] = setting.SensitivePromptBlockedMessage
+	common.OptionMap["SensitiveUABlockedMessage"] = setting.SensitiveUABlockedMessage
+	common.OptionMap["SensitiveEmptyUABlockedMessage"] = setting.SensitiveEmptyUABlockedMessage
+	common.OptionMap["SensitiveEmptyUABlockedHTTPStatusCode"] = strconv.Itoa(setting.SensitiveEmptyUABlockedHTTPStatusCode)
+	common.OptionMap["SensitiveEmptyUABlockedErrorCode"] = setting.SensitiveEmptyUABlockedErrorCode
 	common.OptionMap["StreamCacheQueueLength"] = strconv.Itoa(setting.StreamCacheQueueLength)
 	common.OptionMap["AutomaticDisableKeywords"] = operation_setting.AutomaticDisableKeywordsToString()
 	common.OptionMap["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
@@ -186,9 +200,40 @@ func InitOptionMap() {
 	loadOptionsFromDatabase()
 }
 
+// isBannedBanSyncOptionKey reports whether `key` is a deprecated ban_sync
+// legacy option key that must never be loaded, stored, or applied at runtime.
+// ban_sync (gy's "auto joint ban" external bot integration) is deprecated for
+// this branch: no route/table/model/service/dto depends on it, so its option
+// keys must not enter common.OptionMap nor the options table.
+//
+// The match is case-insensitive on the key suffix/token to also catch legacy
+// spellings like "AutoBanSync" / "CheckSensitiveAutoBanSyncEnabled".
+func isBannedBanSyncOptionKey(key string) bool {
+	k := strings.TrimSpace(key)
+	if k == "" {
+		return false
+	}
+	lower := strings.ToLower(k)
+	if lower == "autobansync" || lower == "checksensitiveautobansyncenabled" {
+		return true
+	}
+	// Also reject any dotted config key whose leaf token is a ban_sync key, e.g.
+	// "ban_sync.enabled" or "ban_sync.foo" — none of these are registered configs
+	// in this branch, so they are silently dropped rather than stored.
+	if strings.HasPrefix(lower, "ban_sync.") {
+		return true
+	}
+	return false
+}
+
 func loadOptionsFromDatabase() {
 	options, _ := AllOption()
 	for _, option := range options {
+		if isBannedBanSyncOptionKey(option.Key) {
+			// Deprecated ban_sync legacy keys must never re-enter OptionMap.
+			common.SysLog("skipping deprecated ban_sync option key on load: " + option.Key)
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
@@ -205,6 +250,19 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
+	// Deprecated ban_sync legacy keys are rejected: not written to DB and not
+	// stored in OptionMap. This prevents stale frontends/scripts from
+	// re-persisting them. Returns nil so generic option callers succeed without
+	// surfacing a ban_sync-specific error.
+	if isBannedBanSyncOptionKey(key) {
+		common.SysLog("rejecting deprecated ban_sync option key on update: " + key)
+		return nil
+	}
+	// Validate sensitive regex options before writing to DB so internal callers
+	// that bypass the controller cannot persist illegal regex/status/code.
+	if err := setting.ValidateSensitiveRegexOptions(key, value); err != nil {
+		return err
+	}
 	// Save to database first
 	option := Option{
 		Key: key,
@@ -225,12 +283,32 @@ func UpdateOption(key string, value string) error {
 // any DB write fails the whole transaction rolls back and no in-memory state
 // is touched — safe for callers that must commit a set of related options
 // atomically (e.g. payment gateway binding).
+//
+// Deprecated ban_sync legacy keys inside `values` are silently skipped: not
+// written to DB, not stored in OptionMap.
 func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
+	// Filter out deprecated ban_sync legacy keys before touching the DB.
+	filtered := make(map[string]string, len(values))
+	for k, v := range values {
+		if isBannedBanSyncOptionKey(k) {
+			common.SysLog("rejecting deprecated ban_sync option key on bulk update: " + k)
+			continue
+		}
+		// Validate sensitive regex options so internal callers cannot persist
+		// illegal regex/status/code via the bulk path.
+		if err := setting.ValidateSensitiveRegexOptions(k, v); err != nil {
+			return err
+		}
+		filtered[k] = v
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		for k, v := range values {
+		for k, v := range filtered {
 			option := Option{Key: k}
 			if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
 				return err
@@ -245,7 +323,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if err != nil {
 		return err
 	}
-	for k, v := range values {
+	for k, v := range filtered {
 		if err := updateOptionMap(k, v); err != nil {
 			return err
 		}
@@ -346,6 +424,12 @@ func updateOptionMap(key string, value string) (err error) {
 			operation_setting.SelfUseModeEnabled = boolValue
 		case "CheckSensitiveOnPromptEnabled":
 			setting.CheckSensitiveOnPromptEnabled = boolValue
+		case "CheckSensitiveOnUAEnabled":
+			setting.CheckSensitiveOnUAEnabled = boolValue
+		case "CheckSensitiveOnEmptyUAEnabled":
+			setting.CheckSensitiveOnEmptyUAEnabled = boolValue
+		case "CheckSensitiveOnEmptyUAAutoBanEnabled":
+			setting.CheckSensitiveOnEmptyUAAutoBanEnabled = boolValue
 		case "ModelRequestRateLimitEnabled":
 			setting.ModelRequestRateLimitEnabled = boolValue
 		case "StopOnSensitiveEnabled":
@@ -558,6 +642,34 @@ func updateOptionMap(key string, value string) (err error) {
 		common.QuotaPerUnit, _ = strconv.ParseFloat(value, 64)
 	case "SensitiveWords":
 		setting.SensitiveWordsFromString(value)
+	case "SensitiveUABlockedRegexes":
+		setting.UABlockedRegexesFromString(value)
+	case "SensitivePromptRegexRules":
+		setting.SensitivePromptRegexRulesFromString(value)
+	case "SensitiveUARegexRules":
+		setting.SensitiveUARegexRulesFromString(value)
+	case "SensitivePromptBlockedMessage":
+		setting.SensitivePromptBlockedMessage = strings.TrimSpace(value)
+		if setting.SensitivePromptBlockedMessage == "" {
+			setting.SensitivePromptBlockedMessage = "请求包含违规内容，已被系统拦截"
+		}
+	case "SensitiveUABlockedMessage":
+		setting.SensitiveUABlockedMessage = strings.TrimSpace(value)
+		if setting.SensitiveUABlockedMessage == "" {
+			setting.SensitiveUABlockedMessage = "当前请求来源已被系统策略拦截"
+		}
+	case "SensitiveEmptyUABlockedMessage":
+		setting.SensitiveEmptyUABlockedMessage = strings.TrimSpace(value)
+	case "SensitiveEmptyUABlockedHTTPStatusCode":
+		setting.SensitiveEmptyUABlockedHTTPStatusCode, _ = strconv.Atoi(strings.TrimSpace(value))
+		if setting.SensitiveEmptyUABlockedHTTPStatusCode < 100 || setting.SensitiveEmptyUABlockedHTTPStatusCode > 599 {
+			setting.SensitiveEmptyUABlockedHTTPStatusCode = setting.DefaultSensitiveStatusCode
+		}
+	case "SensitiveEmptyUABlockedErrorCode":
+		setting.SensitiveEmptyUABlockedErrorCode = strings.TrimSpace(value)
+		if setting.SensitiveEmptyUABlockedErrorCode == "" {
+			setting.SensitiveEmptyUABlockedErrorCode = setting.DefaultSensitiveErrorCode
+		}
 	case "AutomaticDisableKeywords":
 		operation_setting.AutomaticDisableKeywordsFromString(value)
 	case "AutomaticDisableStatusCodes":

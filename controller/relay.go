@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -123,8 +124,27 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
+	needSensitiveCheck := setting.ShouldCheckPromptSensitive() || setting.ShouldCheckUASensitive()
 	needCountToken := constant.CountToken
+	// Admin/root bypass: never block or auto-ban admin/root users.
+	skipSensitiveIntercept := false
+	if needSensitiveCheck {
+		userRole, roleErr := model.GetUserRoleById(relayInfo.UserId)
+		if roleErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("failed to get user role for sensitive bypass: %v", roleErr))
+		} else if userRole >= common.RoleAdminUser {
+			skipSensitiveIntercept = true
+		}
+	}
+	// OpenAIRealtime upgrades the websocket at function entry; its body is not a
+	// plain JSON payload the prompt/UA interceptors can inspect. Skip the
+	// interceptors for realtime in this phase (consistent with gy).
+	isRealtime := relayFormat == types.RelayFormatOpenAIRealtime
+	if needSensitiveCheck && (isRealtime || skipSensitiveIntercept) {
+		// Still run the existing token-count meta path below; just skip the
+		// prompt/UA interception side effects.
+		needSensitiveCheck = false
+	}
 	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.
 	var meta *types.TokenCountMeta
 	if needSensitiveCheck || needCountToken {
@@ -134,10 +154,88 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	if needSensitiveCheck && meta != nil {
-		contains, words := service.CheckSensitiveText(meta.CombineText)
+		// Phase 5C/5D — prompt regex rules first, then basic sensitive words.
+		if setting.ShouldCheckPromptSensitive() {
+			hit, ok := service.MatchSensitivePromptRule(meta.CombineText)
+			if ok && hit != nil {
+				logger.LogWarn(c, fmt.Sprintf("prompt blocked by regex rule: %s", hit.Pattern))
+				status, code, errMsg := service.BuildPromptBlockedErrorAndRecord(
+					&promptBlockRecordContext{ctx: c},
+					hit,
+					setting.SensitivePromptBlockedMessage,
+					"rule",
+					hit.Pattern,
+				)
+				newAPIError = types.NewErrorWithStatusCode(
+					errMsg,
+					code,
+					status,
+					types.ErrOptionWithSkipRetry(),
+				)
+				return
+			}
+
+			contains, words := service.CheckSensitiveText(meta.CombineText)
+			if contains {
+				logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
+				status, code, errMsg := service.BuildPromptBlockedErrorAndRecord(
+					&promptBlockRecordContext{ctx: c},
+					nil,
+					setting.SensitivePromptBlockedMessage,
+					"basic",
+					strings.Join(words, ","),
+				)
+				newAPIError = types.NewErrorWithStatusCode(
+					errMsg,
+					code,
+					status,
+					types.ErrOptionWithSkipRetry(),
+				)
+				return
+			}
+		}
+	}
+
+	if !skipSensitiveIntercept && !isRealtime && setting.ShouldCheckUASensitive() {
+		uaHit, uaOK := service.MatchSensitiveUARule(c.Request.UserAgent())
+		if uaOK && uaHit != nil {
+			logger.LogWarn(c, fmt.Sprintf("user agent blocked by regex rule: %s", uaHit.Pattern))
+			status, code, errMsg := service.BuildUABlockedErrorAndRecord(
+				&uaBlockRecordContext{ctx: c},
+				uaHit,
+			)
+			newAPIError = types.NewErrorWithStatusCode(
+				errMsg,
+				code,
+				status,
+				types.ErrOptionWithSkipRetry(),
+			)
+			return
+		}
+
+		contains, hits := service.CheckSensitiveUA(c.Request.UserAgent())
 		if contains {
-			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
-			newAPIError = types.NewError(err, types.ErrorCodeSensitiveWordsDetected)
+			logger.LogWarn(c, fmt.Sprintf("user agent blocked by regex rules: %s", strings.Join(hits, ", ")))
+			// Build a synthetic hit so the record+auto-ban path is uniform. The
+			// line-regex block never auto-bans (AutoBan=false).
+			syntheticHit := &service.SensitiveRuleHit{
+				Pattern:        strings.Join(hits, ","),
+				Message:        setting.SensitiveUABlockedMessage,
+				ErrorCode:      types.ErrorCodeSensitiveWordsDetected,
+				HTTPStatusCode: http.StatusBadRequest,
+				AutoBan:        false,
+				MatchMode:      "blocked_regex",
+			}
+			status, code, errMsg := service.BuildUABlockedErrorAndRecord(
+				&uaBlockRecordContext{ctx: c},
+				syntheticHit,
+			)
+			newAPIError = types.NewErrorWithStatusCode(
+				errMsg,
+				code,
+				status,
+				types.ErrOptionWithSkipRetry(),
+			)
 			return
 		}
 	}
@@ -253,6 +351,126 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true // 允许跨域
 	},
+}
+
+// promptBlockRecordContext adapts *gin.Context to the
+// service.PromptBlockRecordContext interface so the relay can record a prompt
+// block log + run local auto-ban without coupling the service layer to gin.
+// Raw body reads go through service.BuildRawRequestParamsForInterceptLog which
+// uses the io.Seeker body storage (5B) — no []byte GetRequestBody usage.
+type promptBlockRecordContext struct {
+	ctx *gin.Context
+}
+
+func (p *promptBlockRecordContext) RequestContext() context.Context {
+	if p == nil || p.ctx == nil || p.ctx.Request == nil {
+		return context.Background()
+	}
+	return p.ctx.Request.Context()
+}
+
+func (p *promptBlockRecordContext) UserID() int {
+	if p == nil || p.ctx == nil {
+		return 0
+	}
+	return p.ctx.GetInt("id")
+}
+
+func (p *promptBlockRecordContext) Username() string {
+	if p == nil || p.ctx == nil {
+		return ""
+	}
+	return p.ctx.GetString("username")
+}
+
+func (p *promptBlockRecordContext) ClientIP() string {
+	if p == nil || p.ctx == nil {
+		return ""
+	}
+	return p.ctx.ClientIP()
+}
+
+func (p *promptBlockRecordContext) RequestPath() string {
+	if p == nil || p.ctx == nil || p.ctx.Request == nil || p.ctx.Request.URL == nil {
+		return ""
+	}
+	return p.ctx.Request.URL.Path
+}
+
+func (p *promptBlockRecordContext) RequestHeadersRaw() string {
+	if p == nil {
+		return ""
+	}
+	return service.BuildRawRequestHeadersForInterceptLog(p.ctx)
+}
+
+func (p *promptBlockRecordContext) RequestParamsRaw() string {
+	if p == nil {
+		return ""
+	}
+	return service.BuildRawRequestParamsForInterceptLog(p.ctx, nil)
+}
+
+// uaBlockRecordContext is the UA-block analogue of promptBlockRecordContext;
+// it also exposes the request User-Agent.
+type uaBlockRecordContext struct {
+	ctx *gin.Context
+}
+
+func (u *uaBlockRecordContext) RequestContext() context.Context {
+	if u == nil || u.ctx == nil || u.ctx.Request == nil {
+		return context.Background()
+	}
+	return u.ctx.Request.Context()
+}
+
+func (u *uaBlockRecordContext) UserID() int {
+	if u == nil || u.ctx == nil {
+		return 0
+	}
+	return u.ctx.GetInt("id")
+}
+
+func (u *uaBlockRecordContext) Username() string {
+	if u == nil || u.ctx == nil {
+		return ""
+	}
+	return u.ctx.GetString("username")
+}
+
+func (u *uaBlockRecordContext) ClientIP() string {
+	if u == nil || u.ctx == nil {
+		return ""
+	}
+	return u.ctx.ClientIP()
+}
+
+func (u *uaBlockRecordContext) RequestPath() string {
+	if u == nil || u.ctx == nil || u.ctx.Request == nil || u.ctx.Request.URL == nil {
+		return ""
+	}
+	return u.ctx.Request.URL.Path
+}
+
+func (u *uaBlockRecordContext) UserAgent() string {
+	if u == nil || u.ctx == nil || u.ctx.Request == nil {
+		return ""
+	}
+	return u.ctx.Request.UserAgent()
+}
+
+func (u *uaBlockRecordContext) RequestHeadersRaw() string {
+	if u == nil {
+		return ""
+	}
+	return service.BuildRawRequestHeadersForInterceptLog(u.ctx)
+}
+
+func (u *uaBlockRecordContext) RequestParamsRaw() string {
+	if u == nil {
+		return ""
+	}
+	return service.BuildRawRequestParamsForInterceptLog(u.ctx, nil)
 }
 
 func addUsedChannel(c *gin.Context, channelId int) {

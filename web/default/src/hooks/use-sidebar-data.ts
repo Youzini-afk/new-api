@@ -30,6 +30,7 @@ import {
   Radio,
   ServerCog,
   Settings,
+  ShieldCheck,
   Ticket,
   User,
   Users,
@@ -128,6 +129,11 @@ export function useSidebarData(): SidebarData {
             title: t('Operations Stats'),
             url: '/operations-stats',
             icon: BarChart3,
+          },
+          {
+            title: t('Log Screening'),
+            url: '/log-screening',
+            icon: ShieldCheck,
           },
           {
             title: t('Models'),

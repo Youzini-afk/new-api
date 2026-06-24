@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -325,6 +326,24 @@ func UpdateOption(c *gin.Context) {
 	case "console_setting.uptime_kuma_groups":
 		err = console_setting.ValidateConsoleSettings(option.Value.(string), "UptimeKumaGroups")
 		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	}
+	// Phase 5 — validate/normalize the sensitive regex / message / status-code
+	// option keys before persisting them. ban_sync legacy keys are already
+	// rejected upstream in model.UpdateOption and never reach here.
+	switch option.Key {
+	case "SensitiveWords",
+		"SensitiveUABlockedRegexes",
+		"SensitivePromptRegexRules",
+		"SensitiveUARegexRules",
+		"SensitiveEmptyUABlockedHTTPStatusCode",
+		"SensitiveEmptyUABlockedErrorCode":
+		if err := service.ValidateSensitiveRegexOptions(option.Key, option.Value.(string)); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": err.Error(),

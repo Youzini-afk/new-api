@@ -397,6 +397,23 @@ func SetApiRouter(router *gin.Engine) {
 			ipStatsRoute.GET("/conversation/users", controller.GetIPStatsUsers)
 		}
 
+		// Phase 5 log screening / interception records (admin only).
+		// ban_sync is intentionally NOT migrated.
+		logScreeningRoute := apiRouter.Group("/log_screening")
+		logScreeningRoute.Use(middleware.AdminAuth())
+		{
+			logScreeningRoute.GET("/records", controller.ListLogScreeningRecords)
+			logScreeningRoute.GET("/ua_block_logs", controller.ListUABlockLogs)
+			logScreeningRoute.GET("/ua_block_logs/:id", controller.GetUABlockLogDetail)
+			logScreeningRoute.GET("/prompt_block_logs", controller.ListPromptBlockLogs)
+			logScreeningRoute.GET("/prompt_block_logs/:id", controller.GetPromptBlockLogDetail)
+			logScreeningRoute.POST("/run", controller.RunLogScreening)
+			logScreeningRoute.POST("/records/:id/remark", controller.AppendLogScreeningRemark)
+			logScreeningRoute.POST("/ua_block_logs/:id/remark", controller.AppendUABlockLogRemark)
+			logScreeningRoute.POST("/prompt_block_logs/:id/remark", controller.AppendPromptBlockLogRemark)
+			logScreeningRoute.POST("/cleanup", controller.CleanupLogScreeningRecords)
+		}
+
 		uaStatsRoute := apiRouter.Group("/ua_stats")
 		uaStatsRoute.Use(middleware.AdminAuth())
 		{

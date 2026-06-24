@@ -20,6 +20,12 @@ import (
 const KeyRequestBody = "key_request_body"
 const KeyBodyStorage = "key_body_storage"
 
+// RequestParamsOtherKey is the "other" map key under which the recorded request
+// parameters (BuildRequestParamsForLog result) are nested when merged into a
+// log's other info via MergeRequestParamsToOther. Centralized here so model and
+// service layers reference a single constant rather than hardcoding the string.
+const RequestParamsOtherKey = "request_params"
+
 var ErrRequestBodyTooLarge = errors.New("request body too large")
 
 func IsRequestBodyTooLargeError(err error) bool {
