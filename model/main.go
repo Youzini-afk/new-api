@@ -296,6 +296,9 @@ func migrateDB() error {
 		&TwoFA{},
 		&TwoFABackupCode{},
 		&Checkin{},
+		// Phase 7A — lottery MVP (default disabled; roulette intentionally NOT migrated).
+		&GameLotteryRound{},
+		&GameLotteryTicket{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},
@@ -353,6 +356,9 @@ func migrateDBFast() error {
 		{&TwoFA{}, "TwoFA"},
 		{&TwoFABackupCode{}, "TwoFABackupCode"},
 		{&Checkin{}, "Checkin"},
+		// Phase 7A — lottery MVP (default disabled; roulette intentionally NOT migrated).
+		{&GameLotteryRound{}, "GameLotteryRound"},
+		{&GameLotteryTicket{}, "GameLotteryTicket"},
 		{&SubscriptionOrder{}, "SubscriptionOrder"},
 		{&UserSubscription{}, "UserSubscription"},
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},

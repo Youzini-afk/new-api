@@ -118,7 +118,11 @@ func SetApiRouter(router *gin.Engine) {
 
 				// Check-in routes
 				selfRoute.GET("/checkin", controller.GetCheckinStatus)
-				selfRoute.POST("/checkin", middleware.TurnstileCheck(), controller.DoCheckin)
+				selfRoute.POST("/checkin", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.DoCheckin)
+
+				// Lottery routes (Phase 7A, default disabled; roulette intentionally NOT migrated)
+				selfRoute.GET("/game/lottery", controller.GetLotteryStatus)
+				selfRoute.POST("/game/lottery/buy", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.BuyLotteryTicket)
 
 				// Custom OAuth bindings
 				selfRoute.GET("/oauth/bindings", controller.GetUserOAuthBindings)

@@ -52,6 +52,10 @@ func TestMain(m *testing.M) {
 		&SystemTask{},
 		&SystemTaskLock{},
 		&Option{},
+		&Checkin{},
+		// Phase 7A — lottery MVP (default disabled; roulette intentionally NOT migrated).
+		&GameLotteryRound{},
+		&GameLotteryTicket{},
 		// Phase 5 — log screening / interception records.
 		&LogScreeningRecord{},
 		&PromptBlockLog{},
@@ -83,6 +87,10 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM system_instances")
 		DB.Exec("DELETE FROM system_task_locks")
 		DB.Exec("DELETE FROM system_tasks")
+		// Phase 7A — lottery/checkin fixtures.
+		DB.Exec("DELETE FROM game_lottery_tickets")
+		DB.Exec("DELETE FROM game_lottery_rounds")
+		DB.Exec("DELETE FROM checkins")
 	})
 }
 

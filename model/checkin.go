@@ -2,10 +2,10 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"gorm.io/gorm"
 )
@@ -49,16 +49,21 @@ func HasCheckedInToday(userId int) (bool, error) {
 	return count > 0, err
 }
 
-// UserCheckin 执行用户签到
-// MySQL 和 PostgreSQL 使用事务保证原子性
-// SQLite 不支持嵌套事务，使用顺序操作 + 手动回滚
+// UserCheckin 执行用户签到。
+// 统一 SQLite/MySQL/PostgreSQL 事务路径：
+//   - 唯一约束 (user_id, checkin_date) 防止重复签到；
+//   - quota 增加使用条件原子更新 `WHERE id=? AND quota < max_user_quota`（MaxUserQuota>0 时）
+//     并检查 RowsAffected，消除事务外预检的 TOCTOU 竞态；
+//   - 失败时 rollback 已创建的 checkin 记录并返回清晰错误。
+//
+// 业务语义：当前 quota < MaxUserQuota 即可领奖（允许领奖后超过阈值）。
 func UserCheckin(userId int) (*Checkin, error) {
 	setting := operation_setting.GetCheckinSetting()
 	if !setting.Enabled {
 		return nil, errors.New("签到功能未启用")
 	}
 
-	// 检查今天是否已签到
+	// 检查今天是否已签到（提前快速返回；并发重复由唯一约束兜底）
 	hasChecked, err := HasCheckedInToday(userId)
 	if err != nil {
 		return nil, err
@@ -81,39 +86,42 @@ func UserCheckin(userId int) (*Checkin, error) {
 		CreatedAt:    time.Now().Unix(),
 	}
 
-	// 根据数据库类型选择不同的策略
-	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
-		// SQLite 不支持嵌套事务，使用顺序操作 + 手动回滚
-		return userCheckinWithoutTransaction(checkin, userId, quotaAwarded)
-	}
-
-	// MySQL 和 PostgreSQL 支持事务，使用事务保证原子性
-	return userCheckinWithTransaction(checkin, userId, quotaAwarded)
-}
-
-// userCheckinWithTransaction 使用事务执行签到（适用于 MySQL 和 PostgreSQL）
-func userCheckinWithTransaction(checkin *Checkin, userId int, quotaAwarded int) (*Checkin, error) {
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		// 步骤1: 创建签到记录
-		// 数据库有唯一约束 (user_id, checkin_date)，可以防止并发重复签到
+	// 统一事务路径：SQLite/MySQL/PostgreSQL 均使用事务保证原子性。
+	// quota 更新带条件 RowsAffected 校验，避免先查后扣的 TOCTOU 竞态。
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		// 步骤1: 创建签到记录。
+		// 数据库唯一约束 (user_id, checkin_date) 防止并发重复签到。
 		if err := tx.Create(checkin).Error; err != nil {
 			return errors.New("签到失败，请稍后重试")
 		}
 
-		// 步骤2: 在事务中增加用户额度
-		if err := tx.Model(&User{}).Where("id = ?", userId).
-			Update("quota", gorm.Expr("quota + ?", quotaAwarded)).Error; err != nil {
-			return errors.New("签到失败：更新额度出错")
+		// 步骤2: 原子条件增加用户额度。
+		// MaxUserQuota > 0 时附加 `AND quota < max_user_quota` 条件；
+		// RowsAffected != 1 说明用户不存在或已达额度上限，rollback 签到记录。
+		cond := "id = ?"
+		args := []interface{}{userId}
+		if setting.MaxUserQuota > 0 {
+			cond += " AND quota < ?"
+			args = append(args, setting.MaxUserQuota)
 		}
-
+		res := tx.Model(&User{}).Where(cond, args...).
+			Update("quota", gorm.Expr("quota + ?", quotaAwarded))
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			if setting.MaxUserQuota > 0 {
+				return fmt.Errorf("当前额度已达签到上限 %d，请消耗后再签到", setting.MaxUserQuota)
+			}
+			return errors.New("签到失败：用户不存在或更新额度出错")
+		}
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
 
-	// 事务成功后，异步更新缓存
+	// 事务成功后，异步刷新缓存
 	go func() {
 		_ = cacheIncrUserQuota(userId, int64(quotaAwarded))
 	}()
@@ -121,23 +129,13 @@ func userCheckinWithTransaction(checkin *Checkin, userId int, quotaAwarded int) 
 	return checkin, nil
 }
 
-// userCheckinWithoutTransaction 不使用事务执行签到（适用于 SQLite）
-func userCheckinWithoutTransaction(checkin *Checkin, userId int, quotaAwarded int) (*Checkin, error) {
-	// 步骤1: 创建签到记录
-	// 数据库有唯一约束 (user_id, checkin_date)，可以防止并发重复签到
-	if err := DB.Create(checkin).Error; err != nil {
-		return nil, errors.New("签到失败，请稍后重试")
+// getUserQuotaForCheckin 读取用户当前额度（用于签到风控判定展示，非原子操作）。
+func getUserQuotaForCheckin(userId int) (int, error) {
+	var user User
+	if err := DB.Select("quota").Where("id = ?", userId).First(&user).Error; err != nil {
+		return 0, err
 	}
-
-	// 步骤2: 增加用户额度
-	// 使用 db=true 强制直接写入数据库，不使用批量更新
-	if err := IncreaseUserQuota(userId, quotaAwarded, true); err != nil {
-		// 如果增加额度失败，需要回滚签到记录
-		DB.Delete(checkin)
-		return nil, errors.New("签到失败：更新额度出错")
-	}
-
-	return checkin, nil
+	return user.Quota, nil
 }
 
 // GetUserCheckinStats 获取用户签到统计信息
@@ -169,11 +167,45 @@ func GetUserCheckinStats(userId int, month string) (map[string]interface{}, erro
 	DB.Model(&Checkin{}).Where("user_id = ?", userId).Count(&totalCheckins)
 	DB.Model(&Checkin{}).Where("user_id = ?", userId).Select("COALESCE(SUM(quota_awarded), 0)").Scan(&totalQuota)
 
+	// 计算额度风控资格
+	setting := operation_setting.GetCheckinSetting()
+	maxUserQuota := setting.MaxUserQuota
+	eligible := false
+	ineligibleReason := ""
+	currentQuota := 0
+	if maxUserQuota > 0 {
+		currentQuota, err = getUserQuotaForCheckin(userId)
+		if err != nil {
+			// 优先返回 quota 读取错误，不吞掉。
+			return nil, err
+		}
+		if currentQuota >= maxUserQuota {
+			eligible = false
+			ineligibleReason = fmt.Sprintf("当前额度已达签到上限 %d", maxUserQuota)
+		} else {
+			eligible = true
+		}
+	} else {
+		// 未配置上限时，符合资格
+		eligible = true
+	}
+	// 今日已签到的用户视为今日不再可签到
+	if hasCheckedToday {
+		eligible = false
+		if ineligibleReason == "" {
+			ineligibleReason = "今日已签到"
+		}
+	}
+
 	return map[string]interface{}{
-		"total_quota":      totalQuota,      // 所有时间累计获得的额度
-		"total_checkins":   totalCheckins,   // 所有时间累计签到次数
-		"checkin_count":    len(records),    // 本月签到次数
-		"checked_in_today": hasCheckedToday, // 今天是否已签到
-		"records":          checkinRecords,  // 本月签到记录详情（不含id和user_id）
+		"total_quota":       totalQuota,       // 所有时间累计获得的额度
+		"total_checkins":    totalCheckins,    // 所有时间累计签到次数
+		"checkin_count":     len(records),     // 本月签到次数
+		"checked_in_today":  hasCheckedToday,  // 今天是否已签到
+		"records":           checkinRecords,   // 本月签到记录详情（不含id和user_id）
+		"max_user_quota":    maxUserQuota,     // 签到额度上限（0 表示不限制）
+		"current_quota":     currentQuota,     // 用户当前额度
+		"eligible":          eligible,         // 当前是否可签到
+		"ineligible_reason": ineligibleReason, // 不可签到原因（eligible=true 时为空）
 	}, nil
 }
