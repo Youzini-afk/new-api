@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -53,6 +54,115 @@ type Log struct {
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
 	Other             string `json:"other"`
+	RequestPath       string `json:"request_path,omitempty" gorm:"type:varchar(512);default:''"`
+	UserAgent         string `json:"user_agent,omitempty" gorm:"type:varchar(512);default:''"`
+}
+
+const (
+	// logRequestPathMaxLength 限制 request_path 列存储长度（字节），避免异常长 path
+	// 导致 MySQL/PG varchar(512) 写入失败。UTF-8 安全截断，不会切在多字节字符中间。
+	logRequestPathMaxLength = 512
+	// logUserAgentMaxLength 限制 user_agent 列存储长度（字节），避免异常长 UA 撑爆日志行。
+	logUserAgentMaxLength = 512
+)
+
+// normalizeRequestPath 规范化日志 request_path：
+//  1. trim 前后空白；
+//  2. 去掉 query string（`?` 之后的内容，c.Request.URL.Path 本身不含 query，
+//     但 Other["request_path"] 可能由调用方误带 query）；
+//  3. 修复非法 UTF-8 序列；
+//  4. 在 logRequestPathMaxLength 字节预算内做 rune-safe 截断。
+//
+// 保证返回值是合法 UTF-8 且 len(返回值) <= logRequestPathMaxLength，空输入返回空串。
+func normalizeRequestPath(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if idx := strings.IndexByte(s, '?'); idx >= 0 {
+		s = s[:idx]
+	}
+	s = strings.ToValidUTF8(s, "")
+	if s == "" {
+		return ""
+	}
+	return truncateRunesToByteBudget(s, logRequestPathMaxLength)
+}
+
+// normalizeUserAgent 规范化日志 user_agent：
+//  1. 先修复非法 UTF-8（替换为空），避免后续 trim/截断在无效字节边界处出错；
+//  2. trim 前后空白；
+//  3. 在 logUserAgentMaxLength 字节预算内做 rune-safe 截断。
+//
+// 保证 utf8.ValidString(返回值) 且 len(返回值) <= logUserAgentMaxLength，空输入返回空串。
+func normalizeUserAgent(s string) string {
+	s = strings.ToValidUTF8(s, "")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	return truncateRunesToByteBudget(s, logUserAgentMaxLength)
+}
+
+// truncateRunesToByteBudget 在 maxBytes 字节预算内做 rune-safe 截断，
+// 确保结果仍是合法 UTF-8 且 len(result) <= maxBytes。
+// 调用方应保证输入已是合法 UTF-8（非法 rune 会被防御性跳过）。
+func truncateRunesToByteBudget(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		sz := utf8.RuneLen(r)
+		if sz < 0 {
+			// 防御性跳过无效 rune（调用方应已 ToValidUTF8，此处不应到达）。
+			continue
+		}
+		if n+sz > maxBytes {
+			break
+		}
+		b.WriteRune(r)
+		n += sz
+	}
+	return b.String()
+}
+
+// resolveLogRequestPath 解析并规范化日志的 request_path 字段。
+// 优先采用 other["request_path"]（已由调用方写入），否则回退到 c.Request.URL.Path。
+// 同时把规范化后的值同步回 other，避免顶层字段与 Other.request_path 不一致或泄漏 query：
+// 规范化结果非空则替换 other["request_path"]，为空则从 other 中删除该键。
+// 返回规范化后的 request_path（始终为合法 UTF-8 且 <= logRequestPathMaxLength 字节）。
+func resolveLogRequestPath(c *gin.Context, other map[string]interface{}) string {
+	raw := ""
+	if other != nil {
+		if v, ok := other["request_path"]; ok {
+			if s, ok := v.(string); ok {
+				raw = s
+			}
+		}
+	}
+	if raw == "" && c != nil && c.Request != nil && c.Request.URL != nil {
+		raw = c.Request.URL.Path
+	}
+	normalized := normalizeRequestPath(raw)
+	// 同步 other：避免 Other.request_path 与顶层 RequestPath 不一致或残留 query。
+	if other != nil {
+		if normalized == "" {
+			delete(other, "request_path")
+		} else {
+			other["request_path"] = normalized
+		}
+	}
+	return normalized
+}
+
+// extractUserAgent 从 gin.Context 提取 User-Agent 并规范化（处理非法 UTF-8、trim、rune-safe 截断）。
+func extractUserAgent(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	return normalizeUserAgent(c.Request.UserAgent())
 }
 
 // don't use iota, avoid change log type value
@@ -260,6 +370,9 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
+	// 先解析并规范化 request_path，同时把规范化后的值同步回 other（去 query、截断），
+	// 再序列化 other，确保顶层字段与 Other.request_path 一致。
+	requestPath := resolveLogRequestPath(c, other)
 	otherStr := common.MapToJsonStr(other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -293,6 +406,8 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
 		Other:             otherStr,
+		RequestPath:       requestPath,
+		UserAgent:         extractUserAgent(c),
 	}
 	err := createLog(log)
 	if err != nil {
@@ -324,6 +439,9 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
+	// 先解析并规范化 request_path，同时把规范化后的值同步回 other（去 query、截断），
+	// 再序列化 other，确保顶层字段与 Other.request_path 一致。
+	requestPath := resolveLogRequestPath(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -357,6 +475,8 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
 		Other:             otherStr,
+		RequestPath:       requestPath,
+		UserAgent:         extractUserAgent(c),
 	}
 	err := createLog(log)
 	if err != nil {

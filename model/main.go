@@ -398,7 +398,21 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays)).Error; err != nil {
 		return err
 	}
+	// CREATE TABLE IF NOT EXISTS 不会为已存在的表追加列；
+	// 对升级前已建好的 logs 表，需要 ALTER ADD COLUMN IF NOT EXISTS 幂等补齐新增列。
+	for _, col := range clickHouseLogEnsureColumns {
+		if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS " + col).Error; err != nil {
+			return err
+		}
+	}
 	return syncClickHouseLogTTL(ttlDays)
+}
+
+// clickHouseLogEnsureColumns 是需在已有 logs 表上幂等补齐的列定义。
+// 仅用于历史表升级；新建表由 clickHouseLogCreateTableSQL 一次性建好全部列。
+var clickHouseLogEnsureColumns = []string{
+	"request_path String DEFAULT ''",
+	"user_agent String DEFAULT ''",
 }
 
 func clickHouseLogTTLDays() int {
@@ -446,7 +460,9 @@ CREATE TABLE IF NOT EXISTS logs (
 	ip String DEFAULT '',
 	request_id String DEFAULT '',
 	upstream_request_id String DEFAULT '',
-	other String DEFAULT ''
+	other String DEFAULT '',
+	request_path String DEFAULT '',
+	user_agent String DEFAULT ''
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime(created_at))

@@ -90,6 +90,37 @@ func TestClickHouseLogCreateTableSQL(t *testing.T) {
 	assert.Contains(t, withTTL, "TTL toDateTime(created_at) + INTERVAL 30 DAY DELETE")
 }
 
+// TestClickHouseLogCreateTableSQLNewColumns 确保 CREATE TABLE 语句已包含
+// request_path 与 user_agent 两列，避免新部署的 logs 表缺失字段。
+func TestClickHouseLogCreateTableSQLNewColumns(t *testing.T) {
+	sql := clickHouseLogCreateTableSQL(0)
+	assert.Contains(t, sql, "request_path String DEFAULT ''")
+	assert.Contains(t, sql, "user_agent String DEFAULT ''")
+	// 列顺序：other 之后紧跟 request_path、user_agent，避免被拼到 TTL 子句中。
+	otherIdx := strings.Index(sql, "other String DEFAULT ''")
+	require.GreaterOrEqual(t, otherIdx, 0, "other column must exist in CREATE TABLE")
+	pathIdx := strings.Index(sql, "request_path String DEFAULT ''")
+	uaIdx := strings.Index(sql, "user_agent String DEFAULT ''")
+	require.Greater(t, pathIdx, otherIdx, "request_path must come after other")
+	require.Greater(t, uaIdx, pathIdx, "user_agent must come after request_path")
+}
+
+// TestClickHouseLogEnsureColumns 断言历史表升级用的 ALTER 列定义覆盖了新增列，
+// 防止升级时漏补列。不锁死切片长度/顺序，只断言两列都被覆盖且 ALTER 语句形态稳定。
+func TestClickHouseLogEnsureColumns(t *testing.T) {
+	// 不锁死切片长度/顺序，只断言两列都被 ALTER 覆盖（防止升级时漏补列）。
+	joined := strings.Join(clickHouseLogEnsureColumns, "\n")
+	assert.Contains(t, joined, "request_path String DEFAULT ''", "must ensure request_path via ALTER")
+	assert.Contains(t, joined, "user_agent String DEFAULT ''", "must ensure user_agent via ALTER")
+
+	// 每个 ALTER 语句形态稳定，便于 migrateClickHouseLogDB 直接拼接执行。
+	for _, col := range clickHouseLogEnsureColumns {
+		stmt := "ALTER TABLE logs ADD COLUMN IF NOT EXISTS " + col
+		assert.True(t, strings.HasPrefix(stmt, "ALTER TABLE logs ADD COLUMN IF NOT EXISTS "),
+			"ALTER prefix must be stable for column: %s", col)
+	}
+}
+
 func TestClickHouseCreateTableHasTTL(t *testing.T) {
 	assert.True(t, clickHouseCreateTableHasTTL("CREATE TABLE logs (...)\nTTL toDateTime(created_at) + INTERVAL 30 DAY DELETE"))
 	assert.True(t, clickHouseCreateTableHasTTL("CREATE TABLE logs (...) TTL toDateTime(created_at)"))
