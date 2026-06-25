@@ -208,12 +208,57 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			delete(otherMap, "admin_info")
 			// Remove operation-audit details (operator/route info), admin-only.
 			delete(otherMap, "audit_info")
-			// delete(otherMap, "reject_reason")
 			delete(otherMap, "stream_status")
+			// Remove governance/error-insight private fields so users never see
+			// upstream error details, rule classification, or analytics
+			// fingerprints in their logs. These are admin-only diagnostic fields
+			// written by the error governance system.
+			sanitizeUserLogErrorMetadata(otherMap)
 		}
 		logs[i].Other = common.MapToJsonStr(otherMap)
 	}
 	assignDisplayLogIds(logs, startIdx)
+}
+
+// sanitizeUserLogErrorMetadata deletes governance and error-insight private
+// keys from a user-visible log metadata map. When error_safe != true, it also
+// strips the raw error fields (error_code/error_type/error_message etc.) so
+// opaque upstream error text never reaches regular users.
+func sanitizeUserLogErrorMetadata(metadata map[string]interface{}) {
+	if metadata == nil {
+		return
+	}
+	// When error_safe is explicitly true, the safe error fields are
+	// governance-classified and safe for users. Still strip private diagnostics.
+	if metadata["error_safe"] != true {
+		delete(metadata, "consume_status")
+		delete(metadata, "source")
+		delete(metadata, "error_status_code")
+		delete(metadata, "error_code")
+		delete(metadata, "error_type")
+		delete(metadata, "error_message")
+		delete(metadata, "local_error")
+	}
+	// Always strip governance/analytics diagnostic fields — these are
+	// admin-only and never user-visible.
+	for key := range metadata {
+		if isPrivateLogMetadataKey(key) {
+			delete(metadata, key)
+		}
+	}
+}
+
+func isPrivateLogMetadataKey(key string) bool {
+	switch key {
+	case "relay_error", "error_safe",
+		"governance_rule_code", "governance_rule_matched", "governance_match_source",
+		"governance_unmatched_reason", "governance_rule_version",
+		"normalized_signature", "normalized_message", "normalized_message_hash",
+		"error_source", "error_stage", "upstream_status_code", "client_status_code",
+		"error_insight_id":
+		return true
+	}
+	return strings.HasPrefix(key, "original_error_") || strings.HasPrefix(key, "original_local_error")
 }
 
 func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
