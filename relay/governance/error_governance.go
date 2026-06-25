@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -257,7 +258,7 @@ func SanitizeRelayErrorForClient(c *gin.Context, err *types.NewAPIError) SafeErr
 
 	in := ExtractRelayErrorInput(err)
 
-	if !relayErrorGovernanceEnabled {
+	if !governanceEnabled() {
 		// Governance disabled: preserve pre-existing behavior (masked message +
 		// original status), but strip upstream request-ids and attach local one.
 		oai := err.ToOpenAIError()
@@ -265,7 +266,7 @@ func SanitizeRelayErrorForClient(c *gin.Context, err *types.NewAPIError) SafeErr
 		return SafeErrorPayload{StatusCode: normalizedStatusFallback(in), OpenAIError: oai}
 	}
 
-	rules := defaultEffectiveRules()
+	rules := effectiveRules()
 	cls := classifyWithRules(in, rules)
 	effectiveCode := cls.Code
 
@@ -284,7 +285,7 @@ func SanitizeRelayErrorForClient(c *gin.Context, err *types.NewAPIError) SafeErr
 // --- Classification engine ---
 
 func ClassifyRelayError(in RelayErrorInput) Classification {
-	return classifyWithRules(in, defaultEffectiveRules())
+	return classifyWithRules(in, effectiveRules())
 }
 
 func AnalyzeRelayError(in RelayErrorInput, source string, stage string) RelayErrorAnalysis {
@@ -692,10 +693,64 @@ func containsAny(value string, needles ...string) bool {
 
 // --- Config toggle ---
 
-// relayErrorGovernanceEnabled defaults to true: upstream error details must not
-// reach downstream clients. Set RELAY_ERROR_GOVERNANCE_ENABLED=false to disable
-// rule-based message replacement (falls back to masked original message).
-var relayErrorGovernanceEnabled = os.Getenv("RELAY_ERROR_GOVERNANCE_ENABLED") != "false"
+// governanceEnabled returns the global governance toggle from the system
+// setting. When false, governance falls back to masked original messages
+// (pre-existing behavior). Default is true: upstream error details must not
+// reach downstream clients.
+//
+// The RELAY_ERROR_GOVERNANCE_ENABLED=false env var still overrides to disable
+// for emergency rollback scenarios.
+func governanceEnabled() bool {
+	if os.Getenv("RELAY_ERROR_GOVERNANCE_ENABLED") == "false" {
+		return false
+	}
+	cfg := system_setting.GetRelayErrorGovernanceSetting()
+	return cfg.Enabled
+}
+
+// effectiveRules merges the built-in default rules with admin-configured
+// overrides from the system setting. Only Enabled and Message can be
+// overridden — Status/Type/Code/Param are fixed in code for security.
+func effectiveRules() map[string]effectiveRelayRule {
+	rules := defaultEffectiveRules()
+	cfg := system_setting.GetRelayErrorGovernanceSetting()
+	if cfg == nil || cfg.Rules == nil {
+		return rules
+	}
+	for code, override := range cfg.Rules {
+		rule, ok := rules[code]
+		if !ok {
+			continue
+		}
+		if override.Enabled != nil {
+			rule.Enabled = *override.Enabled
+		}
+		if msg := safeRuleMessage(override.Message); msg != "" {
+			rule.Message = msg
+		}
+		rules[code] = rule
+	}
+	return rules
+}
+
+// safeRuleMessage validates that an admin-provided message override is safe:
+// non-empty, reasonable length, and does not contain template placeholders
+// that could leak original error text.
+func safeRuleMessage(msg string) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return ""
+	}
+	if len(msg) > 500 {
+		msg = msg[:500]
+	}
+	// Reject messages containing template placeholders that could inject
+	// original error content into the client response.
+	if strings.Contains(msg, "{original") || strings.Contains(msg, "{upstream") {
+		return ""
+	}
+	return msg
+}
 
 // --- Stream error sanitization ---
 
@@ -717,5 +772,5 @@ func SanitizedStreamErrorMessage(c *gin.Context, err error) (message, code strin
 	if codeStr == "" {
 		codeStr = RelayRuleStreamInterrupted
 	}
-	return withLocalRequestID(c, effectiveMessage(codeStr, defaultEffectiveRules())), codeStr
+	return withLocalRequestID(c, effectiveMessage(codeStr, effectiveRules())), codeStr
 }

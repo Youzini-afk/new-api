@@ -5319,6 +5319,16 @@
     "Copy signature": "复制签名",
     "Copy request ID": "复制请求 ID",
     "All Time": "全部时间",
-    "Total: {{count}}": "总计：{{count}}"
+    "Total: {{count}}": "总计：{{count}}",
+    "Relay Error Governance": "中继错误治理",
+    "Relay Governance": "中继治理",
+    "Enable error governance": "启用错误治理",
+    "When enabled, governed relay errors are replaced with the configured messages before reaching clients.": "启用后，受治理的中继错误在返回客户端前将被替换为已配置的消息。",
+    "Rule codes are fixed by the backend and cannot be edited here. Only the enabled flag and custom message can be overridden; leave the message blank to use the default.": "规则代码由后端固定，无法在此编辑。仅可覆盖启用状态和自定义消息；消息留空表示使用默认值。",
+    "Default Message": "默认消息",
+    "Custom Message": "自定义消息",
+    "Toggle governance for {{code}}": "切换 {{code}} 的治理",
+    "Custom message for {{code}}": "{{code}} 的自定义消息",
+    "Save error governance": "保存错误治理"
   }
 }

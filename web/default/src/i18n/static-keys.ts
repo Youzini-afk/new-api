@@ -48,6 +48,16 @@ export const STATIC_I18N_KEYS = [
   'Models',
   'Routing Reliability',
   'Maintenance',
+  'Relay Governance',
+  'Relay Error Governance',
+  'Enable error governance',
+  'When enabled, governed relay errors are replaced with the configured messages before reaching clients.',
+  'Rule codes are fixed by the backend and cannot be edited here. Only the enabled flag and custom message can be overridden; leave the message blank to use the default.',
+  'Default Message',
+  'Custom Message',
+  'Toggle governance for {{code}}',
+  'Custom message for {{code}}',
+  'Save error governance',
 
   // Short-message extra billing mode cards
   'Shadow (Audit Only)',

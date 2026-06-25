@@ -406,6 +406,17 @@ export type SecuritySettings = {
   'fetch_setting.apply_ip_filter_for_domain': boolean
 }
 
+/**
+ * Relay Error Governance settings.
+ *
+ * The whole governance config is stored as a JSON string under the
+ * `relay_error_governance` system option. The section component parses and
+ * serializes it locally — see `features/system-settings/governance`.
+ */
+export type GovernanceSettings = {
+  relay_error_governance: string
+}
+
 export type UpstreamChannel = {
   id: number
   name: string
