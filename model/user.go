@@ -954,6 +954,49 @@ func decreaseUserQuota(id int, quota int) (err error) {
 	return err
 }
 
+// DecreaseUserQuotaIfEnough atomically decrements the user's quota by the
+// given amount only when the user has at least that much quota remaining.
+// It uses a single conditional UPDATE (WHERE id = ? AND quota >= ?) so the
+// check and the decrement are atomic across SQLite / MySQL / PostgreSQL,
+// preventing the overdraft race that DecreaseUserQuota + separate
+// pre-check would introduce under concurrent requests.
+//
+// Returns ErrInsufficientUserQuota when RowsAffected == 0 (user does not
+// exist or has insufficient quota). quota < 0 is rejected; quota == 0 is
+// a no-op (returns nil).
+//
+// The cache is updated only AFTER the DB update succeeds (best-effort,
+// asynchronous) so a cache failure can never mask a failed reserve. This
+// helper intentionally does NOT participate in BatchUpdate: enforce-mode
+// reserve must be immediate and atomic so the response can never succeed
+// while billing failed.
+//
+// Used by short-message extra billing enforce mode to reserve the potential
+// extra quota before the upstream call.
+func DecreaseUserQuotaIfEnough(id int, quota int) (err error) {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	result := DB.Model(&User{}).
+		Where("id = ? AND quota >= ?", id, quota).
+		Update("quota", gorm.Expr("quota - ?", quota))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrInsufficientUserQuota
+	}
+	gopool.Go(func() {
+		if err := cacheDecrUserQuota(id, int64(quota)); err != nil {
+			common.SysLog("failed to decrease user quota cache (checked): " + err.Error())
+		}
+	})
+	return nil
+}
+
 func DeltaUpdateUserQuota(id int, delta int) (err error) {
 	if delta == 0 {
 		return nil

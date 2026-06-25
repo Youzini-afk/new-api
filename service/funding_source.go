@@ -29,6 +29,10 @@ type FundingSource interface {
 type WalletFunding struct {
 	userId   int
 	consumed int // 实际预扣的用户额度
+	// checkedPreConsume 在 PreConsume / reserveFunding 中改走 DecreaseUserQuotaIfEnough
+	// 的原子检查路径，避免 BatchUpdate 或信任旁路导致预扣未真正入账。Phase 10B
+	// short-message extra billing enforce 预检在预留潜在额外费用时置位。
+	checkedPreConsume bool
 }
 
 func (w *WalletFunding) Source() string { return BillingSourceWallet }
@@ -37,8 +41,14 @@ func (w *WalletFunding) PreConsume(amount int) error {
 	if amount <= 0 {
 		return nil
 	}
-	if err := model.DecreaseUserQuota(w.userId, amount, false); err != nil {
-		return err
+	if w.checkedPreConsume {
+		if err := model.DecreaseUserQuotaIfEnough(w.userId, amount); err != nil {
+			return err
+		}
+	} else {
+		if err := model.DecreaseUserQuota(w.userId, amount, false); err != nil {
+			return err
+		}
 	}
 	w.consumed = amount
 	return nil

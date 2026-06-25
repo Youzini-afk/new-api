@@ -35,6 +35,11 @@ func TestMain(m *testing.M) {
 	common.RedisEnabled = false
 	common.BatchUpdateEnabled = false
 	common.LogConsumeEnabled = true
+	// initCol populates dialect-specific column names (commonKeyCol, ...) so
+	// GetTokenByKey / channel key queries used by the preconsume flow emit
+	// valid SQL. Without this, commonKeyCol stays "" and any query that
+	// interpolates it produces "near "=": syntax error".
+	model.InitColumnNames()
 
 	if err := db.AutoMigrate(
 		&model.Task{},

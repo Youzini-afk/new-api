@@ -509,6 +509,20 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
+	// Phase 10B: short-message extra billing enforce preflight. When the
+	// request is eligible and a rule matches with estimated prompt tokens
+	// below the threshold, reserve the rule's FeeQuota as potential extra
+	// so the response can never succeed while billing fails / overdrafts.
+	// Must run after ModelPriceHelper (so PriceData is populated) and before
+	// PreConsumeBilling. When potential > 0 the preflight is frozen on
+	// relayInfo and ForcePreConsume + RequireCheckedPreConsume are set so
+	// the wallet preconsume uses the atomic checked debit path.
+	potentialExtra := service.PrepareShortMsgExtraBillingPreConsume(relayInfo, tokens)
+	if potentialExtra > 0 {
+		priceData.QuotaToPreConsume += potentialExtra
+		relayInfo.PriceData = priceData
+	}
+
 	if priceData.FreeModel {
 		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
 	} else {

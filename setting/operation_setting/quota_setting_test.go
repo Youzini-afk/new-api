@@ -31,8 +31,10 @@ func TestEvaluateShortMsgExtraBillingShadow_ModeOffNeverApplies(t *testing.T) {
 }
 
 func TestEvaluateShortMsgExtraBillingShadow_UnknownModeFailsClosed(t *testing.T) {
+	// Phase 10B recognizes "enforce" as a valid mode; use a genuinely
+	// unknown value here so the fail-closed branch is still exercised.
 	cfg := ShortMsgExtraBillingConfig{
-		Mode: "enforce", // unsupported => fail closed as off
+		Mode: "bogus", // unsupported => fail closed as off
 		Rules: []ShortMsgExtraBillingRule{
 			{ID: "r1", Model: "gpt-4o-mini", Trigger: ShortMsgExtraBillingTriggerInputTokensBelow, Threshold: 100, FeeQuota: 500},
 		},
@@ -42,6 +44,57 @@ func TestEvaluateShortMsgExtraBillingShadow_UnknownModeFailsClosed(t *testing.T)
 
 	require.Equal(t, ShortMsgExtraBillingModeOff, res.Mode)
 	require.False(t, res.WouldApply)
+	require.False(t, res.HasReportableInfo())
+}
+
+// TestEvaluateShortMsgExtraBilling_EnforceModeRecognized locks Phase 10B:
+// "enforce" is now a first-class mode (no longer fail-closed to off). A
+// matching rule under enforce produces a reportable candidate with
+// Mode="enforce" and the same candidate-decision fields as shadow.
+func TestEvaluateShortMsgExtraBilling_EnforceModeRecognized(t *testing.T) {
+	cfg := ShortMsgExtraBillingConfig{
+		Mode: ShortMsgExtraBillingModeEnforce,
+		Rules: []ShortMsgExtraBillingRule{
+			{ID: "r1", Model: "gpt-4o-mini", Trigger: ShortMsgExtraBillingTriggerInputTokensBelow, Threshold: 100, FeeQuota: 500},
+		},
+	}
+
+	res := EvaluateShortMsgExtraBilling(cfg, "gpt-4o-mini", 50, 10, 60, "chat_completions")
+
+	require.Equal(t, ShortMsgExtraBillingModeEnforce, res.Mode)
+	require.Equal(t, "chat_completions", res.TextMode)
+	require.NotNil(t, res.MatchedRule)
+	require.Equal(t, "r1", res.MatchedRule.ID)
+	require.True(t, res.WouldApply)
+	require.Equal(t, 500, res.CandidateExtraQuota)
+	require.False(t, res.Waived)
+	require.True(t, res.HasReportableInfo())
+
+	// Enforce-mode specific audit fields are left blank by the evaluator;
+	// they are populated by the service layer after the post-response apply
+	// decision.
+	require.False(t, res.Enforced)
+	require.Equal(t, 0, res.ChargedExtraQuota)
+	require.Equal(t, 0, res.FinalQuota)
+	require.Equal(t, "", res.EnforceSkippedReason)
+}
+
+// TestEvaluateShortMsgExtraBilling_EnforceModeEmptyTextModeNoOp ensures
+// enforce mode still respects the non-text boundary: an empty textMode
+// (image / embedding / rerank / audio / ...) is fail-closed no-op even when
+// the rule has an empty ResponseModes list.
+func TestEvaluateShortMsgExtraBilling_EnforceModeEmptyTextModeNoOp(t *testing.T) {
+	cfg := ShortMsgExtraBillingConfig{
+		Mode: ShortMsgExtraBillingModeEnforce,
+		Rules: []ShortMsgExtraBillingRule{
+			{ID: "r1", Model: "gpt-4o-mini", Trigger: ShortMsgExtraBillingTriggerInputTokensBelow, Threshold: 100, FeeQuota: 500},
+		},
+	}
+
+	res := EvaluateShortMsgExtraBilling(cfg, "gpt-4o-mini", 50, 10, 60, "")
+
+	require.Nil(t, res.MatchedRule)
+	require.Equal(t, "non_text_mode", res.Reason)
 	require.False(t, res.HasReportableInfo())
 }
 

@@ -56,11 +56,14 @@ type textQuotaSummary struct {
 	AudioInputPrice          float64
 	ImageGenerationCallPrice float64
 	ToolCallSurchargeQuota   decimal.Decimal
-	// ShortMsgExtraBilling is the Phase 10A shadow-mode evaluation result for
-	// short-message extra billing. It records what *would* be charged and is
-	// surfaced into the consume log `other` map; it never alters summary.Quota.
-	// Nil when the feature is disabled or no rule matched.
-	ShortMsgExtraBilling *operation_setting.ShortMsgExtraBillingShadowResult
+	// ShortMsgExtraBilling is the Phase 10A/10B short-message extra billing
+	// evaluation result. In shadow mode it records what *would* be charged
+	// and never alters summary.Quota. In enforce mode the service layer
+	// additionally applies the frozen preflight fee to summary.Quota when the
+	// post-response conditions hold (see applyShortMsgExtraBillingEnforce).
+	// Nil when the feature is disabled, no rule matched, or the request is
+	// non-billable.
+	ShortMsgExtraBilling *operation_setting.ShortMsgExtraBillingResult
 }
 
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
@@ -312,9 +315,11 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		summary.Quota = 1
 	}
 
-	// Phase 10A: evaluate short-message extra billing in shadow mode. This
-	// only records what *would* be charged; it never alters summary.Quota.
-	summary.ShortMsgExtraBilling = evaluateShortMsgExtraBillingShadow(relayInfo, summary)
+	// Phase 10A/10B: evaluate short-message extra billing for both shadow
+	// and enforce modes. The result only records what *would* be charged;
+	// the enforce-mode charge (when applicable) is applied post-tiered in
+	// PostTextConsumeQuota using the frozen preflight.
+	summary.ShortMsgExtraBilling = evaluateShortMsgExtraBilling(relayInfo, summary)
 
 	return summary
 }
@@ -367,16 +372,20 @@ func shortMsgExtraBillingTextMode(relayInfo *relaycommon.RelayInfo) string {
 	return ""
 }
 
-// evaluateShortMsgExtraBillingShadow runs the short-message extra billing
-// evaluator against the current request. The result is purely informational
-// (shadow mode); the caller must never add its candidate fee to summary.Quota.
-func evaluateShortMsgExtraBillingShadow(relayInfo *relaycommon.RelayInfo, summary textQuotaSummary) *operation_setting.ShortMsgExtraBillingShadowResult {
+// evaluateShortMsgExtraBilling runs the short-message extra billing
+// evaluator against the current request for both shadow and enforce modes.
+// The result is informational: in shadow mode it surfaces what *would* be
+// charged; in enforce mode the actual charge decision is made by
+// applyShortMsgExtraBillingEnforce using the frozen preflight (so config
+// changes mid-request cannot break accounting). Returns nil when the feature
+// is disabled, no rule matched, or the request is non-billable.
+func evaluateShortMsgExtraBilling(relayInfo *relaycommon.RelayInfo, summary textQuotaSummary) *operation_setting.ShortMsgExtraBillingResult {
 	cfg := operation_setting.GetQuotaSetting().ShortMsgExtraBilling
-	if cfg.Mode != operation_setting.ShortMsgExtraBillingModeShadow {
+	if cfg.Mode != operation_setting.ShortMsgExtraBillingModeShadow && cfg.Mode != operation_setting.ShortMsgExtraBillingModeEnforce {
 		return nil
 	}
 	textMode := shortMsgExtraBillingTextMode(relayInfo)
-	result := operation_setting.EvaluateShortMsgExtraBillingShadow(
+	result := operation_setting.EvaluateShortMsgExtraBilling(
 		cfg,
 		summary.ModelName,
 		summary.PromptTokens,
@@ -390,15 +399,22 @@ func evaluateShortMsgExtraBillingShadow(relayInfo *relaycommon.RelayInfo, summar
 	return &result
 }
 
-// injectShortMsgExtraBillingShadow writes the shadow-mode short-message
-// extra billing evaluation into the consume log `other` map. The map field
-// is only added when the result is reportable (shadow mode + matched rule +
-// non-zero usage); otherwise no field is added so unrelated requests keep
-// their log payload clean.
+// injectShortMsgExtraBilling writes the short-message extra billing
+// evaluation (shadow or enforce) into the consume log `other` map. The map
+// field is only added when the result is reportable; otherwise no field is
+// added so unrelated requests keep their log payload clean.
 //
-// This is audit-only in Phase 10A: it does NOT alter summary.Quota and does
-// NOT call SettleBilling with any candidate fee.
-func injectShortMsgExtraBillingShadow(other map[string]interface{}, summary textQuotaSummary) {
+// Shadow mode (Phase 10A): audit-only, never alters summary.Quota.
+// Enforce mode (Phase 10B): records both the candidate decision and the
+// actual charge decision (enforced / charged_extra_quota / final_quota /
+// enforce_skipped_reason).
+//
+// base_quota is derived as summary.Quota - ChargedExtraQuota so it always
+// reflects the pre-extra amount regardless of whether enforce already added
+// the fee. final_quota is summary.Quota (post-extra). would_final_quota is
+// the hypothetical base + candidate (preserved from Phase 10A for shadow
+// observability).
+func injectShortMsgExtraBilling(other map[string]interface{}, summary textQuotaSummary) {
 	if other == nil || summary.ShortMsgExtraBilling == nil {
 		return
 	}
@@ -406,21 +422,231 @@ func injectShortMsgExtraBillingShadow(other map[string]interface{}, summary text
 	if !res.HasReportableInfo() {
 		return
 	}
+	baseQuota := summary.Quota - res.ChargedExtraQuota
 	entry := map[string]interface{}{
-		"mode":                  res.Mode,
-		"would_apply":           res.WouldApply,
-		"trigger":               res.MatchedRule.Trigger,
-		"threshold":             res.MatchedRule.Threshold,
-		"input_tokens":          summary.PromptTokens,
-		"completion_tokens":     summary.CompletionTokens,
-		"base_quota":            summary.Quota,
-		"candidate_extra_quota": res.CandidateExtraQuota,
-		"would_final_quota":     summary.Quota + res.CandidateExtraQuota,
-		"waived":                res.Waived,
-		"waive_reason":          res.WaiveReason,
-		"rule_id":               res.MatchedRule.ID,
+		"mode":                   res.Mode,
+		"rule_id":                res.MatchedRule.ID,
+		"trigger":                res.MatchedRule.Trigger,
+		"threshold":              res.MatchedRule.Threshold,
+		"text_mode":              res.TextMode,
+		"input_tokens":           summary.PromptTokens,
+		"completion_tokens":      summary.CompletionTokens,
+		"total_tokens":           summary.TotalTokens,
+		"base_quota":             baseQuota,
+		"candidate_extra_quota":  res.CandidateExtraQuota,
+		"would_final_quota":      baseQuota + res.CandidateExtraQuota,
+		"would_apply":            res.WouldApply,
+		"waived":                 res.Waived,
+		"waive_reason":           res.WaiveReason,
+		"charged_extra_quota":    res.ChargedExtraQuota,
+		"final_quota":            summary.Quota,
+		"enforced":               res.Enforced,
+		"enforce_skipped_reason": res.EnforceSkippedReason,
 	}
 	other["short_msg_extra_billing"] = entry
+}
+
+// applyShortMsgExtraBillingEnforce applies (or skips) the enforce-mode
+// short-message extra charge to summary.Quota based on the frozen preflight
+// and the actual post-response usage. It must be called after the base quota
+// is calculated and the tiered override is resolved.
+//
+// Phase 10B must-fix contract:
+//
+//  1. When a frozen enforce preflight exists
+//     (relayInfo.ShortMsgExtraBillingPreflight != nil && frozen.Mode ==
+//     "enforce"), the post logic uses the frozen preflight as the
+//     authoritative source for charge/waive/skip semantics. The live global
+//     config is NOT consulted for the enforce decision — even if it has been
+//     changed to off/shadow or the matched rule has been mutated (different
+//     fee/threshold/waive/response_modes, or a different rule sharing the
+//     same ID), the frozen fields govern.
+//
+//  2. When no frozen enforce preflight exists, shadow mode is real-time
+//     audit (no reservation was made, so it is safe to keep the live
+//     evaluator result that calculateTextQuotaSummary already populated).
+//     Off mode and stray enforce-without-preflight cases drop the evaluator
+//     result to keep logs clean.
+//
+// Shadow mode is otherwise a no-op here (Phase 10A behavior is preserved by
+// leaving summary.ShortMsgExtraBilling untouched).
+func applyShortMsgExtraBillingEnforce(
+	relayInfo *relaycommon.RelayInfo,
+	summary *textQuotaSummary,
+	originUsage *dto.Usage,
+	tieredBillingApplied bool,
+) {
+	if summary == nil || relayInfo == nil {
+		return
+	}
+
+	frozen := relayInfo.ShortMsgExtraBillingPreflight
+
+	// Must-fix #1: when a frozen enforce preflight exists, the post logic
+	// must use it as the authoritative source. The live global config is
+	// NOT consulted for the enforce decision; even off/shadow or a mutated
+	// rule cannot change this request's charge/waive/skip semantics.
+	if frozen != nil && frozen.Mode == operation_setting.ShortMsgExtraBillingModeEnforce {
+		applyShortMsgEnforceFromFrozen(summary, originUsage, relayInfo, tieredBillingApplied, frozen)
+		return
+	}
+
+	// No frozen enforce preflight. Shadow mode is real-time audit (no
+	// reservation was made), so it is safe to keep the live evaluator
+	// result that calculateTextQuotaSummary already populated. Off mode
+	// and stray enforce-without-preflight cases drop the evaluator result
+	// so no audit entry is written for a request that did not reserve.
+	if summary.ShortMsgExtraBilling != nil && summary.ShortMsgExtraBilling.Mode == operation_setting.ShortMsgExtraBillingModeShadow {
+		return
+	}
+	summary.ShortMsgExtraBilling = nil
+}
+
+// applyShortMsgEnforceFromFrozen runs the enforce apply using the frozen
+// preflight as the exclusive source of truth for the audit and the charge.
+// The live evaluator result (if any) is discarded so a mid-request config
+// mutation cannot leak into the enforce audit or charge decision.
+func applyShortMsgEnforceFromFrozen(
+	summary *textQuotaSummary,
+	originUsage *dto.Usage,
+	relayInfo *relaycommon.RelayInfo,
+	tieredBillingApplied bool,
+	frozen *relaycommon.ShortMsgExtraBillingPreflight,
+) {
+	// No reservation was actually made at preflight. Per spec, keep logs
+	// clean: drop any evaluator result so no audit entry is written.
+	if frozen.PotentialExtraQuota <= 0 {
+		summary.ShortMsgExtraBilling = nil
+		return
+	}
+
+	// Must-fix #3: always rebuild the audit/charge result from the frozen
+	// preflight. Never use the live evaluator result for enforce audit or
+	// charge decisions — the live rule may have changed fee/threshold/
+	// waive/response_modes even when its ID matches the frozen RuleID.
+	result := &operation_setting.ShortMsgExtraBillingResult{
+		Mode:     operation_setting.ShortMsgExtraBillingModeEnforce,
+		TextMode: frozen.TextMode,
+		MatchedRule: &operation_setting.ShortMsgExtraBillingRule{
+			ID:                            frozen.RuleID,
+			Model:                         frozen.Model,
+			Trigger:                       frozen.Trigger,
+			Threshold:                     frozen.Threshold,
+			FeeQuota:                      frozen.FeeQuota,
+			WaiveWhenCompletionTokensZero: frozen.WaiveWhenCompletionTokensZero,
+		},
+		Reason:              "matched",
+		CandidateExtraQuota: frozen.FeeQuota,
+	}
+	summary.ShortMsgExtraBilling = result
+
+	skipReason := computeShortMsgEnforceSkipReason(frozen, summary, originUsage, relayInfo, tieredBillingApplied)
+	if skipReason == "" {
+		summary.Quota += frozen.FeeQuota
+		result.Enforced = true
+		result.ChargedExtraQuota = frozen.FeeQuota
+		result.FinalQuota = summary.Quota
+		result.EnforceSkippedReason = ""
+		result.WouldApply = true
+		return
+	}
+
+	// Not applied: leave summary.Quota unchanged so SettleBilling refunds
+	// the pre-reserved extra via negative delta.
+	result.Enforced = false
+	result.ChargedExtraQuota = 0
+	result.FinalQuota = summary.Quota
+	result.EnforceSkippedReason = skipReason
+	if skipReason == "completion_tokens_zero" {
+		// Completion-zero waiver: only the extra is waived; base quota is
+		// still charged (Phase 10A waiver semantics, preserved).
+		result.Waived = true
+		result.WaiveReason = "completion_tokens_zero"
+		result.WouldApply = false
+	}
+}
+
+// computeShortMsgEnforceSkipReason returns "" when the enforce charge should
+// apply, or a stable machine-readable skip reason explaining why it should
+// not. Conditions mirror the Phase 10B must-fix spec ordering (most reliable
+// signal first; later conditions assume earlier ones hold).
+func computeShortMsgEnforceSkipReason(
+	frozen *relaycommon.ShortMsgExtraBillingPreflight,
+	summary *textQuotaSummary,
+	originUsage *dto.Usage,
+	relayInfo *relaycommon.RelayInfo,
+	tieredBillingApplied bool,
+) string {
+	// Must-fix #5: explicit frozen model / trigger / mode validation. The
+	// entry gate already ensures frozen.Mode == "enforce"; this is a
+	// defense-in-depth check that documents the requirement and guards
+	// against future callers bypassing the gate.
+	if frozen.Mode != operation_setting.ShortMsgExtraBillingModeEnforce {
+		return "frozen_mode_mismatch"
+	}
+	if summary.ModelName != frozen.Model {
+		return "model_mismatch"
+	}
+	if frozen.Trigger != operation_setting.ShortMsgExtraBillingTriggerInputTokensBelow {
+		return "trigger_mismatch"
+	}
+
+	// Must-fix #4: reliable usage boundary based on the original usage, not
+	// summary.TotalTokens (which is prompt+completion and may diverge from
+	// upstream's reported total). The base quota calculation is unaffected;
+	// this only gates the enforce extra.
+	if originUsage == nil {
+		return "usage_unreliable"
+	}
+	if originUsage.TotalTokens <= 0 {
+		return "total_tokens_zero"
+	}
+
+	if relayInfo.IsStream {
+		return "streaming"
+	}
+
+	// Must-fix #2: post text mode must match the frozen text mode. An empty
+	// postTextMode means the request reached PostTextConsumeQuota via a
+	// non-text path (image / embedding / rerank / audio / ...); a non-empty
+	// but mismatched postTextMode means the relay format changed between
+	// preflight and post (should not happen in practice, but fail-closed).
+	postTextMode := shortMsgExtraBillingTextMode(relayInfo)
+	if postTextMode == "" {
+		return "non_text_mode"
+	}
+	if postTextMode != frozen.TextMode {
+		return "text_mode_mismatch"
+	}
+
+	if tieredBillingApplied || relayInfo.TieredBillingSnapshot != nil {
+		return "tiered_expr"
+	}
+
+	// Use the actual post-response prompt tokens against the FROZEN
+	// threshold (the preflight used a conservative estimate).
+	if summary.PromptTokens >= frozen.Threshold {
+		return "threshold_not_met"
+	}
+
+	if summary.CompletionTokens == 0 && frozen.WaiveWhenCompletionTokensZero {
+		return "completion_tokens_zero"
+	}
+
+	if frozen.FeeQuota > frozen.PotentialExtraQuota {
+		// Safety net: should never trigger because PotentialExtraQuota is
+		// set to FeeQuota at preflight. Surfaces a mis-reservation rather
+		// than silently overdrafting.
+		return "no_preflight"
+	}
+	return ""
+}
+
+// injectShortMsgExtraBillingShadow is a backward-compatible wrapper for
+// injectShortMsgExtraBilling retained so Phase 10A callers/tests keep
+// compiling. The injection is mode-agnostic.
+func injectShortMsgExtraBillingShadow(other map[string]interface{}, summary textQuotaSummary) {
+	injectShortMsgExtraBilling(other, summary)
 }
 
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) {
@@ -449,6 +675,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			summary.Quota = composeTieredTextQuota(relayInfo, summary, tieredQuota, tieredRes)
 		}
 	}
+
+	// Phase 10B: apply (or skip) the enforce-mode short-message extra charge
+	// using the frozen preflight. Shadow mode is a no-op here. Must run after
+	// the tiered override so summary.Quota reflects the base amount the
+	// extra is added to (and so tiered_expr requests are correctly skipped).
+	applyShortMsgExtraBillingEnforce(relayInfo, &summary, originUsage, tieredBillingApplied)
 
 	if summary.WebSearchCallCount > 0 {
 		extraContent = append(extraContent, fmt.Sprintf("Web Search 调用 %d 次，调用花费 %s", summary.WebSearchCallCount, decimal.NewFromFloat(summary.WebSearchPrice).Mul(decimal.NewFromInt(int64(summary.WebSearchCallCount))).Div(decimal.NewFromInt(1000)).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))

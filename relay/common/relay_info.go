@@ -124,8 +124,21 @@ type RelayInfo struct {
 	FinalPreConsumedQuota  int // 最终预消耗的配额
 	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
-	// 必须在提交前锁定全额。
+	// 必须在提交前锁定全额。Phase 10B 起也用于 short-message extra billing
+	// enforce 模式：当预检识别出潜在额外费用时，必须保证该额外额度被实际预扣，
+	// 否则响应可能成功而账务失败 / 透支。
 	ForcePreConsume bool
+	// RequireCheckedPreConsume 为 true 时强制钱包预扣费走原子检查路径
+	// (DecreaseUserQuotaIfEnough)，避免因 BatchUpdate / 信任旁路导致预扣未真正
+	// 入账。Phase 10B short-message extra billing enforce 预检在预留潜在额外
+	// 费用时置位，保证预留额度立即且原子地扣减。
+	RequireCheckedPreConsume bool
+	// ShortMsgExtraBillingPreflight 在 controller/relay.go 的预扣费前被冻结，
+	// 记录 short-message extra billing enforce 模式预检命中的规则快照。Post
+	// 阶段的 enforce 决策必须基于此冻结快照，避免中途配置变更引入账务竞态。
+	// 为 nil 时表示预检未命中（mode 非 enforce / 流式 / 非文本 / tiered_expr /
+	// 免费模型 / 无匹配规则 / 未触发阈值），Post 阶段不收取额外费用。
+	ShortMsgExtraBillingPreflight *ShortMsgExtraBillingPreflight
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 免费模型时为 nil。
 	Billing BillingSettler
