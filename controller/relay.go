@@ -96,6 +96,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			// ran above. The safe payload carries only the governance-
 			// classified status/type/code/param/message + local request id.
 			safe := governance.SanitizeRelayErrorForClient(c, newAPIError)
+			// Record error insight for admin debugging (async, non-blocking).
+			// The original error is classified + fingerprinted; the safe payload
+			// carries the client-facing fields. This is idempotent per-request.
+			governance.RecordRelayErrorInsight(c, newAPIError, safe, "relay_error", "relay_response", 0, 0)
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, safe.OpenAIError)

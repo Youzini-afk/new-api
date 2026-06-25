@@ -1541,6 +1541,8 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		// governance-classified safe message. Billing semantics are
 		// preserved: we still return &usage, nil (not an error).
 		safe := governance.SanitizeRelayErrorForClient(c, newAPIError)
+		// Record error insight for admin debugging (async, non-blocking).
+		governance.RecordRelayErrorInsight(c, newAPIError, safe, "upstream_error", "upstream_response", 0, 0)
 		switch info.RelayFormat {
 		case types.RelayFormatClaude:
 			c.JSON(safe.StatusCode, gin.H{
