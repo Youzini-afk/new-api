@@ -207,14 +207,6 @@ export const channelFormSchema = z
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),
-    // Channel fallback (safe path) — stored in settings JSON
-    fallback_channel_id: z
-      .number()
-      .int('Fallback channel id must be an integer')
-      .min(0, 'Fallback channel id must be 0 or a positive integer')
-      .optional(),
-    fallback_on_error: z.boolean().optional(),
-    fallback_on_empty_reply: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
@@ -296,21 +288,6 @@ export const channelFormSchema = z
         'Vertex AI API Key mode does not support batch creation'
       )
     }
-
-    // Channel fallback: enabling either switch requires a real target id.
-    const fallbackEnabled =
-      data.fallback_on_error === true || data.fallback_on_empty_reply === true
-    if (
-      fallbackEnabled &&
-      (!Number.isInteger(data.fallback_channel_id) ||
-        (data.fallback_channel_id ?? 0) <= 0)
-    ) {
-      addRequiredIssue(
-        ctx,
-        'fallback_channel_id',
-        'A fallback channel id is required when fallback is enabled'
-      )
-    }
   })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -369,10 +346,6 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
   advanced_custom: '',
-  // Channel fallback (safe path)
-  fallback_channel_id: 0,
-  fallback_on_error: false,
-  fallback_on_empty_reply: false,
 }
 
 // ============================================================================
@@ -428,9 +401,6 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
   let advancedCustom = ''
-  let fallbackChannelId = 0
-  let fallbackOnError = false
-  let fallbackOnEmptyReply = false
 
   if (channel.settings) {
     try {
@@ -458,13 +428,6 @@ export function transformChannelToFormDefaults(
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
-      fallbackChannelId =
-        Number.isInteger(parsed.fallback_channel_id) &&
-        parsed.fallback_channel_id > 0
-          ? parsed.fallback_channel_id
-          : 0
-      fallbackOnError = parsed.fallback_on_error === true
-      fallbackOnEmptyReply = parsed.fallback_on_empty_reply === true
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Failed to parse channel settings:', error)
@@ -515,9 +478,6 @@ export function transformChannelToFormDefaults(
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
     advanced_custom: advancedCustom,
-    fallback_channel_id: fallbackChannelId,
-    fallback_on_error: fallbackOnError,
-    fallback_on_empty_reply: fallbackOnEmptyReply,
   }
 }
 
@@ -651,33 +611,6 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     }
   } else if ('advanced_custom' in settingsObj) {
     delete settingsObj.advanced_custom
-  }
-
-  // Channel fallback (safe path). The switches are only meaningful when a
-  // valid target channel id is set, so strip both booleans together when the
-  // id is missing — this avoids leaving backend state with `true` flags but
-  // no fallback target.
-  const fallbackChannelId = Number.isInteger(formData.fallback_channel_id)
-    ? (formData.fallback_channel_id as number)
-    : 0
-  if (fallbackChannelId > 0) {
-    settingsObj.fallback_channel_id = fallbackChannelId
-    if (formData.fallback_on_error === true) {
-      settingsObj.fallback_on_error = true
-    } else if ('fallback_on_error' in settingsObj) {
-      delete settingsObj.fallback_on_error
-    }
-    if (formData.fallback_on_empty_reply === true) {
-      settingsObj.fallback_on_empty_reply = true
-    } else if ('fallback_on_empty_reply' in settingsObj) {
-      delete settingsObj.fallback_on_empty_reply
-    }
-  } else {
-    if ('fallback_channel_id' in settingsObj)
-      delete settingsObj.fallback_channel_id
-    if ('fallback_on_error' in settingsObj) delete settingsObj.fallback_on_error
-    if ('fallback_on_empty_reply' in settingsObj)
-      delete settingsObj.fallback_on_empty_reply
   }
 
   return JSON.stringify(settingsObj)

@@ -482,23 +482,6 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		}
 	}
 
-	// Phase 9A/B safe MVP: per-channel explicit fallback backend validation.
-	// Only static range/self checks here; runtime group/model/path checks run
-	// during relay. Zero values are valid (default off).
-	otherSettings := channel.GetOtherSettings()
-	if otherSettings.RetryTimes < 0 {
-		return fmt.Errorf("retry_times 不能为负数")
-	}
-	if otherSettings.RetryIntervalSeconds < 0 {
-		return fmt.Errorf("retry_interval_seconds 不能为负数")
-	}
-	if otherSettings.FallbackChannelID < 0 {
-		return fmt.Errorf("fallback_channel_id 不能为负数")
-	}
-	if channel.Id > 0 && otherSettings.FallbackChannelID > 0 && otherSettings.FallbackChannelID == channel.Id {
-		return fmt.Errorf("fallback_channel_id 不能指向当前渠道自身")
-	}
-
 	// VertexAI 特殊校验
 	if channel.Type == constant.ChannelTypeVertexAi {
 		if channel.Other == "" {

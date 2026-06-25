@@ -718,18 +718,7 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 	if setting == nil || !setting.Enabled {
 		return
 	}
-	// When a per-channel fallback was applied and the request ultimately
-	// succeeded, the affinity cache must record the fallback channel that
-	// actually served the request — not the middleware-selected initial
-	// channel that was passed in. This takes precedence over SwitchOnSuccess
-	// so an admin cannot accidentally cache a known-bad channel by disabling
-	// SwitchOnSuccess. Plain (no-fallback) requests keep the existing
-	// SwitchOnSuccess behavior unchanged.
-	if c != nil && IsChannelFallbackApplied(c) {
-		if successChannelID := c.GetInt("channel_id"); successChannelID > 0 {
-			channelID = successChannelID
-		}
-	} else if setting.SwitchOnSuccess && c != nil {
+	if setting.SwitchOnSuccess && c != nil {
 		if successChannelID := c.GetInt("channel_id"); successChannelID > 0 {
 			channelID = successChannelID
 		}

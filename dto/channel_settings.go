@@ -48,17 +48,6 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastRemovedModels  []string              `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels      []string              `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
 	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
-
-	// Per-channel explicit fallback backend (Phase 9A/B safe MVP).
-	// All zero values keep behavior closed/off so existing channels are unaffected.
-	// RetryEnabled gates per-channel retry behavior (field reserved for future UI;
-	// the safe MVP only consumes FallbackChannelID/FallbackOnError/FallbackOnEmptyReply).
-	RetryEnabled         bool    `json:"retry_enabled,omitempty"`
-	RetryTimes           int     `json:"retry_times,omitempty"`
-	RetryIntervalSeconds float64 `json:"retry_interval_seconds,omitempty"`
-	FallbackChannelID    int     `json:"fallback_channel_id,omitempty"`
-	FallbackOnError      bool    `json:"fallback_on_error,omitempty"`
-	FallbackOnEmptyReply bool    `json:"fallback_on_empty_reply,omitempty"`
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

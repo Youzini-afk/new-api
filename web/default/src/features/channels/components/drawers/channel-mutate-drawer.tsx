@@ -223,10 +223,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
-    values.upstream_model_update_ignored_models?.trim() ||
-    (values.fallback_channel_id ?? 0) > 0 ||
-    values.fallback_on_error ||
-    values.fallback_on_empty_reply
+    values.upstream_model_update_ignored_models?.trim()
   )
 }
 
@@ -385,25 +382,6 @@ export function ChannelMutateDrawer({
   )
   const currentSettings = form.watch('settings')
   const currentAdvancedCustom = form.watch('advanced_custom')
-  const fallbackChannelId = form.watch('fallback_channel_id')
-  const fallbackOnError = form.watch('fallback_on_error')
-  const fallbackOnEmptyReply = form.watch('fallback_on_empty_reply')
-
-  useEffect(() => {
-    if ((fallbackChannelId ?? 0) > 0) return
-    if (fallbackOnError) {
-      form.setValue('fallback_on_error', false, {
-        shouldDirty: true,
-        shouldValidate: true,
-      })
-    }
-    if (fallbackOnEmptyReply) {
-      form.setValue('fallback_on_empty_reply', false, {
-        shouldDirty: true,
-        shouldValidate: true,
-      })
-    }
-  }, [fallbackChannelId, fallbackOnEmptyReply, fallbackOnError, form])
   const {
     unlocked: doubaoApiEditUnlocked,
     handleClick: handleApiConfigSecretClick,
@@ -2681,144 +2659,6 @@ export function ChannelMutateDrawer({
                             </FormItem>
                           )}
                         />
-                      </div>
-
-                      <div className='flex flex-col gap-4 border-t pt-4'>
-                        <SubHeading
-                          title={t('Channel Fallback')}
-                          icon={<HelpCircle className='h-3.5 w-3.5' />}
-                        />
-                        <Alert>
-                          <AlertDescription>
-                            {t(
-                              'Fallback re-dispatches a non-streaming request to another channel before any response bytes are written. It only applies to safe requests that have not started streaming and does not consume an additional global retry slot. Streaming, image, audio and task requests are not covered.'
-                            )}
-                          </AlertDescription>
-                        </Alert>
-                        <FormField
-                          control={form.control}
-                          name='fallback_channel_id'
-                          render={({ field }) => {
-                            const rawValue = Number.isFinite(field.value)
-                              ? Number(field.value)
-                              : 0
-                            const valueForInput =
-                              rawValue === 0 ? '' : String(rawValue)
-                            const hasTarget = rawValue > 0
-                            const targetsSelf =
-                              isEditing &&
-                              channelId !== null &&
-                              rawValue === channelId
-                            return (
-                              <FormItem>
-                                <FormLabel>{t('Fallback Channel ID')}</FormLabel>
-                                <FormControl>
-                                  <Input
-                                    type='number'
-                                    min={0}
-                                    inputMode='numeric'
-                                    placeholder={t(
-                                      'Enter the target channel id (0 = disabled)'
-                                    )}
-                                    value={valueForInput}
-                                    disabled={isSubmitting}
-                                    onChange={(e) => {
-                                      const next = Number(e.target.value)
-                                      field.onChange(
-                                        Number.isFinite(next) && next > 0
-                                          ? Math.floor(next)
-                                          : 0
-                                      )
-                                    }}
-                                  />
-                                </FormControl>
-                                <FormDescription>
-                                  {hasTarget
-                                    ? t(
-                                        'When the fallback switches below are on, eligible failed requests will be retried on channel #{{id}}. It must serve the same group, model and path.',
-                                        { id: rawValue }
-                                      )
-                                    : t(
-                                        'Set a target channel id to enable fallback. 0 or empty disables it.'
-                                      )}
-                                </FormDescription>
-                                {targetsSelf && (
-                                  <FormDescription className='text-warning'>
-                                    {t(
-                                      'This id matches the current channel. The backend will reject it — pick a different channel.'
-                                    )}
-                                  </FormDescription>
-                                )}
-                                <FormMessage />
-                              </FormItem>
-                            )
-                          }}
-                        />
-                        <div className='divide-border space-y-0 divide-y border-y'>
-                          <FormField
-                            control={form.control}
-                            name='fallback_on_error'
-                            render={({ field }) => (
-                              <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
-                                <div className='space-y-0.5'>
-                                  <FormLabel className='text-sm'>
-                                    {t('Fallback on error')}
-                                  </FormLabel>
-                                  <FormDescription>
-                                    {t(
-                                      'Retry on the fallback channel when this channel returns a retriable error.'
-                                    )}
-                                  </FormDescription>
-                                </div>
-                                <FormControl>
-                                  <Switch
-                                    checked={
-                                      field.value === true &&
-                                      (fallbackChannelId ?? 0) > 0
-                                    }
-                                    disabled={(fallbackChannelId ?? 0) <= 0}
-                                    onCheckedChange={field.onChange}
-                                  />
-                                </FormControl>
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            control={form.control}
-                            name='fallback_on_empty_reply'
-                            render={({ field }) => (
-                              <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
-                                <div className='space-y-0.5'>
-                                  <FormLabel className='text-sm'>
-                                    {t('Fallback on empty reply')}
-                                  </FormLabel>
-                                  <FormDescription>
-                                    {t(
-                                      'Retry on the fallback channel when this channel returns an empty reply.'
-                                    )}
-                                  </FormDescription>
-                                </div>
-                                <FormControl>
-                                  <Switch
-                                    checked={
-                                      field.value === true &&
-                                      (fallbackChannelId ?? 0) > 0
-                                    }
-                                    disabled={(fallbackChannelId ?? 0) <= 0}
-                                    onCheckedChange={field.onChange}
-                                  />
-                                </FormControl>
-                              </FormItem>
-                            )}
-                          />
-                        </div>
-                        {!fallbackOnError && !fallbackOnEmptyReply && (
-                          <FormDescription>
-                            {t(
-                              'No fallback trigger is enabled. Set a channel id and turn on at least one switch above.'
-                            )}
-                          </FormDescription>
-                        )}
                       </div>
 
                       <div className='flex flex-col gap-4 border-t pt-4'>
