@@ -182,8 +182,8 @@ func main() {
 		Path:     "/",
 		MaxAge:   2592000, // 30 days
 		HttpOnly: true,
-		Secure:   false,
-		SameSite: http.SameSiteStrictMode,
+		Secure:   common.GetEnvOrDefaultBool("SESSION_COOKIE_SECURE", false),
+		SameSite: sessionCookieSameSite(),
 	})
 	server.Use(sessions.Sessions("session", store))
 
@@ -208,6 +208,22 @@ func main() {
 	err = server.Run(":" + port)
 	if err != nil {
 		common.FatalLog("failed to start HTTP server: " + err.Error())
+	}
+}
+
+func sessionCookieSameSite() http.SameSite {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SESSION_COOKIE_SAME_SITE"))) {
+	case "strict":
+		return http.SameSiteStrictMode
+	case "none":
+		return http.SameSiteNoneMode
+	case "default":
+		return http.SameSiteDefaultMode
+	case "", "lax":
+		return http.SameSiteLaxMode
+	default:
+		common.SysLog("invalid SESSION_COOKIE_SAME_SITE, using lax")
+		return http.SameSiteLaxMode
 	}
 }
 
