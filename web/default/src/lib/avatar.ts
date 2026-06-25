@@ -43,3 +43,27 @@ export function getUserAvatarStyle(name: string): UserAvatarStyle {
 export function getUserAvatarFallback(name: string): string {
   return name.trim().charAt(0).toUpperCase() || '?'
 }
+
+const backendAvatarPathPattern =
+  /^\/api\/user\/avatar\/[1-9]\d*\/[0-9a-f]{64}\.(?:png|jpg|jpeg)$/i
+
+export function getSafeUserAvatarUrl(value?: string): string | undefined {
+  const avatarUrl = value?.trim()
+  if (!avatarUrl) return undefined
+  if (backendAvatarPathPattern.test(avatarUrl)) return avatarUrl
+
+  if (typeof window === 'undefined') return undefined
+  try {
+    const parsed = new URL(avatarUrl, window.location.origin)
+    const normalized = parsed.pathname
+    if (
+      parsed.origin === window.location.origin &&
+      backendAvatarPathPattern.test(normalized)
+    ) {
+      return normalized
+    }
+  } catch {
+    /* invalid URL: ignore */
+  }
+  return undefined
+}

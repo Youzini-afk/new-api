@@ -316,6 +316,9 @@ func migrateDB() error {
 		&PromptBlockLog{},
 		&UABlockLog{},
 		&SuspiciousIPMark{},
+		// User-uploaded avatars: blob lives in a separate table so the users
+		// row only carries short avatar_url / avatar_source fields.
+		&UserAvatar{},
 	)
 	if err != nil {
 		return err
@@ -374,11 +377,13 @@ func migrateDBFast() error {
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
-		// Phase 5 — log screening / interception records (admin-only, no ban_sync).
+		// Phase 5 — log screening / interception records.
 		{&LogScreeningRecord{}, "LogScreeningRecord"},
 		{&PromptBlockLog{}, "PromptBlockLog"},
 		{&UABlockLog{}, "UABlockLog"},
 		{&SuspiciousIPMark{}, "SuspiciousIPMark"},
+		// User-uploaded avatars (separate blob table).
+		{&UserAvatar{}, "UserAvatar"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

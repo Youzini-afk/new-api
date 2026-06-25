@@ -51,6 +51,8 @@ type User struct {
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
 	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+	AvatarURL        string         `json:"avatar_url" gorm:"column:avatar_url;type:varchar(1024)" validate:"omitempty,max=1024"`
+	AvatarSource     string         `json:"avatar_source" gorm:"column:avatar_source;type:varchar(32)" validate:"omitempty,max=32"`
 	CreatedAt        int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	LastLoginAt      int64          `json:"last_login_at" gorm:"default:0;column:last_login_at"`
 
@@ -344,6 +346,9 @@ func HardDeleteUserById(id int) error {
 		if err := deleteUserOAuthBindingsByUserId(tx, id); err != nil {
 			return err
 		}
+		if err := DeleteUserAvatarWithDB(tx, id); err != nil {
+			return err
+		}
 		return tx.Unscoped().Delete(&User{}, "id = ?", id).Error
 	})
 }
@@ -593,7 +598,12 @@ func (user *User) Delete() error {
 	if user.Id == 0 {
 		return errors.New("id 为空！")
 	}
-	if err := DB.Delete(user).Error; err != nil {
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := DeleteUserAvatarWithDB(tx, user.Id); err != nil {
+			return err
+		}
+		return tx.Delete(user).Error
+	}); err != nil {
 		return err
 	}
 
@@ -607,6 +617,9 @@ func (user *User) HardDelete() error {
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		if err := deleteUserOAuthBindingsByUserId(tx, user.Id); err != nil {
+			return err
+		}
+		if err := DeleteUserAvatarWithDB(tx, user.Id); err != nil {
 			return err
 		}
 		return tx.Unscoped().Delete(user).Error

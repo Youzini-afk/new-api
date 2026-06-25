@@ -64,6 +64,8 @@ func TestMain(m *testing.M) {
 		&PromptBlockLog{},
 		&UABlockLog{},
 		&SuspiciousIPMark{},
+		// User-uploaded avatars (separate blob table).
+		&UserAvatar{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -97,6 +99,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM game_roulette_daily_users")
 		DB.Exec("DELETE FROM game_roulette_spins")
 		DB.Exec("DELETE FROM checkins")
+		DB.Exec("DELETE FROM user_avatars")
 	})
 }
 

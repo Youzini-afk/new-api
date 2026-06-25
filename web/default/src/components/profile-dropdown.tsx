@@ -21,11 +21,15 @@ import { useNavigate } from '@tanstack/react-router'
 import { User, Wallet, LogOut, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/auth-store'
-import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
+import {
+  getSafeUserAvatarUrl,
+  getUserAvatarFallback,
+  getUserAvatarStyle,
+} from '@/lib/avatar'
 import { ROLE } from '@/lib/roles'
 import useDialogState from '@/hooks/use-dialog'
 import { useUserDisplay } from '@/hooks/use-user-display'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -47,6 +51,7 @@ export function ProfileDropdown() {
   const isSuperAdmin = user?.role === ROLE.SUPER_ADMIN
   const avatarName = user?.username || displayName
   const avatarFallback = getUserAvatarFallback(avatarName)
+  const avatarUrl = getSafeUserAvatarUrl(user?.avatar_url)
   const avatarFallbackStyle = useMemo(
     () => getUserAvatarStyle(avatarName),
     [avatarName]
@@ -59,6 +64,12 @@ export function ProfileDropdown() {
           render={<Button variant='ghost' className='relative size-6 p-0' />}
         >
           <Avatar className='size-6'>
+            {avatarUrl && (
+              <AvatarImage
+                src={avatarUrl}
+                alt={t('Avatar of {{name}}', { name: displayName })}
+              />
+            )}
             <AvatarFallback
               className={`${avatarFallbackClassName} text-[11px]`}
               style={avatarFallbackStyle}
@@ -70,6 +81,12 @@ export function ProfileDropdown() {
         <DropdownMenuContent align='end' sideOffset={8} className='w-56'>
           <div className='flex items-center gap-2 px-1.5 py-1.5'>
             <Avatar className='size-8'>
+              {avatarUrl && (
+                <AvatarImage
+                  src={avatarUrl}
+                  alt={t('Avatar of {{name}}', { name: displayName })}
+                />
+              )}
               <AvatarFallback
                 className={`${avatarFallbackClassName} text-xs`}
                 style={avatarFallbackStyle}

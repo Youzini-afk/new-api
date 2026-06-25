@@ -16,11 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useMemo } from 'react'
 import { Link } from '@tanstack/react-router'
 import { X, User, Wallet, LogOut } from 'lucide-react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import type { AuthUser } from '@/stores/auth-store'
+import {
+  getSafeUserAvatarUrl,
+  getUserAvatarFallback,
+  getUserAvatarStyle,
+} from '@/lib/avatar'
 import useDialogState from '@/hooks/use-dialog'
 import { useUserDisplay } from '@/hooks/use-user-display'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -78,7 +84,14 @@ interface MobileUserProfileProps {
 function MobileUserProfile({ user, onNavigate }: MobileUserProfileProps) {
   const { t } = useTranslation()
   const [signOutOpen, setSignOutOpen] = useDialogState()
-  const { displayName, initials, roleLabel } = useUserDisplay(user)
+  const { displayName, roleLabel } = useUserDisplay(user)
+  const avatarName = user?.username || displayName
+  const avatarFallback = getUserAvatarFallback(avatarName)
+  const avatarFallbackStyle = useMemo(
+    () => getUserAvatarStyle(avatarName),
+    [avatarName]
+  )
+  const avatarUrl = getSafeUserAvatarUrl(user?.avatar_url)
 
   if (!user) return null
 
@@ -89,8 +102,18 @@ function MobileUserProfile({ user, onNavigate }: MobileUserProfileProps) {
         {/* User header - simplified */}
         <div className='border-border flex items-center gap-2.5 border-b p-2.5'>
           <Avatar className='size-9'>
-            <AvatarImage src='/avatars/01.png' alt={`@${displayName}`} />
-            <AvatarFallback className='text-xs'>{initials}</AvatarFallback>
+            {avatarUrl && (
+              <AvatarImage
+                src={avatarUrl}
+                alt={t('Avatar of {{name}}', { name: displayName })}
+              />
+            )}
+            <AvatarFallback
+              className='text-xs font-semibold text-white'
+              style={avatarFallbackStyle}
+            >
+              {avatarFallback}
+            </AvatarFallback>
           </Avatar>
           <div className='flex flex-1 flex-col gap-0.5 overflow-hidden'>
             <p className='text-foreground truncate font-medium'>

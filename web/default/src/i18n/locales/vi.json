@@ -5244,6 +5244,22 @@
     "Upload logo image": "Upload logo image",
     "Clear logo": "Clear logo",
     "Logo preview": "Logo preview",
-    "Use a remote image URL, or upload a local PNG/JPEG/WebP/GIF up to {{sourceSize}} MB. Large images are compressed to {{storedSize}} KB before saving.": "Use a remote image URL, or upload a local PNG/JPEG/WebP/GIF up to {{sourceSize}} MB. Large images are compressed to {{storedSize}} KB before saving."
+    "Use a remote image URL, or upload a local PNG/JPEG/WebP/GIF up to {{sourceSize}} MB. Large images are compressed to {{storedSize}} KB before saving.": "Use a remote image URL, or upload a local PNG/JPEG/WebP/GIF up to {{sourceSize}} MB. Large images are compressed to {{storedSize}} KB before saving.",
+    "Avatar updated successfully": "Avatar updated successfully",
+    "Failed to update avatar": "Failed to update avatar",
+    "Avatar removed": "Avatar removed",
+    "Failed to remove avatar": "Failed to remove avatar",
+    "Avatar of {{name}}": "Avatar of {{name}}",
+    "Change avatar": "Change avatar",
+    "Remove avatar": "Remove avatar",
+    "Remove your uploaded avatar? You will revert to the default avatar.": "Remove your uploaded avatar? You will revert to the default avatar.",
+    "Failed to decode image": "Failed to decode image",
+    "Failed to encode image": "Failed to encode image",
+    "Only PNG or JPEG images are supported": "Only PNG or JPEG images are supported",
+    "Image must be 5 MB or smaller": "Image must be 5 MB or smaller",
+    "Image has no usable dimensions": "Image has no usable dimensions",
+    "Image dimensions are too large": "Image dimensions are too large",
+    "Canvas 2D context unavailable": "Canvas 2D context unavailable",
+    "Failed to compress avatar": "Failed to compress avatar"
   }
 }

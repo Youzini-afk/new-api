@@ -93,6 +93,10 @@ export interface UserProfile {
   telegram_id?: string
   /** LinuxDO ID (OAuth) */
   linux_do_id?: string
+  /** Public avatar image URL (served by the backend) */
+  avatar_url?: string
+  /** Where the avatar came from (e.g. "upload", "oauth", "default") */
+  avatar_source?: string
 }
 
 /**

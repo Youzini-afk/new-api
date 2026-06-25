@@ -29,6 +29,16 @@ import type {
 } from './types'
 
 // ============================================================================
+// Avatar Types
+// ============================================================================
+
+/** Response payload returned after uploading or deleting an avatar. */
+export interface AvatarMutationResponse {
+  avatar_url?: string
+  avatar_source?: string
+}
+
+// ============================================================================
 // User Profile APIs
 // ============================================================================
 
@@ -67,6 +77,34 @@ export async function updateUserLanguage(
   language: string
 ): Promise<ApiResponse> {
   const res = await api.put('/api/user/self', { language })
+  return res.data
+}
+
+// ============================================================================
+// User Avatar APIs
+// ============================================================================
+
+/**
+ * Upload (and overwrite) the current user's avatar.
+ * The blob is sent as multipart/form-data under the `avatar` field.
+ */
+export async function uploadUserAvatar(
+  file: Blob
+): Promise<ApiResponse<AvatarMutationResponse>> {
+  const formData = new FormData()
+  formData.append('avatar', file, 'avatar.jpg')
+  // Let the browser/axios set the multipart boundary automatically.
+  const res = await api.post('/api/user/self/avatar', formData)
+  return res.data
+}
+
+/**
+ * Delete the current user's uploaded avatar and fall back to the default.
+ */
+export async function deleteUserAvatar(): Promise<
+  ApiResponse<AvatarMutationResponse>
+> {
+  const res = await api.delete('/api/user/self/avatar')
   return res.data
 }
 

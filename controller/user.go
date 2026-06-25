@@ -146,12 +146,14 @@ func setupLogin(user *model.User, c *gin.Context) {
 		"message": "",
 		"success": true,
 		"data": map[string]any{
-			"id":           user.Id,
-			"username":     user.Username,
-			"display_name": user.DisplayName,
-			"role":         user.Role,
-			"status":       user.Status,
-			"group":        user.Group,
+			"id":            user.Id,
+			"username":      user.Username,
+			"display_name":  user.DisplayName,
+			"role":          user.Role,
+			"status":        user.Status,
+			"group":         user.Group,
+			"avatar_url":    user.AvatarURL,
+			"avatar_source": user.AvatarSource,
 		},
 	})
 }
@@ -478,6 +480,8 @@ func GetSelf(c *gin.Context) {
 		"linux_do_id":               user.LinuxDOId,
 		"setting":                   user.Setting,
 		"stripe_customer":           user.StripeCustomer,
+		"avatar_url":                user.AvatarURL,
+		"avatar_source":             user.AvatarSource,
 		"sidebar_modules":           userSetting.SidebarModules, // 正确提取sidebar_modules字段
 		"permissions":               permissions,                // 新增权限字段
 	}

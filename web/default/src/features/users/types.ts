@@ -51,6 +51,8 @@ export const userSchema = z.object({
   aff_history_quota: z.number().optional(),
   inviter_id: z.number().optional(),
   linux_do_id: z.string().optional(),
+  avatar_url: z.string().optional(),
+  avatar_source: z.string().optional(),
   status: userStatusSchema,
   role: userRoleSchema,
   created_at: z.number().optional(),

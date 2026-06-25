@@ -18,14 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Activity, BarChart3, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatCompactNumber, formatQuota } from '@/lib/format'
 import { getRoleLabel } from '@/lib/roles'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/status-badge'
 import { getDisplayName } from '../lib'
+import { AvatarEditor } from './avatar-editor'
 import type { UserProfile } from '../types'
 
 // ============================================================================
@@ -35,9 +34,14 @@ import type { UserProfile } from '../types'
 interface ProfileHeaderProps {
   profile: UserProfile | null
   loading: boolean
+  onProfileUpdate: () => void
 }
 
-export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
+export function ProfileHeader({
+  profile,
+  loading,
+  onProfileUpdate,
+}: ProfileHeaderProps) {
   const { t } = useTranslation()
 
   if (loading) {
@@ -61,8 +65,8 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
         </CardContent>
         <div className='border-t'>
           <div className='divide-border/60 grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0'>
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className='px-4 py-3.5 sm:px-5 sm:py-4'>
+            {['balance', 'usage', 'requests'].map((key) => (
+              <div key={key} className='px-4 py-3.5 sm:px-5 sm:py-4'>
                 <Skeleton className='h-3.5 w-20' />
                 <Skeleton className='mt-2 h-7 w-28' />
                 <Skeleton className='mt-1.5 h-3.5 w-24' />
@@ -77,9 +81,6 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
   if (!profile) return null
 
   const displayName = getDisplayName(profile)
-  const avatarName = profile.username || displayName
-  const avatarFallback = getUserAvatarFallback(avatarName)
-  const avatarFallbackStyle = getUserAvatarStyle(avatarName)
   const roleLabel = getRoleLabel(profile.role)
   const stats = [
     {
@@ -106,14 +107,7 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
     <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
       <CardContent className='p-3 sm:p-5'>
         <div className='flex items-center gap-3 text-left sm:gap-4'>
-          <Avatar className='ring-background h-12 w-12 rounded-xl text-sm ring-2 sm:h-16 sm:w-16 sm:rounded-2xl sm:text-lg sm:ring-4'>
-            <AvatarFallback
-              className='rounded-xl font-semibold text-white sm:rounded-2xl'
-              style={avatarFallbackStyle}
-            >
-              {avatarFallback}
-            </AvatarFallback>
-          </Avatar>
+          <AvatarEditor profile={profile} onProfileUpdate={onProfileUpdate} />
 
           <div className='min-w-0 flex-1 space-y-1.5 sm:space-y-3'>
             <div className='flex min-w-0 items-center gap-2'>

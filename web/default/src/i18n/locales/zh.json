@@ -5244,6 +5244,22 @@
     "Upload logo image": "上传徽标图片",
     "Clear logo": "清除徽标",
     "Logo preview": "徽标预览",
-    "Use a remote image URL, or upload a local PNG/JPEG/WebP/GIF up to {{sourceSize}} MB. Large images are compressed to {{storedSize}} KB before saving.": "可以使用远程图片 URL，也可以上传不超过 {{sourceSize}} MB 的本地 PNG/JPEG/WebP/GIF。较大的图片会先压缩到 {{storedSize}} KB 再保存。"
+    "Use a remote image URL, or upload a local PNG/JPEG/WebP/GIF up to {{sourceSize}} MB. Large images are compressed to {{storedSize}} KB before saving.": "可以使用远程图片 URL，也可以上传不超过 {{sourceSize}} MB 的本地 PNG/JPEG/WebP/GIF。较大的图片会先压缩到 {{storedSize}} KB 再保存。",
+    "Avatar updated successfully": "头像已更新",
+    "Failed to update avatar": "头像更新失败",
+    "Avatar removed": "头像已移除",
+    "Failed to remove avatar": "头像移除失败",
+    "Avatar of {{name}}": "{{name}} 的头像",
+    "Change avatar": "更换头像",
+    "Remove avatar": "移除头像",
+    "Remove your uploaded avatar? You will revert to the default avatar.": "移除你上传的头像？移除后会恢复为默认头像。",
+    "Failed to decode image": "图片解码失败",
+    "Failed to encode image": "图片编码失败",
+    "Only PNG or JPEG images are supported": "仅支持 PNG 或 JPEG 图片",
+    "Image must be 5 MB or smaller": "图片必须不超过 5 MB",
+    "Image has no usable dimensions": "图片没有可用尺寸",
+    "Image dimensions are too large": "图片尺寸过大",
+    "Canvas 2D context unavailable": "Canvas 2D 上下文不可用",
+    "Failed to compress avatar": "头像压缩失败"
   }
 }

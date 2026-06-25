@@ -76,6 +76,9 @@ func SetApiRouter(router *gin.Engine) {
 			userRoute.POST("/epay/notify", anonymousRequestBodyLimit, controller.EpayNotify)
 			userRoute.GET("/epay/notify", controller.EpayNotify)
 			userRoute.GET("/groups", controller.GetUserGroups)
+			// Public avatar read: URL carries a SHA256 cache-busting token.
+			// Auth-free so <img> tags can fetch it directly.
+			userRoute.GET("/avatar/:id/:hash", controller.GetUserAvatar)
 
 			selfRoute := userRoute.Group("/")
 			selfRoute.Use(middleware.UserAuth())
@@ -86,6 +89,10 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/models", controller.GetUserModels)
 				selfRoute.PUT("/self", controller.UpdateSelf)
 				selfRoute.DELETE("/self", controller.DeleteSelf)
+				// Avatar upload / delete. PUT /api/user/self is NOT used so
+				// avatar_url cannot be written through the generic self update.
+				selfRoute.POST("/self/avatar", middleware.CriticalRateLimit(), middleware.RequestBodyLimit(5*1024*1024), controller.UploadSelfAvatar)
+				selfRoute.DELETE("/self/avatar", controller.DeleteSelfAvatar)
 				selfRoute.GET("/token", controller.GenerateAccessToken)
 				selfRoute.GET("/passkey", controller.PasskeyStatus)
 				selfRoute.POST("/passkey/register/begin", controller.PasskeyRegisterBegin)

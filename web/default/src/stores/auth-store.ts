@@ -44,6 +44,10 @@ export interface AuthUser {
   wechat_id?: string
   telegram_id?: string
   linux_do_id?: string
+  /** Public avatar image URL (served by the backend) */
+  avatar_url?: string
+  /** Where the avatar came from (e.g. "upload", "oauth", "default") */
+  avatar_source?: string
   setting?: Record<string, unknown> | string
   stripe_customer?: string
   sidebar_modules?: string
