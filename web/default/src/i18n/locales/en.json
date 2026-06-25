@@ -5228,6 +5228,11 @@
     "No models match your filters": "No models match your filters",
     "Enabled, priced": "Enabled, priced",
     "Enabled, unpriced": "Enabled, unpriced",
-    "Configured but not enabled": "Configured but not enabled"
+    "Configured but not enabled": "Configured but not enabled",
+    "Shadow (Audit Only)": "Shadow (Audit Only)",
+    "Enforce (Charge)": "Enforce (Charge)",
+    "No extra billing. Rules are preserved but have no effect.": "No extra billing. Rules are preserved but have no effect.",
+    "Records potential extra charges in consume logs without charging users.": "Records potential extra charges in consume logs without charging users.",
+    "Reserves potential extra quota before the upstream call and charges it only if usage still matches.": "Reserves potential extra quota before the upstream call and charges it only if usage still matches."
   }
 }

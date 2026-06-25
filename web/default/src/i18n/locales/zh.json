@@ -5228,6 +5228,11 @@
     "No models match your filters": "没有符合筛选条件的模型",
     "Enabled, priced": "渠道存在且已定价",
     "Enabled, unpriced": "渠道存在但未定价",
-    "Configured but not enabled": "仅有定价配置（渠道未启用）"
+    "Configured but not enabled": "仅有定价配置（渠道未启用）",
+    "Shadow (Audit Only)": "影子模式（仅审计）",
+    "Enforce (Charge)": "强制扣费（实际收费）",
+    "No extra billing. Rules are preserved but have no effect.": "不进行额外计费。规则会保留，但不会生效。",
+    "Records potential extra charges in consume logs without charging users.": "在消费日志中记录可能的额外费用，但不会向用户扣费。",
+    "Reserves potential extra quota before the upstream call and charges it only if usage still matches.": "上游调用前预留可能的额外额度，只有实际用量仍匹配时才扣费。"
   }
 }
