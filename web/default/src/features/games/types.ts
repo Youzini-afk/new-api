@@ -130,3 +130,93 @@ export interface LotteryBuyResult {
   ticket_id: number
   stake_quota: number
 }
+
+// ============================================================================
+// Roulette Type Definitions
+//
+// All response shapes mirror the Go backend DTOs in
+// `model/game_roulette.go` / `controller/roulette.go` and use snake_case
+// keys to match the wire format exactly.
+// ============================================================================
+
+/**
+ * A single outcome on the roulette wheel. `multiplier_bps` is the payout
+ * multiplier in basis points (e.g. `10000` => 1x stake returned on top of
+ * the deducted stake). `weight` is the relative selection weight used by
+ * the backend weighted-random draw.
+ */
+export interface RouletteWheelOutcome {
+  key: string
+  multiplier_bps: number
+  weight: number
+}
+
+/**
+ * A past spin visible under "recent spins".
+ */
+export interface RouletteSpinView {
+  id: number
+  day: number
+  stake_quota: number
+  multiplier_bps: number
+  raw_prize_quota: number
+  prize_quota: number
+  net_quota: number
+  outcome_key: string
+  capped: boolean
+  created_at: number
+}
+
+/**
+ * Full roulette status payload returned by `GET /api/user/game/roulette`.
+ *
+ * When the feature is disabled the backend returns `success` with a minimal
+ * payload where `enabled=false`; gate the UI on that flag.
+ */
+export interface RouletteStatusData {
+  enabled: boolean
+  eligible: boolean
+  ineligible_reason: string
+  current_quota: number
+  daily_spin_count: number
+  daily_spin_limit: number
+  daily_stake_quota: number
+  daily_stake_limit: number
+  stake_min_quota: number
+  stake_max_quota: number
+  max_user_quota: number
+  rtp_bps: number
+  wheel: RouletteWheelOutcome[]
+  my_recent_spins: RouletteSpinView[]
+}
+
+/**
+ * Spin request body. `stake_quota` is in raw quota units (the same units the
+ * backend uses for billing). `idempotency_key` must be stable for retries of
+ * the same click (including through a Turnstile token challenge).
+ */
+export interface RouletteSpinRequest {
+  stake_quota: number
+  idempotency_key: string
+}
+
+/**
+ * Spin response payload returned on success.
+ */
+export interface RouletteSpinResult {
+  spin_id: number
+  day: number
+  stake_quota: number
+  multiplier_bps: number
+  raw_prize_quota: number
+  prize_quota: number
+  net_quota: number
+  outcome_key: string
+  capped: boolean
+  new_quota: number
+  daily_spin_count: number
+  daily_spin_limit: number
+  daily_stake_quota: number
+  daily_stake_limit: number
+  idempotent: boolean
+}

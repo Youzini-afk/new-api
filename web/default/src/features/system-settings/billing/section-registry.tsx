@@ -215,6 +215,19 @@ const BILLING_SECTIONS = [
             settings['game_setting.lottery_system_injected_quota'],
           maxUserQuota: settings['game_setting.lottery_max_user_quota'],
           drawHour: settings['game_setting.lottery_draw_hour'],
+          rouletteEnabled: settings['game_setting.roulette_enabled'],
+          rouletteDailySpinLimit:
+            settings['game_setting.roulette_daily_spin_limit'],
+          rouletteMinStakeQuota:
+            settings['game_setting.roulette_min_stake_quota'],
+          rouletteMaxStakeQuota:
+            settings['game_setting.roulette_max_stake_quota'],
+          rouletteMaxDailyStakeQuota:
+            settings['game_setting.roulette_max_daily_stake_quota'],
+          rouletteMaxUserQuota:
+            settings['game_setting.roulette_max_user_quota'],
+          rouletteRtpBps: settings['game_setting.roulette_rtp_bps'],
+          rouletteWheel: settings['game_setting.roulette_wheel'],
         }}
       />
     ),

@@ -113,6 +113,15 @@ const defaultBillingSettings: BillingSettings = {
   'game_setting.lottery_system_injected_quota': 0,
   'game_setting.lottery_max_user_quota': 0,
   'game_setting.lottery_draw_hour': 22,
+  'game_setting.roulette_enabled': false,
+  'game_setting.roulette_daily_spin_limit': 3,
+  'game_setting.roulette_min_stake_quota': 500000,
+  'game_setting.roulette_max_stake_quota': 5000000,
+  'game_setting.roulette_max_daily_stake_quota': 0,
+  'game_setting.roulette_max_user_quota': 0,
+  'game_setting.roulette_rtp_bps': 9000,
+  'game_setting.roulette_wheel':
+    '[{"key":"lose","multiplier_bps":0,"weight":50},{"key":"x1","multiplier_bps":10000,"weight":20},{"key":"x2","multiplier_bps":20000,"weight":20},{"key":"x3","multiplier_bps":30000,"weight":10}]',
 }
 
 export function BillingSettings() {

@@ -22,6 +22,9 @@ import type {
   LotteryBuyRequest,
   LotteryBuyResult,
   LotteryStatusData,
+  RouletteSpinRequest,
+  RouletteSpinResult,
+  RouletteStatusData,
 } from './types'
 
 /**
@@ -59,6 +62,46 @@ export async function buyLotteryTicket(
         turnstileToken
       )}`
     : '/api/user/game/lottery/buy'
+  const res = await api.post(url, data)
+  return res.data
+}
+
+/**
+ * Get current roulette status for the authenticated user.
+ *
+ * `GET /api/user/game/roulette`
+ *
+ * When the roulette feature is disabled the backend returns `success` with a
+ * minimal payload (`data.enabled=false`); callers should gate the UI on that
+ * flag rather than treating it as an error.
+ */
+export async function getRouletteStatus(): Promise<
+  ApiResponse<RouletteStatusData>
+> {
+  const res = await api.get('/api/user/game/roulette')
+  return res.data
+}
+
+/**
+ * Submit a paid instant roulette spin.
+ *
+ * `POST /api/user/game/roulette/spin`
+ *
+ * The backend deducts `stake_quota` immediately and resolves a weighted
+ * wheel outcome, paying out `prize_quota` after any `max_user_quota` payout
+ * cap. When Turnstile is enabled and the session has not been verified, the
+ * first attempt will fail with a Turnstile challenge message; retry the *same*
+ * request (same idempotency key) with the token supplied as `?turnstile=...`.
+ */
+export async function spinRoulette(
+  data: RouletteSpinRequest,
+  turnstileToken?: string
+): Promise<ApiResponse<RouletteSpinResult>> {
+  const url = turnstileToken
+    ? `/api/user/game/roulette/spin?turnstile=${encodeURIComponent(
+        turnstileToken
+      )}`
+    : '/api/user/game/roulette/spin'
   const res = await api.post(url, data)
   return res.data
 }

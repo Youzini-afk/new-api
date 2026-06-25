@@ -67,3 +67,29 @@ export function tierLabelKey(tier: string): string {
       return tier
   }
 }
+
+// ============================================================================
+// Roulette constants
+// ============================================================================
+
+/**
+ * Maximum allowed RTP in basis points. The backend enforces a hard cap of
+ * 9500 (95%); admin validation mirrors that so operators cannot save an
+ * unsafe value through the form.
+ */
+export const ROULETTE_MAX_RTP_BPS = 9500
+
+/**
+ * Default wheel config used to prefill the admin settings textarea when the
+ * operator has not configured one yet. Uses the same shape/weights as the
+ * backend default but with double-quoted JSON for safe `JSON.parse`.
+ */
+export const ROULETTE_DEFAULT_WHEEL_JSON =
+  '[{"key":"lose","multiplier_bps":0,"weight":50},{"key":"x1","multiplier_bps":10000,"weight":20},{"key":"x2","multiplier_bps":20000,"weight":20},{"key":"x3","multiplier_bps":30000,"weight":10}]'
+
+/**
+ * Quick-pick stake chips shown next to the stake input (raw quota units).
+ * These are conservative placeholders; the real bounds come from the
+ * backend status payload.
+ */
+export const ROULETTE_QUICK_STAKES = [500000, 2500000, 5000000] as const

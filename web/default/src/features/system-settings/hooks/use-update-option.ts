@@ -39,6 +39,7 @@ const STATUS_RELATED_KEYS = [
   // Feature toggles exposed via /api/status (drive profile-page gating).
   'checkin_setting.enabled',
   'game_setting.lottery_enabled',
+  'game_setting.roulette_enabled',
 ]
 
 const LOTTERY_STATUS_RELATED_KEYS = [
@@ -55,6 +56,23 @@ const LOTTERY_STATUS_RELATED_KEYS = [
   'game_setting.lottery_system_injected_quota',
   'game_setting.lottery_max_user_quota',
   'game_setting.lottery_draw_hour',
+]
+
+const ROULETTE_STATUS_RELATED_KEYS = [
+  'QuotaPerUnit',
+  'USDExchangeRate',
+  'DisplayInCurrencyEnabled',
+  'general_setting.quota_display_type',
+  'general_setting.custom_currency_symbol',
+  'general_setting.custom_currency_exchange_rate',
+  'game_setting.roulette_enabled',
+  'game_setting.roulette_daily_spin_limit',
+  'game_setting.roulette_min_stake_quota',
+  'game_setting.roulette_max_stake_quota',
+  'game_setting.roulette_max_daily_stake_quota',
+  'game_setting.roulette_max_user_quota',
+  'game_setting.roulette_rtp_bps',
+  'game_setting.roulette_wheel',
 ]
 
 export function useUpdateOption() {
@@ -79,6 +97,10 @@ export function useUpdateOption() {
 
         if (LOTTERY_STATUS_RELATED_KEYS.includes(variables.key)) {
           queryClient.invalidateQueries({ queryKey: ['lottery-status'] })
+        }
+
+        if (ROULETTE_STATUS_RELATED_KEYS.includes(variables.key)) {
+          queryClient.invalidateQueries({ queryKey: ['roulette-status'] })
         }
 
         toast.success(i18next.t('Setting updated successfully'))

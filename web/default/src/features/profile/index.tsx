@@ -23,7 +23,7 @@ import {
   CardStaggerContainer,
   CardStaggerItem,
 } from '@/components/page-transition'
-import { LotteryCard } from '@/features/games'
+import { LotteryCard, RouletteCard } from '@/features/games'
 import { CheckinCalendarCard } from './components/checkin-calendar-card'
 import { LanguagePreferencesCard } from './components/language-preferences-card'
 import { PasskeyCard } from './components/passkey-card'
@@ -41,6 +41,7 @@ export function Profile() {
 
   const checkinEnabled = status?.checkin_enabled === true
   const lotteryEnabled = status?.lottery_enabled === true
+  const rouletteEnabled = status?.roulette_enabled === true
   const turnstileEnabled = !!(
     status?.turnstile_check && status?.turnstile_site_key
   )
@@ -81,6 +82,13 @@ export function Profile() {
                 {lotteryEnabled && (
                   <LotteryCard
                     lotteryEnabled={lotteryEnabled}
+                    turnstileEnabled={turnstileEnabled}
+                    turnstileSiteKey={turnstileSiteKey}
+                  />
+                )}
+                {rouletteEnabled && (
+                  <RouletteCard
+                    rouletteEnabled={rouletteEnabled}
                     turnstileEnabled={turnstileEnabled}
                     turnstileSiteKey={turnstileSiteKey}
                   />

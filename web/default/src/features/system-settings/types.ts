@@ -338,6 +338,14 @@ export type BillingSettings = {
   'game_setting.lottery_system_injected_quota': number
   'game_setting.lottery_max_user_quota': number
   'game_setting.lottery_draw_hour': number
+  'game_setting.roulette_enabled': boolean
+  'game_setting.roulette_daily_spin_limit': number
+  'game_setting.roulette_min_stake_quota': number
+  'game_setting.roulette_max_stake_quota': number
+  'game_setting.roulette_max_daily_stake_quota': number
+  'game_setting.roulette_max_user_quota': number
+  'game_setting.roulette_rtp_bps': number
+  'game_setting.roulette_wheel': string
 }
 
 export type OperationsSettings = {
