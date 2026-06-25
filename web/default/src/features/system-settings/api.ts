@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import type {
   ConfirmPaymentComplianceResponse,
+  EnabledModelsResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
   SystemOptionsResponse,
@@ -87,6 +88,11 @@ export async function resetModelRatios() {
   const res = await api.post<UpdateOptionResponse>(
     '/api/option/rest_model_ratio'
   )
+  return res.data
+}
+
+export async function getEnabledModels() {
+  const res = await api.get<EnabledModelsResponse>('/api/channel/models_enabled')
   return res.data
 }
 

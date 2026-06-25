@@ -5221,6 +5221,10 @@
     "Unknown prize": "未知奖项",
     "Lottery": "彩票",
     "Ticket": "彩票",
-    "Enabled games appear on the profile page. Keep games disabled until quota limits are reviewed.": "启用的游戏会显示在个人资料页。请在审核额度限制后再启用游戏。"
+    "Enabled games appear on the profile page. Keep games disabled until quota limits are reviewed.": "启用的游戏会显示在个人资料页。请在审核额度限制后再启用游戏。",
+    "Pricing status": "定价状态",
+    "Unpriced models": "未设置价格模型",
+    "Priced models": "已设置价格模型",
+    "No models match your filters": "没有符合筛选条件的模型"
   }
 }

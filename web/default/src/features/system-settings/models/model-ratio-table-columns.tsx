@@ -25,6 +25,7 @@ import { StatusBadge } from '@/components/status-badge'
 import {
   getModeLabel,
   getModeVariant,
+  getModelPricingStatus,
   getPriceDetail,
   getPriceSummary,
   type ModelRow,
@@ -141,6 +142,22 @@ export function buildModelRatioColumns({
       meta: { label: t('Price summary') },
     },
     {
+      id: 'pricingStatus',
+      accessorFn: (row) => getModelPricingStatus(row),
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title={t('Pricing status')} />
+      ),
+      cell: ({ row }) =>
+        row.original.pricingStatus === 'unset'
+          ? t('Unpriced models')
+          : t('Priced models'),
+      filterFn: (row, id, value) =>
+        filterBySelectedValues(row.getValue(id), value),
+      enableHiding: false,
+      enableSorting: false,
+      meta: { label: t('Pricing status') },
+    },
+    {
       id: 'actions',
       header: () => <div>{t('Actions')}</div>,
       cell: ({ row }) => (
@@ -152,13 +169,15 @@ export function buildModelRatioColumns({
           >
             <Pencil />
           </Button>
-          <Button
-            variant='ghost'
-            size='sm'
-            onClick={() => onDelete(row.original.name)}
-          >
-            <Trash2 />
-          </Button>
+          {!row.original.isEnabledOnly && (
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => onDelete(row.original.name)}
+            >
+              <Trash2 />
+            </Button>
+          )}
         </div>
       ),
       enableHiding: false,

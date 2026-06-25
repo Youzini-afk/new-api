@@ -39,6 +39,12 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type EnabledModelsResponse = {
+  success: boolean
+  message: string
+  data?: string[]
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string

@@ -34,6 +34,7 @@ import {
   type VisibilityState,
   type SortingState,
 } from '@tanstack/react-table'
+import { useQuery } from '@tanstack/react-query'
 import { useMediaQuery } from '@/hooks'
 import { Copy, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -49,6 +50,7 @@ import {
 } from '@/components/data-table'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
 import { safeJsonParse } from '../utils/json-parser'
+import { getEnabledModels } from '../api'
 import {
   ModelPricingEditorPanel,
   type ModelPricingEditorPanelHandle,
@@ -57,7 +59,9 @@ import {
 } from './model-pricing-sheet'
 import {
   buildModelSnapshots,
+  getModelPricingStatus,
   getSnapshotSignature,
+  type ModelPricingSnapshot,
   type ModelRow,
 } from './model-pricing-snapshots'
 import { buildModelRatioColumns } from './model-ratio-table-columns'
@@ -93,6 +97,14 @@ export type ModelRatioVisualEditorHandle = {
 }
 
 const STORAGE_KEY = 'model-ratio-column-visibility'
+const DEFAULT_COLUMN_VISIBILITY: VisibilityState = {
+  cacheRatio: false,
+  createCacheRatio: false,
+  imageRatio: false,
+  audioRatio: false,
+  audioCompletionRatio: false,
+  pricingStatus: false,
+}
 
 const ModelRatioVisualEditorComponent = forwardRef<
   ModelRatioVisualEditorHandle,
@@ -144,35 +156,31 @@ const ModelRatioVisualEditorComponent = forwardRef<
       const saved = localStorage.getItem(STORAGE_KEY)
       if (saved) {
         try {
-          return safeJsonParse<VisibilityState>(saved, {
-            fallback: {
-              cacheRatio: false,
-              createCacheRatio: false,
-              imageRatio: false,
-              audioRatio: false,
-              audioCompletionRatio: false,
-            },
+          const parsed = safeJsonParse<VisibilityState>(saved, {
+            fallback: DEFAULT_COLUMN_VISIBILITY,
             silent: true,
           })
+          return { ...DEFAULT_COLUMN_VISIBILITY, ...parsed, pricingStatus: false }
         } catch {
-          return {
-            cacheRatio: false,
-            createCacheRatio: false,
-            imageRatio: false,
-            audioRatio: false,
-            audioCompletionRatio: false,
-          }
+          return DEFAULT_COLUMN_VISIBILITY
         }
       }
-      return {
-        cacheRatio: false,
-        createCacheRatio: false,
-        imageRatio: false,
-        audioRatio: false,
-        audioCompletionRatio: false,
-      }
+      return DEFAULT_COLUMN_VISIBILITY
     }
   )
+
+  const enabledModelsQuery = useQuery({
+    queryKey: ['system-settings', 'enabled-models'],
+    queryFn: getEnabledModels,
+    staleTime: 60_000,
+  })
+
+  const enabledModelNames = useMemo(() => {
+    const data = enabledModelsQuery.data?.success
+      ? (enabledModelsQuery.data.data ?? [])
+      : []
+    return Array.from(new Set(data.filter(Boolean)))
+  }, [enabledModelsQuery.data])
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(columnVisibility))
@@ -206,23 +214,38 @@ const ModelRatioVisualEditorComponent = forwardRef<
 
     const savedByName = new Map(savedRows.map((row) => [row.name, row]))
     const draftByName = new Map(draftRows.map((row) => [row.name, row]))
-    const modelNames = new Set([...savedByName.keys(), ...draftByName.keys()])
+    const modelNames = new Set([
+      ...enabledModelNames,
+      ...savedByName.keys(),
+      ...draftByName.keys(),
+    ])
 
     return Array.from(modelNames)
       .map((name) => {
         const saved = savedByName.get(name)
         const draft = draftByName.get(name)
-        const displayed = saved ?? draft
+        const displayed =
+          saved ??
+          draft ??
+          ({
+            name,
+            price: '',
+            ratio: '',
+            billingMode: 'per-token',
+            hasConflict: false,
+          } satisfies ModelPricingSnapshot)
         const savedSignature = getSnapshotSignature(saved)
         const draftSignature = getSnapshotSignature(draft)
 
         return {
-          ...displayed!,
+          ...displayed,
           saved,
           draft,
           isDraftChanged: savedSignature !== draftSignature,
           isDraftDeleted: Boolean(saved && !draft),
           isDraftNew: Boolean(!saved && draft),
+          isEnabledOnly: Boolean(!saved && !draft),
+          pricingStatus: getModelPricingStatus(displayed),
         }
       })
       .filter((row) => !row.isDraftDeleted)
@@ -238,6 +261,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedAudioCompletionRatio,
     savedBillingMode,
     savedBillingExpr,
+    enabledModelNames,
     modelPrice,
     modelRatio,
     cacheRatio,
@@ -267,6 +291,18 @@ const ModelRatioVisualEditorComponent = forwardRef<
           'per-request': 0,
           tiered_expr: 0,
         } as Record<'per-token' | 'per-request' | 'tiered_expr', number>
+      ),
+    [models]
+  )
+
+  const pricingStatusCounts = useMemo(
+    () =>
+      models.reduce(
+        (acc, model) => {
+          acc[model.pricingStatus] += 1
+          return acc
+        },
+        { priced: 0, unset: 0 } as Record<'priced' | 'unset', number>
       ),
     [models]
   )
@@ -624,6 +660,9 @@ const ModelRatioVisualEditorComponent = forwardRef<
   )
 
   const hasRows = table.getRowModel().rows.length > 0
+  const hasTableFilters =
+    Boolean(table.getState().globalFilter) ||
+    table.getState().columnFilters.length > 0
 
   return (
     <div className='flex flex-col gap-4'>
@@ -654,6 +693,22 @@ const ModelRatioVisualEditorComponent = forwardRef<
                   },
                 ],
               },
+              {
+                columnId: 'pricingStatus',
+                title: t('Pricing status'),
+                options: [
+                  {
+                    label: 'Unpriced models',
+                    value: 'unset',
+                    count: pricingStatusCounts.unset,
+                  },
+                  {
+                    label: 'Priced models',
+                    value: 'priced',
+                    count: pricingStatusCounts.priced,
+                  },
+                ],
+              },
             ]}
             preActions={
               <Button onClick={handleAdd}>
@@ -665,8 +720,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
 
           {!hasRows ? (
             <div className='text-muted-foreground rounded-lg border border-dashed p-8 text-center'>
-              {table.getState().globalFilter
-                ? t('No models match your search')
+              {hasTableFilters
+                ? t('No models match your filters')
                 : t('No models configured. Use Add model to get started.')}
             </div>
           ) : (
