@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -48,6 +49,11 @@ var (
 	ErrTopUpNotFound         = errors.New("topup not found")
 	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
 	ErrPaidMoneyMismatch     = errors.New("paid money mismatch")
+	// Stripe-specific validation errors. The webhook amount_total cents
+	// check covers paid-money mismatch via ErrPaidMoneyMismatch; these cover
+	// the remaining Stripe checkout fields the snapshot must agree on.
+	ErrStripeCurrencyMismatch = errors.New("stripe currency mismatch")
+	ErrStripeCustomerMismatch = errors.New("stripe customer mismatch")
 )
 
 func (topUp *TopUp) Insert() error {
@@ -351,17 +357,13 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			return errors.New("订单状态不是待支付，无法补单")
 		}
 
-		// 计算应充值额度：
-		// - Stripe 订单：Money 代表经分组倍率换算后的美元数量，直接 * QuotaPerUnit
-		// - 其他订单（如易支付）：Amount 为美元数量，* QuotaPerUnit
-		if topUp.PaymentProvider == PaymentProviderStripe {
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(dQuotaPerUnit).IntPart())
-		} else {
-			dAmount := decimal.NewFromInt(topUp.Amount)
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
-		}
+		// 计算应充值额度：统一使用 Amount * QuotaPerUnit。Stripe 钱包充值
+		// 的 TopUp.Amount 已是归一化后的充值金额单位（见 controller 的
+		// quoteStripeTopUp），Money 仅作为支付金额快照供 webhook 校验，不再
+		// 参与额度计算。其他订单（如易支付）Amount 本就是美元数量。
+		dAmount := decimal.NewFromInt(topUp.Amount)
+		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+		quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
 		if quotaToAdd <= 0 {
 			return errors.New("无效的充值额度")
 		}
@@ -756,6 +758,253 @@ func validateEpayCallbackMatches(topUp *TopUp, paymentMethod string, paidMoney s
 		return fmt.Errorf("invalid paid money %q: %w", paidMoney, err)
 	}
 	if !actualMoney.Equal(expectedMoney) {
+		return ErrPaidMoneyMismatch
+	}
+	return nil
+}
+
+// StripeTopUpCompletion captures the result of a Stripe wallet topup
+// completion. Completed is true only when this call transitioned the order
+// from pending to success; a duplicate success notify whose verified payload
+// still matches the stored snapshot returns Completed=false with a nil error
+// so the webhook can ack 200 without re-processing, while a duplicate whose
+// amount/customer/currency differs returns the corresponding mismatch error.
+type StripeTopUpCompletion struct {
+	Completed     bool
+	UserId        int
+	QuotaToAdd    int
+	PayMoney      float64
+	PaymentMethod string
+	CustomerID    string
+}
+
+// CompleteStripeTopUp finalizes a pending Stripe wallet topup inside a single
+// DB transaction. It locks the topup row, then validates the verified webhook
+// payload against the stored snapshot — provider, checkout status, payment
+// status, mode, currency, amount_total cents, and customer — before
+// atomically transitioning pending -> success via a conditional UPDATE (CAS)
+// and incrementing user quota / setting stripe_customer in the same
+// transaction.
+//
+// The conditional UPDATE — not the row lock — is the authoritative concurrency
+// guard: exactly one completion's `UPDATE ... WHERE status=pending` matches and
+// credits quota; the loser sees RowsAffected=0 and resolves as an idempotent
+// duplicate. An already-success order returns Completed=false with a nil error
+// when the verified payload still matches, or a mismatch error otherwise. The
+// caller must ack 200 to Stripe only after this returns nil.
+//
+// Quota to add is `TopUp.Amount * common.QuotaPerUnit` (Amount is the
+// normalized recharge unit captured at creation, NOT Money). Money is the
+// expected paid money snapshot in USD and is only used for the amount_total
+// cents check.
+func CompleteStripeTopUp(tradeNo string, customerID string, amountTotal string, currency string, checkoutStatus string, paymentStatus string, mode string, callerIp string) (*StripeTopUpCompletion, error) {
+	if tradeNo == "" {
+		return nil, errors.New("未提供支付单号")
+	}
+
+	completion := &StripeTopUpCompletion{}
+	topUp := &TopUp{}
+
+	refCol := "`trade_no`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		refCol = `"trade_no"`
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+
+		if topUp.PaymentProvider != PaymentProviderStripe {
+			return ErrPaymentMethodMismatch
+		}
+
+		// Read the user best-effort for the customer-match check. Used by the
+		// already-success duplicate and pending transition validation paths; a
+		// missing user on the pending path is caught later by the quota-update
+		// RowsAffected==1 guard (order stays pending).
+		storedUser, userFound := loadStripeUserForTx(tx, topUp.UserId)
+
+		// Idempotent duplicate: an already-success order must not re-add quota,
+		// flip status, or write a second log. The verified payload is still
+		// cross-checked against the stored snapshot so a mismatched duplicate
+		// surfaces as an error rather than being silently swallowed.
+		if topUp.Status == common.TopUpStatusSuccess {
+			if err := validateStripeCallbackMatches(topUp, storedUser, customerID, amountTotal, currency, checkoutStatus, paymentStatus, mode); err != nil {
+				return err
+			}
+			completion.Completed = false
+			completion.UserId = topUp.UserId
+			completion.PaymentMethod = topUp.PaymentMethod
+			completion.PayMoney = topUp.Money
+			completion.CustomerID = strings.TrimSpace(customerID)
+			return nil
+		}
+
+		// Non-pending (failed/expired) orders cannot be completed; do not
+		// validate the payload (mirrors CompleteEpayTopUp) — the status itself
+		// is the rejection reason.
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+
+		// Pending transition: validate the verified payload against the stored
+		// snapshot before attempting the CAS.
+		if err := validateStripeCallbackMatches(topUp, storedUser, customerID, amountTotal, currency, checkoutStatus, paymentStatus, mode); err != nil {
+			return err
+		}
+
+		dAmount := decimal.NewFromInt(topUp.Amount)
+		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+		quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
+		if quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
+
+		// CAS transition: flip pending -> success only if the row is still
+		// pending. This is the authoritative concurrency guard — the row lock
+		// is best-effort (no-op on SQLite). A concurrent winner leaves
+		// status=success, so this UPDATE affects 0 rows and we fall through to
+		// duplicate handling below.
+		result := tx.Model(&TopUp{}).Where("id = ? AND status = ?", topUp.Id, common.TopUpStatusPending).Updates(map[string]interface{}{
+			"status":        common.TopUpStatusSuccess,
+			"complete_time": common.GetTimestamp(),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			// Lost the race to a concurrent completion. Re-read to decide: an
+			// already-success order is an idempotent duplicate (after re-checking
+			// the payload); any other status is a status error.
+			refreshed := &TopUp{}
+			if err := tx.Where("id = ?", topUp.Id).First(refreshed).Error; err != nil {
+				return ErrTopUpNotFound
+			}
+			if refreshed.Status == common.TopUpStatusSuccess {
+				// The winner may have just set stripe_customer; re-read the user
+				// so the customer-match check reflects the committed state.
+				refreshedUser, _ := loadStripeUserForTx(tx, refreshed.UserId)
+				if err := validateStripeCallbackMatches(refreshed, refreshedUser, customerID, amountTotal, currency, checkoutStatus, paymentStatus, mode); err != nil {
+					return err
+				}
+				completion.Completed = false
+				completion.UserId = refreshed.UserId
+				completion.PaymentMethod = refreshed.PaymentMethod
+				completion.PayMoney = refreshed.Money
+				completion.CustomerID = strings.TrimSpace(customerID)
+				return nil
+			}
+			return ErrTopUpStatusInvalid
+		}
+
+		// Increment user quota and set stripe_customer in the same
+		// transaction; require exactly one row affected so a missing user
+		// rolls back the whole completion (order stays pending) instead of
+		// leaving an ack'd-but-uncredited order. stripe_customer is only set
+		// when the user does not already have one — validateStripeCallbackMatches
+		// already rejected a mismatch against an existing StripeCustomer.
+		updateFields := map[string]interface{}{
+			"quota": gorm.Expr("quota + ?", quotaToAdd),
+		}
+		if userFound && strings.TrimSpace(storedUser.StripeCustomer) == "" {
+			updateFields["stripe_customer"] = strings.TrimSpace(customerID)
+		}
+		userResult := tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updateFields)
+		if userResult.Error != nil {
+			return userResult.Error
+		}
+		if userResult.RowsAffected != 1 {
+			return fmt.Errorf("user quota update affected %d rows, expected 1 (user_id=%d)", userResult.RowsAffected, topUp.UserId)
+		}
+
+		completion.Completed = true
+		completion.UserId = topUp.UserId
+		completion.QuotaToAdd = quotaToAdd
+		completion.PayMoney = topUp.Money
+		completion.PaymentMethod = topUp.PaymentMethod
+		completion.CustomerID = strings.TrimSpace(customerID)
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Record log outside the transaction to avoid coupling log failures with
+	// the completion commit; only on an actual pending->success transition.
+	if completion.Completed {
+		RecordTopupLog(completion.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.FormatQuota(completion.QuotaToAdd), completion.PayMoney), callerIp, completion.PaymentMethod, PaymentProviderStripe)
+	}
+
+	return completion, nil
+}
+
+// loadStripeUserForTx reads the user row inside the completion transaction so
+// the customer-match check reflects the in-flight state. Returns (nil, false)
+// when the user is missing (or any read error) instead of erroring, so the
+// caller can route the missing-user case through the RowsAffected==1
+// quota-update guard.
+func loadStripeUserForTx(tx *gorm.DB, userID int) (*User, bool) {
+	if tx == nil || userID == 0 {
+		return nil, false
+	}
+	user := &User{}
+	if err := tx.Where("id = ?", userID).First(user).Error; err != nil {
+		return nil, false
+	}
+	return user, true
+}
+
+// validateStripeCallbackMatches cross-checks the verified webhook payload
+// against the stored snapshot. Used for both the pending transition and the
+// already-success duplicate path so a mismatched duplicate is reported rather
+// than silently ack'd. Checks:
+//   - checkout status == "complete"
+//   - payment status == "paid"
+//   - mode == "payment" (topup branch; empty mode is rejected)
+//   - currency == "USD" (uppercase trim; no multi-currency schema)
+//   - webhook customer not empty, and if the user already has a StripeCustomer
+//     it must equal the webhook customer
+//   - amount_total (Stripe minor units) == TopUp.Money rounded to cents
+//
+// Paid-money mismatch surfaces as ErrPaidMoneyMismatch (same sentinel as Epay);
+// currency and customer mismatches surface as the Stripe-specific sentinels so
+// callers and tests can tell them apart.
+func validateStripeCallbackMatches(topUp *TopUp, user *User, customerID string, amountTotal string, currency string, checkoutStatus string, paymentStatus string, mode string) error {
+	if checkoutStatus != "complete" {
+		return fmt.Errorf("stripe checkout status %q is not complete", checkoutStatus)
+	}
+	if paymentStatus != "paid" {
+		return fmt.Errorf("stripe payment status %q is not paid", paymentStatus)
+	}
+	if mode != "payment" {
+		return fmt.Errorf("stripe checkout mode %q is not payment", mode)
+	}
+	cur := strings.ToUpper(strings.TrimSpace(currency))
+	if cur != "USD" {
+		return ErrStripeCurrencyMismatch
+	}
+	cid := strings.TrimSpace(customerID)
+	if cid == "" {
+		return ErrStripeCustomerMismatch
+	}
+	if user != nil {
+		stored := strings.TrimSpace(user.StripeCustomer)
+		if stored != "" && stored != cid {
+			return ErrStripeCustomerMismatch
+		}
+	}
+	// amount_total is Stripe minor units (cents). The snapshot TopUp.Money is
+	// the expected paid money in USD, so cents = round(Money * 100). Decimal
+	// equality tolerates float drift; a mismatched amount surfaces as
+	// ErrPaidMoneyMismatch so the order stays pending for reconciliation.
+	expectedCents := decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromInt(100)).Round(0)
+	actualCents, err := decimal.NewFromString(amountTotal)
+	if err != nil {
+		return fmt.Errorf("invalid amount_total %q: %w", amountTotal, err)
+	}
+	if !actualCents.Equal(expectedCents) {
 		return ErrPaidMoneyMismatch
 	}
 	return nil
