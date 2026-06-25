@@ -5260,6 +5260,23 @@
     "Image has no usable dimensions": "Image has no usable dimensions",
     "Image dimensions are too large": "Image dimensions are too large",
     "Canvas 2D context unavailable": "Canvas 2D context unavailable",
-    "Failed to compress avatar": "Failed to compress avatar"
+    "Failed to compress avatar": "Failed to compress avatar",
+    "Sync Discord Avatar": "Sync Discord Avatar",
+    "Replace with Discord Avatar": "Replace with Discord Avatar",
+    "Re-sync Discord Avatar": "Re-sync Discord Avatar",
+    "Discord avatar synced successfully": "Discord avatar synced successfully",
+    "Please bind your Discord account first": "Please bind your Discord account first",
+    "No Discord avatar found": "No Discord avatar found",
+    "Failed to download Discord avatar": "Failed to download Discord avatar",
+    "Invalid Discord avatar format": "Invalid Discord avatar format",
+    "Discord avatar is already up to date": "Discord avatar is already up to date",
+    "Discord avatar sync skipped": "Discord avatar sync skipped",
+    "Failed to sync Discord avatar": "Failed to sync Discord avatar",
+    "Overwrite Uploaded Avatar?": "Overwrite Uploaded Avatar?",
+    "You currently have a custom uploaded avatar. Syncing from Discord will overwrite it. Do you want to continue?": "You currently have a custom uploaded avatar. Syncing from Discord will overwrite it. Do you want to continue?",
+    "Overwrite": "Overwrite",
+    "Discord profile synced {{time}}": "Discord profile synced {{time}}",
+    "Avatar source": "Avatar source",
+    "Uploaded": "Uploaded"
   }
 }

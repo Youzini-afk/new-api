@@ -5260,6 +5260,23 @@
     "Image has no usable dimensions": "图片没有可用尺寸",
     "Image dimensions are too large": "图片尺寸过大",
     "Canvas 2D context unavailable": "Canvas 2D 上下文不可用",
-    "Failed to compress avatar": "头像压缩失败"
+    "Failed to compress avatar": "头像压缩失败",
+    "Sync Discord Avatar": "同步 Discord 头像",
+    "Replace with Discord Avatar": "替换为 Discord 头像",
+    "Re-sync Discord Avatar": "重新同步 Discord 头像",
+    "Discord avatar synced successfully": "Discord 头像同步成功",
+    "Please bind your Discord account first": "请先绑定你的 Discord 账号",
+    "No Discord avatar found": "未找到 Discord 头像",
+    "Failed to download Discord avatar": "下载 Discord 头像失败",
+    "Invalid Discord avatar format": "Discord 头像格式无效",
+    "Discord avatar is already up to date": "Discord 头像已是最新",
+    "Discord avatar sync skipped": "Discord 头像同步已跳过",
+    "Failed to sync Discord avatar": "同步 Discord 头像失败",
+    "Overwrite Uploaded Avatar?": "覆盖已上传的头像？",
+    "You currently have a custom uploaded avatar. Syncing from Discord will overwrite it. Do you want to continue?": "你当前使用了自定义上传头像。从 Discord 同步会覆盖该头像，是否继续？",
+    "Overwrite": "覆盖",
+    "Discord profile synced {{time}}": "Discord 资料已同步：{{time}}",
+    "Avatar source": "头像来源",
+    "Uploaded": "已上传"
   }
 }

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+
 import type {
   ApiResponse,
   UserProfile,
@@ -105,6 +106,26 @@ export async function deleteUserAvatar(): Promise<
   ApiResponse<AvatarMutationResponse>
 > {
   const res = await api.delete('/api/user/self/avatar')
+  return res.data
+}
+
+/**
+ * Import/Sync Discord avatar.
+ */
+export async function syncDiscordAvatar(force: boolean = false): Promise<
+  ApiResponse<
+    AvatarMutationResponse & {
+      synced?: boolean
+      skipped?: boolean
+      reason?: string
+    }
+  >
+> {
+  const res = await api.post(
+    '/api/user/self/avatar/discord',
+    { force },
+    { skipBusinessError: true }
+  )
   return res.data
 }
 

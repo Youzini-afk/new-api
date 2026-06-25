@@ -95,8 +95,16 @@ export interface UserProfile {
   linux_do_id?: string
   /** Public avatar image URL (served by the backend) */
   avatar_url?: string
-  /** Where the avatar came from (e.g. "upload", "oauth", "default") */
+  /** Where the avatar came from ("uploaded", "discord", or empty/default) */
   avatar_source?: string
+  /** Discord global name (OAuth) */
+  discord_global_name?: string
+  /** Discord username (OAuth) */
+  discord_username?: string
+  /** Discord discriminator (OAuth) */
+  discord_discriminator?: string
+  /** Discord profile last synced at (OAuth) */
+  discord_profile_synced_at?: number
 }
 
 /**
