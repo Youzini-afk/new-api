@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -55,6 +56,11 @@ type textQuotaSummary struct {
 	AudioInputPrice          float64
 	ImageGenerationCallPrice float64
 	ToolCallSurchargeQuota   decimal.Decimal
+	// ShortMsgExtraBilling is the Phase 10A shadow-mode evaluation result for
+	// short-message extra billing. It records what *would* be charged and is
+	// surfaced into the consume log `other` map; it never alters summary.Quota.
+	// Nil when the feature is disabled or no rule matched.
+	ShortMsgExtraBilling *operation_setting.ShortMsgExtraBillingShadowResult
 }
 
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
@@ -306,6 +312,10 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		summary.Quota = 1
 	}
 
+	// Phase 10A: evaluate short-message extra billing in shadow mode. This
+	// only records what *would* be charged; it never alters summary.Quota.
+	summary.ShortMsgExtraBilling = evaluateShortMsgExtraBillingShadow(relayInfo, summary)
+
 	return summary
 }
 
@@ -317,6 +327,100 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 		return "anthropic"
 	}
 	return "openai"
+}
+
+// shortMsgExtraBillingTextMode maps the current request's relay format/mode
+// to a stable internal text-mode label used by short-message extra billing
+// rules' response_modes filter.
+//
+// Returns "" for non-text paths (image, embedding, rerank, audio, realtime,
+// task, mj_proxy) and for OpenAI-format sub-modes that are not chat/legacy
+// completions. The evaluator treats an empty textMode as fail-closed no-op
+// (Reason "non_text_mode") regardless of rule ResponseModes, so those paths
+// never produce a shadow audit record even when PostTextConsumeQuota is
+// reached via image / embedding / rerank / audio fallback callers.
+func shortMsgExtraBillingTextMode(relayInfo *relaycommon.RelayInfo) string {
+	if relayInfo == nil {
+		return ""
+	}
+	format := relayInfo.GetFinalRequestRelayFormat()
+	switch format {
+	case types.RelayFormatOpenAI:
+		// Distinguish chat completions from legacy /v1/completions. Other
+		// OpenAI-format text sub-modes are treated conservatively as unknown.
+		switch relayInfo.RelayMode {
+		case relayconstant.RelayModeChatCompletions:
+			return "chat_completions"
+		case relayconstant.RelayModeCompletions:
+			return "completions"
+		}
+		return ""
+	case types.RelayFormatOpenAIResponses:
+		return "responses"
+	case types.RelayFormatOpenAIResponsesCompaction:
+		return "responses_compact"
+	case types.RelayFormatClaude:
+		return "claude"
+	case types.RelayFormatGemini:
+		return "gemini"
+	}
+	return ""
+}
+
+// evaluateShortMsgExtraBillingShadow runs the short-message extra billing
+// evaluator against the current request. The result is purely informational
+// (shadow mode); the caller must never add its candidate fee to summary.Quota.
+func evaluateShortMsgExtraBillingShadow(relayInfo *relaycommon.RelayInfo, summary textQuotaSummary) *operation_setting.ShortMsgExtraBillingShadowResult {
+	cfg := operation_setting.GetQuotaSetting().ShortMsgExtraBilling
+	if cfg.Mode != operation_setting.ShortMsgExtraBillingModeShadow {
+		return nil
+	}
+	textMode := shortMsgExtraBillingTextMode(relayInfo)
+	result := operation_setting.EvaluateShortMsgExtraBillingShadow(
+		cfg,
+		summary.ModelName,
+		summary.PromptTokens,
+		summary.CompletionTokens,
+		summary.TotalTokens,
+		textMode,
+	)
+	if !result.HasReportableInfo() {
+		return nil
+	}
+	return &result
+}
+
+// injectShortMsgExtraBillingShadow writes the shadow-mode short-message
+// extra billing evaluation into the consume log `other` map. The map field
+// is only added when the result is reportable (shadow mode + matched rule +
+// non-zero usage); otherwise no field is added so unrelated requests keep
+// their log payload clean.
+//
+// This is audit-only in Phase 10A: it does NOT alter summary.Quota and does
+// NOT call SettleBilling with any candidate fee.
+func injectShortMsgExtraBillingShadow(other map[string]interface{}, summary textQuotaSummary) {
+	if other == nil || summary.ShortMsgExtraBilling == nil {
+		return
+	}
+	res := summary.ShortMsgExtraBilling
+	if !res.HasReportableInfo() {
+		return
+	}
+	entry := map[string]interface{}{
+		"mode":                  res.Mode,
+		"would_apply":           res.WouldApply,
+		"trigger":               res.MatchedRule.Trigger,
+		"threshold":             res.MatchedRule.Threshold,
+		"input_tokens":          summary.PromptTokens,
+		"completion_tokens":     summary.CompletionTokens,
+		"base_quota":            summary.Quota,
+		"candidate_extra_quota": res.CandidateExtraQuota,
+		"would_final_quota":     summary.Quota + res.CandidateExtraQuota,
+		"waived":                res.Waived,
+		"waive_reason":          res.WaiveReason,
+		"rule_id":               res.MatchedRule.ID,
+	}
+	other["short_msg_extra_billing"] = entry
 }
 
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) {
@@ -458,6 +562,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if tieredBillingApplied {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
+	injectShortMsgExtraBillingShadow(other, summary)
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
