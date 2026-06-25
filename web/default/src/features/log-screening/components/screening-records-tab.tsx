@@ -272,6 +272,12 @@ export function ScreeningRecordsTab() {
     )
   }
 
+  const expiredLabel =
+    TRISTATE_OPTIONS.find((opt) => opt.value === filter.expired)?.labelKey ??
+    filter.expired
+  const runKindLabel =
+    SCREENING_KINDS.find((k) => k.value === runKind)?.labelKey ?? runKind
+
   return (
     <div className='flex h-full min-h-0 flex-col gap-4'>
       <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
@@ -318,7 +324,7 @@ export function ScreeningRecordsTab() {
             }
           >
             <SelectTrigger className='w-[130px]'>
-              <SelectValue />
+              <SelectValue>{t(expiredLabel)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {TRISTATE_OPTIONS.map((opt) => (
@@ -342,7 +348,7 @@ export function ScreeningRecordsTab() {
             onValueChange={(v) => setRunKind(v as ScreeningKind)}
           >
             <SelectTrigger className='w-[180px]'>
-              <SelectValue />
+              <SelectValue>{t(runKindLabel)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {SCREENING_KINDS.map((k) => (

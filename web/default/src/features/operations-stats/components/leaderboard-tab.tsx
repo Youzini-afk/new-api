@@ -137,6 +137,8 @@ export function LeaderboardTab() {
 
   const rankItems = rankResponse?.rank?.items ?? []
   const coverageItems = rankResponse?.coverage?.items ?? []
+  const selectedMetricLabel =
+    LEADERBOARD_METRICS.find((m) => m.value === metric)?.labelKey ?? metric
 
   return (
     <div className='flex h-full min-h-0 flex-col gap-4'>
@@ -151,7 +153,7 @@ export function LeaderboardTab() {
             }
           >
             <SelectTrigger className='w-[140px]'>
-              <SelectValue />
+              <SelectValue>{t(selectedMetricLabel)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {LEADERBOARD_METRICS.map((m) => (

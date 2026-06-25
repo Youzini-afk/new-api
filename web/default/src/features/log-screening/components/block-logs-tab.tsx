@@ -258,6 +258,13 @@ export function BlockLogsTab(props: BlockLogsTabProps) {
     )
   }
 
+  const autoBannedLabel =
+    TRISTATE_OPTIONS.find((opt) => opt.value === filter.auto_banned)?.labelKey ??
+    filter.auto_banned
+  const emptyUALabel =
+    TRISTATE_OPTIONS.find((opt) => opt.value === filter.is_empty_ua)?.labelKey ??
+    filter.is_empty_ua
+
   return (
     <div className='flex h-full min-h-0 flex-col gap-4'>
       <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
@@ -301,7 +308,9 @@ export function BlockLogsTab(props: BlockLogsTabProps) {
             }
           >
             <SelectTrigger className='w-[150px]'>
-              <SelectValue />
+              <SelectValue>
+                {t('Auto-banned')}: {t(autoBannedLabel)}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {TRISTATE_OPTIONS.map((opt) => (
@@ -319,7 +328,9 @@ export function BlockLogsTab(props: BlockLogsTabProps) {
               }
             >
               <SelectTrigger className='w-[150px]'>
-                <SelectValue />
+                <SelectValue>
+                  {t('Empty UA')}: {t(emptyUALabel)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {TRISTATE_OPTIONS.map((opt) => (

@@ -64,7 +64,7 @@ export function tierLabelKey(tier: string): string {
     case 'pending':
       return 'Pending draw'
     default:
-      return tier
+      return 'Unknown prize'
   }
 }
 

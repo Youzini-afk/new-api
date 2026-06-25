@@ -122,6 +122,8 @@ export function IPStatsTab() {
   }
 
   const items = rankResponse?.items ?? []
+  const selectedKindLabel =
+    CONVERSATION_KINDS.find((k) => k.value === kind)?.labelKey ?? kind
 
   return (
     <div className='flex h-full min-h-0 flex-col gap-4'>
@@ -129,7 +131,7 @@ export function IPStatsTab() {
         <div className='flex flex-wrap items-center gap-2'>
           <Select value={kind} onValueChange={(v) => setKind(v as typeof kind)}>
             <SelectTrigger className='w-[180px]'>
-              <SelectValue />
+              <SelectValue>{t(selectedKindLabel)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {CONVERSATION_KINDS.map((k) => (

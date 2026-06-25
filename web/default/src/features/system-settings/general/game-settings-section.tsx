@@ -200,7 +200,7 @@ export function GameSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Daily buy limit per user')}</FormLabel>
                     <FormControl>
-                      <Input type='number' min={1} placeholder={t('3')} {...field} />
+                      <Input type='number' min={1} placeholder='3' {...field} />
                     </FormControl>
                     <FormDescription>
                       {t(
@@ -219,7 +219,7 @@ export function GameSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Daily draw hour (0-23)')}</FormLabel>
                     <FormControl>
-                      <Input type='number' min={0} max={23} placeholder={t('22')} {...field} />
+                      <Input type='number' min={0} max={23} placeholder='22' {...field} />
                     </FormControl>
                     <FormDescription>
                       {t(
@@ -238,7 +238,7 @@ export function GameSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Minimum stake (quota)')}</FormLabel>
                     <FormControl>
-                      <Input type='number' min={0} placeholder={t('500000')} {...field} />
+                      <Input type='number' min={0} placeholder='500000' {...field} />
                     </FormControl>
                     <FormDescription>
                       {t(
@@ -257,7 +257,7 @@ export function GameSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Maximum stake (quota)')}</FormLabel>
                     <FormControl>
-                      <Input type='number' min={0} placeholder={t('50000000')} {...field} />
+                      <Input type='number' min={0} placeholder='50000000' {...field} />
                     </FormControl>
                     <FormDescription>
                       {t(
@@ -276,7 +276,7 @@ export function GameSettingsSection({
                   <FormItem>
                     <FormLabel>{t('System injected quota per round')}</FormLabel>
                     <FormControl>
-                      <Input type='number' min={0} placeholder={t('0')} {...field} />
+                      <Input type='number' min={0} placeholder='0' {...field} />
                     </FormControl>
                     <FormDescription>
                       {t(
@@ -295,7 +295,7 @@ export function GameSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Maximum user quota for lottery')}</FormLabel>
                     <FormControl>
-                      <Input type='number' min={0} placeholder={t('0')} {...field} />
+                      <Input type='number' min={0} placeholder='0' {...field} />
                     </FormControl>
                     <FormDescription>
                       {t(
@@ -687,7 +687,7 @@ function RouletteSettingsSection({
                         <Input
                           type='number'
                           min={0}
-                          placeholder={t('3')}
+                          placeholder='3'
                           {...field}
                         />
                       </FormControl>
@@ -714,7 +714,7 @@ function RouletteSettingsSection({
                           type='number'
                           min={0}
                           max={ROULETTE_MAX_RTP_BPS}
-                          placeholder={t('9000')}
+                          placeholder='9000'
                           {...field}
                         />
                       </FormControl>
@@ -747,7 +747,7 @@ function RouletteSettingsSection({
                         <Input
                           type='number'
                           min={1}
-                          placeholder={t('500000')}
+                          placeholder='500000'
                           {...field}
                         />
                       </FormControl>
@@ -773,7 +773,7 @@ function RouletteSettingsSection({
                         <Input
                           type='number'
                           min={1}
-                          placeholder={t('5000000')}
+                          placeholder='5000000'
                           {...field}
                         />
                       </FormControl>
@@ -799,7 +799,7 @@ function RouletteSettingsSection({
                         <Input
                           type='number'
                           min={0}
-                          placeholder={t('0')}
+                          placeholder='0'
                           {...field}
                         />
                       </FormControl>
@@ -825,7 +825,7 @@ function RouletteSettingsSection({
                         <Input
                           type='number'
                           min={0}
-                          placeholder={t('0')}
+                          placeholder='0'
                           {...field}
                         />
                       </FormControl>
