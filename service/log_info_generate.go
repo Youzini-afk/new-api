@@ -71,6 +71,10 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	}
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
+	// Phase 9A/B: surface per-channel fallback admin metadata on success logs
+	// too (error logs already append it in processChannelError), so a fallback
+	// that ultimately succeeded is visible in the consume log admin_info.
+	AppendChannelFallbackAdminInfo(ctx, adminInfo)
 
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)

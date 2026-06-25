@@ -332,3 +332,98 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
 	require.False(t, exists)
 }
+
+// TestRecordChannelAffinity_FallbackUsesContextChannel verifies that when a
+// per-channel fallback was applied and the request ultimately succeeded,
+// RecordChannelAffinity caches the fallback channel (read from the gin
+// context's channel_id, which SetupContextForSelectedChannel rewired to the
+// fallback channel) instead of the middleware-selected initial channel that
+// was passed in. This must hold even when SwitchOnSuccess is disabled, so an
+// admin cannot accidentally cache a known-bad initial channel by turning off
+// SwitchOnSuccess.
+func TestRecordChannelAffinity_FallbackUsesContextChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	originalEnabled := setting.Enabled
+	originalSwitchOnSuccess := setting.SwitchOnSuccess
+	t.Cleanup(func() {
+		setting.Enabled = originalEnabled
+		setting.SwitchOnSuccess = originalSwitchOnSuccess
+	})
+	setting.Enabled = true
+
+	cache := getChannelAffinityCache()
+
+	t.Run("fallback applied: caches fallback channel even with SwitchOnSuccess=false", func(t *testing.T) {
+		setting.SwitchOnSuccess = false
+		cacheKeySuffix := fmt.Sprintf("record-fallback-on-%d", time.Now().UnixNano())
+		cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
+		t.Cleanup(func() {
+			_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+		})
+
+		ctx := buildChannelAffinityTemplateContextForTest(channelAffinityMeta{
+			CacheKey:   cacheKeyFull,
+			TTLSeconds: 60,
+		})
+		// Simulate the relay outcome: middleware picked channel 7 (initial),
+		// fallback rewired context to channel 42, request ultimately succeeded.
+		ctx.Set("channel_id", 42)
+		MarkChannelFallbackScheduled(ctx, 42, 7, ChannelFallbackReasonError)
+
+		// RecordChannelAffinity is called by the distributor with the
+		// middleware-selected initial channel id (7), but must record 42.
+		RecordChannelAffinity(ctx, 7)
+
+		recorded, found, err := cache.Get(cacheKeySuffix)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, 42, recorded, "fallback channel must be cached, not the initial channel")
+	})
+
+	t.Run("no fallback: SwitchOnSuccess=false keeps middleware channel", func(t *testing.T) {
+		setting.SwitchOnSuccess = false
+		cacheKeySuffix := fmt.Sprintf("record-no-fallback-off-%d", time.Now().UnixNano())
+		cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
+		t.Cleanup(func() {
+			_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+		})
+
+		ctx := buildChannelAffinityTemplateContextForTest(channelAffinityMeta{
+			CacheKey:   cacheKeyFull,
+			TTLSeconds: 60,
+		})
+		// No fallback scheduled; SwitchOnSuccess=false means the passed-in
+		// middleware channel id is what gets cached.
+		RecordChannelAffinity(ctx, 7)
+
+		recorded, found, err := cache.Get(cacheKeySuffix)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, 7, recorded)
+	})
+
+	t.Run("no fallback: SwitchOnSuccess=true rewrites to context channel", func(t *testing.T) {
+		setting.SwitchOnSuccess = true
+		cacheKeySuffix := fmt.Sprintf("record-no-fallback-on-%d", time.Now().UnixNano())
+		cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
+		t.Cleanup(func() {
+			_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+		})
+
+		ctx := buildChannelAffinityTemplateContextForTest(channelAffinityMeta{
+			CacheKey:   cacheKeyFull,
+			TTLSeconds: 60,
+		})
+		// No fallback; SwitchOnSuccess=true rewrites the recorded id to the
+		// context channel_id (existing behavior, unchanged).
+		ctx.Set("channel_id", 42)
+		RecordChannelAffinity(ctx, 7)
+
+		recorded, found, err := cache.Get(cacheKeySuffix)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, 42, recorded)
+	})
+}

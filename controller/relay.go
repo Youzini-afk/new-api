@@ -56,6 +56,259 @@ func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErro
 	return err
 }
 
+// Phase 9A/B safe MVP — per-channel explicit fallback backend.
+//
+// The gin context keys and the admin-info append helper live in the service
+// package (so both controller error logs and service.GenerateTextOtherInfo can
+// reference them without an import cycle). The controller is responsible for
+// scheduling the fallback (prepareNextChannelFallback) and consuming the
+// override in getChannel.
+
+const (
+	channelFallbackReasonEmptyReply = service.ChannelFallbackReasonEmptyReply
+	channelFallbackReasonError      = service.ChannelFallbackReasonError
+)
+
+// relayFallbackModeAllowed reports whether the relay format/mode is in the safe
+// allowlist for fallback. Fallback is a non-stream, idempotent-style MVP, so
+// we reject anything that mutates state (image gen/edit, audio speech/transcribe,
+// realtime, unknown) and require non-stream for Gemini/Claude.
+func relayFallbackModeAllowed(relayFormat types.RelayFormat, info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	if info.IsStream {
+		return false
+	}
+	if relayFormat == types.RelayFormatOpenAIRealtime {
+		return false
+	}
+	switch info.RelayMode {
+	case relayconstant.RelayModeChatCompletions,
+		relayconstant.RelayModeCompletions,
+		relayconstant.RelayModeResponses,
+		relayconstant.RelayModeResponsesCompact,
+		relayconstant.RelayModeEmbeddings,
+		relayconstant.RelayModeRerank,
+		relayconstant.RelayModeGemini:
+		return true
+	default:
+		return false
+	}
+}
+
+// relayFallbackStateDenied reports whether the current request state forbids a
+// fallback. We refuse fallback once any byte has been written to the client,
+// once stream status is non-nil (safety: any stream interaction), once the
+// client cancelled the request, once the error is marked skip-retry, once
+// channel-affinity asked us not to retry, once a specific channel was
+// requested, or once a fallback was already scheduled this request.
+func relayFallbackStateDenied(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) bool {
+	if c == nil || info == nil || err == nil {
+		return true
+	}
+	if info.IsStream {
+		return true
+	}
+	if info.StreamStatus != nil {
+		return true
+	}
+	if info.SendResponseCount > 0 || info.ReceivedResponseCount > 0 {
+		return true
+	}
+	if c.Writer != nil && c.Writer.Written() {
+		return true
+	}
+	if c.Request != nil && c.Request.Context().Err() != nil {
+		return true
+	}
+	if types.IsSkipRetryError(err) {
+		return true
+	}
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+		return true
+	}
+	if _, ok := c.Get("specific_channel_id"); ok {
+		return true
+	}
+	if service.IsChannelFallbackApplied(c) {
+		return true
+	}
+	return false
+}
+
+// canFallbackChannelServeRequest validates that the fallback channel can serve
+// the current request: enabled, not the same as the current channel, not
+// already in use_channel, and able to serve the model for the effective group
+// (or any user auto group when group is empty/auto). For Advanced Custom
+// channels (type 58), also requires a route match for the request path.
+func canFallbackChannelServeRequest(c *gin.Context, fallback *model.Channel, currentChannelID int, info *relaycommon.RelayInfo) bool {
+	if fallback == nil || info == nil {
+		return false
+	}
+	if fallback.Id <= 0 {
+		return false
+	}
+	if fallback.Status != common.ChannelStatusEnabled {
+		return false
+	}
+	if fallback.Id == currentChannelID {
+		return false
+	}
+	fallbackIDStr := fmt.Sprintf("%d", fallback.Id)
+	for _, usedID := range c.GetStringSlice("use_channel") {
+		if usedID == fallbackIDStr {
+			return false
+		}
+	}
+
+	modelName := info.OriginModelName
+	requestPath := ""
+	if c.Request != nil && c.Request.URL != nil {
+		requestPath = c.Request.URL.Path
+	}
+
+	// Advanced Custom channels are path-bound; require a matching route.
+	if fallback.Type == constant.ChannelTypeAdvancedCustom {
+		advancedConfig := fallback.GetOtherSettings().AdvancedCustom
+		if advancedConfig == nil || !advancedConfig.SupportsPath(requestPath) {
+			return false
+		}
+	}
+
+	// Group/model eligibility. Use the effective group when available; for
+	// "auto" or empty, fall back to user auto groups (conservative: allow
+	// if the fallback serves any of them).
+	usingGroup := strings.TrimSpace(info.UsingGroup)
+	if usingGroup == "" {
+		usingGroup = common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+	}
+	if usingGroup == "" {
+		usingGroup = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	}
+
+	if usingGroup != "" && usingGroup != "auto" {
+		if !model.IsChannelEnabledForGroupModel(usingGroup, modelName, fallback.Id) {
+			return false
+		}
+		return true
+	}
+
+	// Auto/empty group: accept if the fallback serves any user auto group.
+	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	if userGroup == "" {
+		userGroup = info.UserGroup
+	}
+	autoGroups := service.GetUserAutoGroup(userGroup)
+	if len(autoGroups) == 0 {
+		return false
+	}
+	return model.IsChannelEnabledForAnyGroupModel(autoGroups, modelName, fallback.Id)
+}
+
+// relayFallbackErrorPolicyAllowed reports whether the error's status-code /
+// error-code policy permits a fallback. Fallback shares the same
+// error/status-code retry policy as the global retry loop, so an always-skip
+// status code (504/524), an always-skip error code (bad_response_body), a 2xx,
+// or a 4xx/5xx outside the configured retry ranges never triggers a fallback
+// even when FallbackOnError/FallbackOnEmptyReply is set.
+//
+// Unlike shouldRetry this does NOT consult the retry-times budget (fallback
+// carries its own one-slot budget via IsChannelFallbackApplied) nor the
+// affinity/specific-channel/stream/written state guards, which
+// relayFallbackStateDenied already handles. The two helpers together mirror
+// shouldRetry's full gate without coupling fallback to common.RetryTimes.
+func relayFallbackErrorPolicyAllowed(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	if types.IsChannelError(err) {
+		return true
+	}
+	if types.IsSkipRetryError(err) {
+		return false
+	}
+	code := err.StatusCode
+	if code >= 200 && code < 300 {
+		return false
+	}
+	if code < 100 || code > 599 {
+		return true
+	}
+	if operation_setting.IsAlwaysSkipRetryCode(err.GetErrorCode()) {
+		return false
+	}
+	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+// prepareNextChannelFallback decides whether to schedule a per-channel
+// explicit fallback after a non-stream relay failure that wrote nothing to the
+// client. Returns true when a fallback has been scheduled; in that case the
+// caller must call retryParam.ResetRetryNextTry() and continue the retry loop
+// without consuming a global retry slot.
+//
+// Billing/body/affinity invariants are preserved: PreConsume/Refund defer and
+// BodyStorage re-read remain in the outer Relay loop; SetupContextForSelectedChannel
+// is re-run inside getChannel so the next attempt sees the fallback channel's
+// settings/keys/overrides.
+//
+// Fallback is independent of the global retry-times budget but still obeys the
+// same error/status-code retry policy as shouldRetry (via
+// relayFallbackErrorPolicyAllowed), so always-skip status codes / error codes
+// and 4xx outside the retry ranges cannot bypass the global policy.
+func prepareNextChannelFallback(c *gin.Context, currentChannel *model.Channel, info *relaycommon.RelayInfo, openaiErr *types.NewAPIError) bool {
+	if c == nil || currentChannel == nil || info == nil || openaiErr == nil {
+		return false
+	}
+	if relayFallbackStateDenied(c, info, openaiErr) {
+		return false
+	}
+	if !relayFallbackModeAllowed(info.RelayFormat, info) {
+		return false
+	}
+	if !relayFallbackErrorPolicyAllowed(openaiErr) {
+		return false
+	}
+
+	settings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
+	if !ok {
+		return false
+	}
+	if settings.FallbackChannelID <= 0 || settings.FallbackChannelID == currentChannel.Id {
+		return false
+	}
+
+	fallbackReason := ""
+	switch openaiErr.GetErrorCode() {
+	case types.ErrorCodeEmptyResponse:
+		if !settings.FallbackOnEmptyReply {
+			return false
+		}
+		fallbackReason = channelFallbackReasonEmptyReply
+	default:
+		if !settings.FallbackOnError {
+			return false
+		}
+		fallbackReason = channelFallbackReasonError
+	}
+
+	fallback, err := model.GetChannelById(settings.FallbackChannelID, true)
+	if err != nil || fallback == nil {
+		if err != nil {
+			logger.LogWarn(c, fmt.Sprintf("load fallback channel #%d failed: %s", settings.FallbackChannelID, err.Error()))
+		}
+		return false
+	}
+	if !canFallbackChannelServeRequest(c, fallback, currentChannel.Id, info) {
+		logger.LogWarn(c, fmt.Sprintf("fallback channel #%d cannot serve current request (group/model/path), skip fallback", fallback.Id))
+		return false
+	}
+
+	service.MarkChannelFallbackScheduled(c, fallback.Id, currentChannel.Id, fallbackReason)
+	logger.LogInfo(c, fmt.Sprintf("channel fallback triggered: #%d -> #%d, reason: %s", currentChannel.Id, fallback.Id, fallbackReason))
+	return true
+}
+
 func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
 	if strings.Contains(c.Request.URL.Path, "embed") {
@@ -327,7 +580,18 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
+		// Phase 9A/B safe MVP: per-channel explicit fallback. Try fallback
+		// BEFORE shouldRetry so it does not consume a global retry slot
+		// (ResetRetryNextTry keeps the global counter stable). At most one
+		// fallback per request (guarded by channelFallbackAppliedKey).
+		fallbackScheduled := prepareNextChannelFallback(c, channel, relayInfo, newAPIError)
+
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+
+		if fallbackScheduled {
+			retryParam.ResetRetryNextTry()
+			continue
+		}
 
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
@@ -509,6 +773,21 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
+	// Phase 9A/B safe MVP: per-channel explicit fallback. If a fallback was
+	// scheduled, force getChannel to return the fallback channel instead of
+	// going through CacheGetRandomSatisfiedChannel. The override is consumed
+	// once so subsequent retries in the same request revert to normal selection.
+	if overrideID, ok := service.ConsumeChannelFallbackOverride(c); ok && overrideID > 0 {
+		fallback, err := model.GetChannelById(overrideID, true)
+		if err != nil || fallback == nil {
+			return nil, types.NewError(fmt.Errorf("获取回退渠道 #%d 失败: %s", overrideID, errOrEmpty(err)), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+		if setupErr := middleware.SetupContextForSelectedChannel(c, fallback, info.OriginModelName); setupErr != nil {
+			return nil, setupErr
+		}
+		return fallback, nil
+	}
 	if info.ChannelMeta == nil {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
@@ -538,6 +817,16 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		return nil, newAPIError
 	}
 	return channel, nil
+}
+
+// errOrEmpty returns err.Error() or "" when err is nil. Used for fallback channel
+// load error messages where the error may be nil but the channel lookup still
+// failed (returned nil without an error).
+func errOrEmpty(err error) string {
+	if err == nil {
+		return "channel not found"
+	}
+	return err.Error()
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
@@ -608,6 +897,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
+		service.AppendChannelFallbackAdminInfo(c, adminInfo)
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
