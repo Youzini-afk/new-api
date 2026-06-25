@@ -17,11 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
-import { useAuthStore } from '@/stores/auth-store'
-import { Markdown } from '@/components/ui/markdown'
+
 import { PublicLayout } from '@/components/layout'
-import { Footer } from '@/components/layout/components/footer'
-import { CTA, Features, Hero, HowItWorks, Stats } from './components'
+import { Markdown } from '@/components/ui/markdown'
+import { useAuthStore } from '@/stores/auth-store'
+
+import { YouziLanding } from './components/youzi-landing'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
@@ -48,6 +49,7 @@ export function Home() {
             <iframe
               src={content}
               className='h-screen w-full border-none'
+              sandbox='allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox'
               title={t('Custom Home Page')}
             />
           ) : (
@@ -60,14 +62,7 @@ export function Home() {
     )
   }
 
-  return (
-    <PublicLayout showMainContainer={false}>
-      <Hero isAuthenticated={isAuthenticated} />
-      <Stats />
-      <Features />
-      <HowItWorks />
-      <CTA isAuthenticated={isAuthenticated} />
-      <Footer />
-    </PublicLayout>
-  )
+  // Default landing: full-screen Youzi star field with central brand,
+  // top-right lightweight controls and bottom links (centered brand layout).
+  return <YouziLanding isAuthenticated={isAuthenticated} />
 }

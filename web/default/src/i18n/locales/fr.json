@@ -5281,7 +5281,10 @@
     "Youziapi · API Constellation": "Youziapi · constellation API",
     "Route every AI call with Youziapi": "Faites passer chaque appel IA par Youziapi",
     "the Youzi star trail": "la trajectoire stellaire Youzi",
+    "Where AI calls become Youzi trails": "Là où chaque appel IA trace une piste Youzi",
     "One unified gateway across 50+ providers. Tracked, billed, and routed with the care of a constellation.": "Une passerelle unifiée pour plus de 50 fournisseurs. Suivi, facturation et routage avec la précision d'une constellation.",
-    "Live Gateway Demo": "Démo passerelle en direct"
+    "Live Gateway Demo": "Démo passerelle en direct",
+    "Language": "Langue",
+    "OpenAI-compatible · Multi-provider routing · Usage insights": "Compatible OpenAI · Routage multi-fournisseurs · Analyse d'usage"
   }
 }
