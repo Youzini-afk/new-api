@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -322,4 +323,260 @@ func TestForceDiscordGateReauthDoesNotClearDiscordID(t *testing.T) {
 func TestDiscordGateTruncateRunes(t *testing.T) {
 	assert.Equal(t, "ab", truncateRunes(" abc ", 2))
 	assert.Equal(t, strings.Repeat("界", 3), truncateRunes(strings.Repeat("界", 5), 3))
+}
+
+// TestRecheckDiscordGate_RefreshInvalidClientPreservesToken proves that only an
+// explicit invalid_grant clears the refresh token; an invalid_client response
+// (e.g., a rotated client_secret) must leave the token and the existing gate
+// pass intact so the user is not forced through reauth on a transient config
+// drift.
+func TestRecheckDiscordGate_RefreshInvalidClientPreservesToken(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGate = discordGateConfig("guild-1", "role-1")
+	})
+	logBuf := withDiscordLogBuffer(t)
+	encryptedRefreshToken := encryptedDiscordRefreshToken(t, "old-refresh")
+	user := createDiscordGateUser(t, model.User{
+		DiscordId:           "discord-1",
+		DiscordRefreshToken: encryptedRefreshToken,
+		DiscordGatePassed:   true,
+	})
+	withDiscordTokenAndMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/oauth2/token", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid_client","error_description":"client_secret=super-secret mismatch"}`))
+	})
+
+	outcome, err := RecheckDiscordGate(context.Background(), user)
+	require.NoError(t, err)
+	assert.Equal(t, discordGateResultUnknown, outcome.Result)
+	assert.Equal(t, "refresh_failed", outcome.Reason)
+	assert.True(t, outcome.GatePassed, "existing gate pass must survive invalid_client")
+
+	stored, err := model.GetUserById(user.Id, true)
+	require.NoError(t, err)
+	assert.True(t, stored.DiscordGatePassed)
+	decrypted, err := common.DecryptWithCryptoSecret(stored.DiscordRefreshToken)
+	require.NoError(t, err)
+	assert.Equal(t, "old-refresh", decrypted, "refresh token must NOT be cleared on invalid_client")
+
+	logStr := logBuf.String()
+	assert.Contains(t, logStr, "category=invalid_client")
+	assert.NotContains(t, logStr, "super-secret")
+	assert.NotContains(t, logStr, "old-refresh")
+	assert.NotContains(t, logStr, encryptedRefreshToken)
+}
+
+// TestRecheckDiscordGate_RefreshRateLimitedPreservesToken proves a 429 from the
+// token endpoint (with Retry-After) does not clear the refresh token or the
+// existing gate pass.
+func TestRecheckDiscordGate_RefreshRateLimitedPreservesToken(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGate = discordGateConfig("guild-1", "role-1")
+	})
+	user := createDiscordGateUser(t, model.User{
+		DiscordId:           "discord-1",
+		DiscordRefreshToken: encryptedDiscordRefreshToken(t, "old-refresh"),
+		DiscordGatePassed:   true,
+	})
+	withDiscordTokenAndMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/oauth2/token", r.URL.Path)
+		w.Header().Set("Retry-After", "10")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"rate_limited","retry_after":10,"global":true}`))
+	})
+
+	outcome, err := RecheckDiscordGate(context.Background(), user)
+	require.NoError(t, err)
+	assert.Equal(t, discordGateResultUnknown, outcome.Result)
+	assert.Equal(t, "refresh_failed", outcome.Reason)
+	assert.True(t, outcome.GatePassed, "existing gate pass must survive 429")
+
+	stored, err := model.GetUserById(user.Id, true)
+	require.NoError(t, err)
+	assert.True(t, stored.DiscordGatePassed)
+	decrypted, err := common.DecryptWithCryptoSecret(stored.DiscordRefreshToken)
+	require.NoError(t, err)
+	assert.Equal(t, "old-refresh", decrypted, "refresh token must NOT be cleared on 429")
+}
+
+// TestRecheckDiscordGate_RefreshTimeoutPreservesToken proves token endpoint
+// timeouts are treated as transient unknowns and do not clear the refresh token
+// or an existing gate pass.
+func TestRecheckDiscordGate_RefreshTimeoutPreservesToken(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGate = discordGateConfig("guild-1", "role-1")
+	})
+	user := createDiscordGateUser(t, model.User{
+		DiscordId:           "discord-1",
+		DiscordRefreshToken: encryptedDiscordRefreshToken(t, "old-refresh"),
+		DiscordGatePassed:   true,
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/oauth2/token", r.URL.Path)
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"access_token":"late-access"}`))
+	}))
+	oldBaseURL := discordAPIBaseURL
+	oldClient := discordHTTPClient
+	discordAPIBaseURL = server.URL
+	discordHTTPClient = &http.Client{Timeout: 50 * time.Millisecond}
+	t.Cleanup(func() {
+		server.Close()
+		discordAPIBaseURL = oldBaseURL
+		discordHTTPClient = oldClient
+	})
+
+	outcome, err := RecheckDiscordGate(context.Background(), user)
+	require.NoError(t, err)
+	assert.Equal(t, discordGateResultUnknown, outcome.Result)
+	assert.Equal(t, "refresh_failed", outcome.Reason)
+	assert.True(t, outcome.GatePassed, "existing gate pass must survive timeout")
+
+	stored, err := model.GetUserById(user.Id, true)
+	require.NoError(t, err)
+	assert.True(t, stored.DiscordGatePassed)
+	decrypted, err := common.DecryptWithCryptoSecret(stored.DiscordRefreshToken)
+	require.NoError(t, err)
+	assert.Equal(t, "old-refresh", decrypted, "refresh token must NOT be cleared on timeout")
+}
+
+// TestRecheckDiscordGate_RefreshBodyTooLargePreservesToken proves an oversized
+// response body from the token endpoint is capped without panic and does not
+// clear the refresh token.
+func TestRecheckDiscordGate_RefreshBodyTooLargePreservesToken(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGate = discordGateConfig("guild-1", "role-1")
+	})
+	user := createDiscordGateUser(t, model.User{
+		DiscordId:           "discord-1",
+		DiscordRefreshToken: encryptedDiscordRefreshToken(t, "old-refresh"),
+		DiscordGatePassed:   true,
+	})
+	oversized := strings.Repeat("x", discordResponseBodyLimit+256)
+	require.NotPanics(t, func() {
+		withDiscordTokenAndMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "/oauth2/token", r.URL.Path)
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(oversized))
+		})
+
+		outcome, err := RecheckDiscordGate(context.Background(), user)
+		require.NoError(t, err)
+		assert.Equal(t, discordGateResultUnknown, outcome.Result)
+		assert.Equal(t, "refresh_failed", outcome.Reason)
+		assert.True(t, outcome.GatePassed)
+
+		stored, err := model.GetUserById(user.Id, true)
+		require.NoError(t, err)
+		assert.True(t, stored.DiscordGatePassed)
+		decrypted, decryptErr := common.DecryptWithCryptoSecret(stored.DiscordRefreshToken)
+		require.NoError(t, decryptErr)
+		assert.Equal(t, "old-refresh", decrypted, "refresh token must NOT be cleared on body_too_large")
+	})
+}
+
+// TestRecheckDiscordGate_GuildMember401StaysUnknown proves a 401 from the guild
+// member endpoint is treated as unknown (transient/auth failure), never as
+// "not a member".
+func TestRecheckDiscordGate_GuildMember401StaysUnknown(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGate = discordGateConfig("guild-1", "role-1")
+	})
+	user := createDiscordGateUser(t, model.User{
+		DiscordId:           "discord-1",
+		DiscordRefreshToken: encryptedDiscordRefreshToken(t, "refresh"),
+		DiscordGatePassed:   true,
+	})
+	withDiscordTokenAndMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth2/token":
+			_, _ = w.Write([]byte(`{"access_token":"access"}`))
+		case "/users/@me/guilds/guild-1/member":
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	outcome, err := RecheckDiscordGate(context.Background(), user)
+	require.NoError(t, err)
+	assert.Equal(t, discordGateResultUnknown, outcome.Result)
+	assert.True(t, outcome.GatePassed, "401 must not clear existing gate pass")
+
+	stored, err := model.GetUserById(user.Id, true)
+	require.NoError(t, err)
+	assert.True(t, stored.DiscordGatePassed)
+	assert.Equal(t, discordGateResultUnknown, stored.DiscordLastCheckResult)
+}
+
+// TestRecheckDiscordGate_GuildMember403StaysUnknown proves a 403 from the guild
+// member endpoint is treated as unknown, never as "not a member".
+func TestRecheckDiscordGate_GuildMember403StaysUnknown(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGate = discordGateConfig("guild-1", "role-1")
+	})
+	user := createDiscordGateUser(t, model.User{
+		DiscordId:           "discord-1",
+		DiscordRefreshToken: encryptedDiscordRefreshToken(t, "refresh"),
+		DiscordGatePassed:   true,
+	})
+	withDiscordTokenAndMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth2/token":
+			_, _ = w.Write([]byte(`{"access_token":"access"}`))
+		case "/users/@me/guilds/guild-1/member":
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	outcome, err := RecheckDiscordGate(context.Background(), user)
+	require.NoError(t, err)
+	assert.Equal(t, discordGateResultUnknown, outcome.Result)
+	assert.True(t, outcome.GatePassed)
+}
+
+// TestRecheckDiscordGate_GuildMemberBodyTooLargeStaysUnknown proves an oversized
+// guild member body is capped without panic and still yields unknown (never
+// "not a member").
+func TestRecheckDiscordGate_GuildMemberBodyTooLargeStaysUnknown(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGate = discordGateConfig("guild-1", "role-1")
+	})
+	user := createDiscordGateUser(t, model.User{
+		DiscordId:           "discord-1",
+		DiscordRefreshToken: encryptedDiscordRefreshToken(t, "refresh"),
+		DiscordGatePassed:   true,
+	})
+	oversized := strings.Repeat("x", discordResponseBodyLimit+256)
+	withDiscordTokenAndMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth2/token":
+			_, _ = w.Write([]byte(`{"access_token":"access"}`))
+		case "/users/@me/guilds/guild-1/member":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(oversized))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	require.NotPanics(t, func() {
+		outcome, err := RecheckDiscordGate(context.Background(), user)
+		require.NoError(t, err)
+		assert.Equal(t, discordGateResultUnknown, outcome.Result)
+		assert.True(t, outcome.GatePassed, "body_too_large must not clear existing gate pass")
+	})
 }

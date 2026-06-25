@@ -2,9 +2,13 @@ package oauth
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,6 +93,208 @@ var (
 	discordHTTPClient = &http.Client{Timeout: 5 * time.Second}
 )
 
+// discordResponseBodyLimit caps the number of bytes read from a Discord OAuth
+// or API response body so a misbehaving upstream cannot exhaust memory. We
+// read at most limit+1 bytes (the +1 lets us detect oversize without an
+// unbounded read).
+const discordResponseBodyLimit = 64 * 1024
+
+// discordRetryAfterClamp is the upper bound we report for the Retry-After
+// header. We never sleep on 429 (the caller decides what to do); the clamp
+// just keeps the diagnostic value reasonable.
+const discordRetryAfterClamp = 5 * time.Minute
+
+// errDiscordBodyTooLarge is returned by readDiscordLimitedBody when the body
+// exceeds discordResponseBodyLimit. Callers must treat this as a distinct
+// category and never log the partial bytes they may have read.
+var errDiscordBodyTooLarge = errors.New("discord response body exceeds limit")
+
+// discordErrorPayload mirrors the subset of Discord OAuth/API error bodies we
+// use for classification. The fields are parsed but never logged verbatim —
+// only the derived category, status and Retry-After are surfaced.
+type discordErrorPayload struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+	Message          string `json:"message"`
+	RetryAfter       int    `json:"retry_after"`
+	Global           bool   `json:"global"`
+}
+
+// discordErrorCategory is a stable, sanitized bucket for Discord HTTP failures.
+// It is safe to log because it never carries tokens, the OAuth code,
+// client_secret, or response bodies.
+type discordErrorCategory string
+
+const (
+	discordCategoryInvalidGrant        discordErrorCategory = "invalid_grant"
+	discordCategoryInvalidClient       discordErrorCategory = "invalid_client"
+	discordCategoryRedirectURIMismatch discordErrorCategory = "redirect_uri_mismatch"
+	discordCategoryRateLimited         discordErrorCategory = "rate_limited"
+	discordCategoryUnauthorized        discordErrorCategory = "unauthorized"
+	discordCategoryForbidden           discordErrorCategory = "forbidden"
+	discordCategoryBodyTooLarge        discordErrorCategory = "body_too_large"
+	discordCategoryTimeout             discordErrorCategory = "timeout"
+	discordCategoryNetworkError        discordErrorCategory = "network_error"
+	discordCategoryBadResponse         discordErrorCategory = "bad_response"
+	discordCategoryDiscordError        discordErrorCategory = "discord_error"
+)
+
+// discordDiagnostic bundles the sanitized diagnostic output for one Discord
+// HTTP failure. Raw() is the only string that may appear in logs or in
+// OAuthError.RawError — it contains only the category, status and Retry-After
+// hint, never secrets or response bodies.
+type discordDiagnostic struct {
+	Category   discordErrorCategory
+	Status     int
+	RetryAfter time.Duration
+}
+
+// Raw renders a compact, secret-free diagnostic string suitable for logs and
+// OAuthError.RawError.
+func (d discordDiagnostic) Raw() string {
+	parts := []string{"category=" + string(d.Category)}
+	if d.Status != 0 {
+		parts = append(parts, fmt.Sprintf("status=%d", d.Status))
+	}
+	if d.RetryAfter > 0 {
+		parts = append(parts, "retry_after="+d.RetryAfter.String())
+	}
+	return strings.Join(parts, " ")
+}
+
+// readDiscordLimitedBody reads at most limit+1 bytes from r. If the body
+// exceeds the limit it returns errDiscordBodyTooLarge; the partially read
+// prefix is intentionally discarded because callers must not log it.
+func readDiscordLimitedBody(r io.Reader, limit int) ([]byte, error) {
+	limited := io.LimitReader(r, int64(limit)+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > limit {
+		return nil, errDiscordBodyTooLarge
+	}
+	return data, nil
+}
+
+// decodeDiscordJSONLimited parses a Discord response into v while enforcing
+// the discordResponseBodyLimit cap. On oversize failure it returns
+// errDiscordBodyTooLarge without leaving the reader open for unbounded reads.
+func decodeDiscordJSONLimited(r io.Reader, v any) error {
+	data, err := readDiscordLimitedBody(r, discordResponseBodyLimit)
+	if err != nil {
+		return err
+	}
+	return common.Unmarshal(data, v)
+}
+
+// parseDiscordRetryAfter parses the Retry-After header (delta-seconds form,
+// RFC 7231 §7.1.3). Returns 0 when absent or unparseable. We never sleep on
+// the value; callers only use it for diagnostics.
+func parseDiscordRetryAfter(header string) time.Duration {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return 0
+	}
+	seconds, err := strconv.ParseFloat(header, 64)
+	if err != nil || seconds < 0 {
+		return 0
+	}
+	d := time.Duration(seconds * float64(time.Second))
+	if d > discordRetryAfterClamp {
+		return discordRetryAfterClamp
+	}
+	return d
+}
+
+// classifyDiscordTransportError maps a transport-level error (no response
+// received) to a diagnostic category. Timeouts become timeout; everything
+// else becomes network_error.
+func classifyDiscordTransportError(err error) discordDiagnostic {
+	cat := discordCategoryNetworkError
+	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			cat = discordCategoryTimeout
+		}
+	}
+	return discordDiagnostic{Category: cat}
+}
+
+// classifyDiscordPayload maps a parsed Discord error payload and HTTP status
+// to a stable category. Payload-driven categories (invalid_grant,
+// invalid_client, redirect_uri_mismatch) take precedence over the bare HTTP
+// status because Discord sometimes returns these alongside unexpected codes.
+func classifyDiscordPayload(status int, payload discordErrorPayload) discordErrorCategory {
+	errCode := strings.ToLower(strings.TrimSpace(payload.Error))
+	desc := strings.ToLower(payload.ErrorDescription)
+	switch errCode {
+	case "invalid_grant":
+		return discordCategoryInvalidGrant
+	case "invalid_client":
+		return discordCategoryInvalidClient
+	case "invalid_request":
+		if strings.Contains(desc, "redirect_uri") {
+			return discordCategoryRedirectURIMismatch
+		}
+	}
+	if status == http.StatusTooManyRequests {
+		return discordCategoryRateLimited
+	}
+	switch status {
+	case http.StatusUnauthorized:
+		return discordCategoryUnauthorized
+	case http.StatusForbidden:
+		return discordCategoryForbidden
+	}
+	return discordCategoryDiscordError
+}
+
+// classifyDiscordResponseError reads a bounded slice of the response body and
+// classifies the failure based on the HTTP status and parsed Discord payload.
+// The body is consumed (or capped) so a malicious upstream cannot pin the
+// connection. An empty or non-JSON body never produces bad_response here — the
+// status code alone is enough to classify non-200 responses, and a missing
+// body is not itself a "bad response" at the HTTP level.
+func classifyDiscordResponseError(res *http.Response) discordDiagnostic {
+	diag := discordDiagnostic{
+		Status:     res.StatusCode,
+		RetryAfter: parseDiscordRetryAfter(res.Header.Get("Retry-After")),
+	}
+	body, err := readDiscordLimitedBody(res.Body, discordResponseBodyLimit)
+	if err != nil {
+		if errors.Is(err, errDiscordBodyTooLarge) {
+			diag.Category = discordCategoryBodyTooLarge
+			return diag
+		}
+		// Read failure (not oversize): classify by status with an empty
+		// payload. The body is gone but the status code is still reliable.
+		diag.Category = classifyDiscordPayload(res.StatusCode, discordErrorPayload{})
+		return diag
+	}
+	var payload discordErrorPayload
+	if uerr := common.Unmarshal(body, &payload); uerr != nil {
+		// Non-JSON body (e.g., an HTML interstitial from a CDN): classify
+		// by status, since the status code is authoritative even when the
+		// body is not JSON.
+		diag.Category = classifyDiscordPayload(res.StatusCode, discordErrorPayload{})
+		return diag
+	}
+	diag.Category = classifyDiscordPayload(res.StatusCode, payload)
+	return diag
+}
+
+// discordDecodeDiagnostic converts an error returned by decodeDiscordJSONLimited
+// into a diagnostic category, distinguishing oversize bodies from generic
+// decode failures.
+func discordDecodeDiagnostic(status int, err error) discordDiagnostic {
+	diag := discordDiagnostic{Status: status, Category: discordCategoryBadResponse}
+	if errors.Is(err, errDiscordBodyTooLarge) {
+		diag.Category = discordCategoryBodyTooLarge
+	}
+	return diag
+}
+
 func (p *DiscordProvider) GetName() string {
 	return "Discord"
 }
@@ -102,8 +308,6 @@ func (p *DiscordProvider) ExchangeToken(ctx context.Context, code string, c *gin
 		return nil, NewOAuthError(i18n.MsgOAuthInvalidCode, nil)
 	}
 
-	logger.LogDebug(ctx, "[OAuth-Discord] ExchangeToken: code=%s...", code[:min(len(code), 10)])
-
 	settings := system_setting.GetDiscordSettings()
 	redirectUri := fmt.Sprintf("%s/oauth/discord", system_setting.ServerAddress)
 	values := url.Values{}
@@ -115,29 +319,39 @@ func (p *DiscordProvider) ExchangeToken(ctx context.Context, code string, c *gin
 
 	logger.LogDebug(ctx, "[OAuth-Discord] ExchangeToken: redirect_uri=%s", redirectUri)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://discord.com/api/v10/oauth2/token", strings.NewReader(values.Encode()))
+	endpoint := strings.TrimRight(discordAPIBaseURL, "/") + "/oauth2/token"
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(values.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	client := http.Client{
-		Timeout: 5 * time.Second,
+	client := discordHTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] ExchangeToken error: %s", err.Error()))
-		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthConnectFailed, map[string]any{"Provider": "Discord"}, err.Error())
+		diag := classifyDiscordTransportError(err)
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] token exchange failed: %s", diag.Raw()))
+		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthConnectFailed, map[string]any{"Provider": "Discord"}, diag.Raw())
 	}
 	defer res.Body.Close()
 
 	logger.LogDebug(ctx, "[OAuth-Discord] ExchangeToken response status: %d", res.StatusCode)
 
+	if res.StatusCode != http.StatusOK {
+		diag := classifyDiscordResponseError(res)
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] token exchange failed: %s", diag.Raw()))
+		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthTokenFailed, map[string]any{"Provider": "Discord"}, diag.Raw())
+	}
+
 	var discordResponse discordOAuthResponse
-	if err = common.DecodeJson(res.Body, &discordResponse); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] ExchangeToken decode error: %s", err.Error()))
-		return nil, err
+	if err = decodeDiscordJSONLimited(res.Body, &discordResponse); err != nil {
+		diag := discordDecodeDiagnostic(res.StatusCode, err)
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] token exchange decode failed: %s", diag.Raw()))
+		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthTokenFailed, map[string]any{"Provider": "Discord"}, diag.Raw())
 	}
 
 	if discordResponse.AccessToken == "" {
@@ -173,22 +387,25 @@ func (p *DiscordProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetUserInfo error: %s", err.Error()))
-		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthConnectFailed, map[string]any{"Provider": "Discord"}, err.Error())
+		diag := classifyDiscordTransportError(err)
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetUserInfo failed: %s", diag.Raw()))
+		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthConnectFailed, map[string]any{"Provider": "Discord"}, diag.Raw())
 	}
 	defer res.Body.Close()
 
 	logger.LogDebug(ctx, "[OAuth-Discord] GetUserInfo response status: %d", res.StatusCode)
 
 	if res.StatusCode != http.StatusOK {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetUserInfo failed: status=%d", res.StatusCode))
-		return nil, NewOAuthError(i18n.MsgOAuthGetUserErr, nil)
+		diag := classifyDiscordResponseError(res)
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetUserInfo failed: %s", diag.Raw()))
+		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthGetUserErr, map[string]any{"Provider": "Discord"}, diag.Raw())
 	}
 
 	var discordUser discordUser
-	if err = common.DecodeJson(res.Body, &discordUser); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetUserInfo decode error: %s", err.Error()))
-		return nil, err
+	if err = decodeDiscordJSONLimited(res.Body, &discordUser); err != nil {
+		diag := discordDecodeDiagnostic(res.StatusCode, err)
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetUserInfo decode failed: %s", diag.Raw()))
+		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthGetUserErr, map[string]any{"Provider": "Discord"}, diag.Raw())
 	}
 
 	if discordUser.UID == "" || discordUser.ID == "" {
@@ -465,16 +682,20 @@ func evaluateDiscordGateGroup(ctx context.Context, accessToken string, group sys
 func evaluateDiscordGateRule(ctx context.Context, accessToken string, rule system_setting.DiscordGateRule, isBan bool, cache map[string]discordMemberFetchResult) discordRuleResult {
 	fetch := fetchDiscordGuildMember(ctx, accessToken, rule.GuildID, cache)
 	if fetch.Err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] guild member fetch failed: guild=%s err=%s", rule.GuildID, fetch.Err.Error()))
+		// fetchDiscordGuildMember already logged the diagnostic detail.
 		return discordRuleUnknown
 	}
 	switch fetch.Status {
 	case http.StatusOK:
 		// continue below
 	case http.StatusNotFound:
+		// 404 means the user is genuinely not a member; this is a real
+		// rule failure, not a transient outage.
 		return discordRuleFail
 	default:
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] guild member fetch unexpected status: guild=%s status=%d", rule.GuildID, fetch.Status))
+		// 429/401/403/5xx/body_too_large are all transient or unknown —
+		// never treat as "not a member". fetchDiscordGuildMember already
+		// logged the categorized diagnostic.
 		return discordRuleUnknown
 	}
 	if fetch.Member == nil {
@@ -514,20 +735,32 @@ func fetchDiscordGuildMember(ctx context.Context, accessToken, guildID string, c
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		result.Err = err
+		diag := classifyDiscordTransportError(err)
+		result.Err = fmt.Errorf("discord guild member fetch: %s", diag.Raw())
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] guild member fetch failed: guild=%s %s", guildID, diag.Raw()))
 		return result
 	}
 	defer res.Body.Close()
 	result.Status = res.StatusCode
-	if res.StatusCode != http.StatusOK {
+
+	if res.StatusCode == http.StatusOK {
+		var member discordGuildMember
+		if err := decodeDiscordJSONLimited(res.Body, &member); err != nil {
+			diag := discordDecodeDiagnostic(res.StatusCode, err)
+			result.Err = fmt.Errorf("discord guild member decode: %s", diag.Raw())
+			logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] guild member decode failed: guild=%s %s", guildID, diag.Raw()))
+			return result
+		}
+		result.Member = &member
 		return result
 	}
-	var member discordGuildMember
-	if err := common.DecodeJson(res.Body, &member); err != nil {
-		result.Err = err
-		return result
-	}
-	result.Member = &member
+
+	// Non-200: classify for diagnostics without consuming an unbounded body.
+	// 404 stays a deliberate "not a member" failure for the rule evaluator;
+	// every other status (429/401/403/5xx/body_too_large) stays unknown so
+	// we never accidentally treat a transient outage as "not a member".
+	diag := classifyDiscordResponseError(res)
+	logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] guild member fetch non-ok: guild=%s %s", guildID, diag.Raw()))
 	return result
 }
 

@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 )
@@ -219,20 +221,58 @@ func refreshDiscordAccessToken(ctx context.Context, refreshToken string) (*OAuth
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, false, err
+		diag := classifyDiscordTransportError(err)
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] refresh token failed: %s", diag.Raw()))
+		// Network/timeout failures must NOT clear the refresh token or the
+		// existing gate pass — only an explicit invalid_grant does.
+		return nil, false, fmt.Errorf("discord refresh token: %s", diag.Raw())
 	}
 	defer res.Body.Close()
 
-	var tokenResponse discordRefreshTokenResponse
-	if err := common.DecodeJson(res.Body, &tokenResponse); err != nil {
-		return nil, false, err
+	// Read a bounded body regardless of status. Discord returns invalid_grant
+	// on 400 with a JSON error body, but edge cases (proxies, CDNs) may also
+	// surface errors on other codes; decoding once keeps the invalid_grant
+	// detection uniform without ever reading an unbounded body.
+	body, readErr := readDiscordLimitedBody(res.Body, discordResponseBodyLimit)
+	retryAfter := parseDiscordRetryAfter(res.Header.Get("Retry-After"))
+	if readErr != nil {
+		diag := discordDiagnostic{Status: res.StatusCode, RetryAfter: retryAfter, Category: discordCategoryBadResponse}
+		if errors.Is(readErr, errDiscordBodyTooLarge) {
+			diag.Category = discordCategoryBodyTooLarge
+		}
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] refresh token body read failed: %s", diag.Raw()))
+		// Body-too-large / read failure must NOT clear the refresh token.
+		return nil, false, fmt.Errorf("discord refresh token: %s", diag.Raw())
 	}
+
+	var tokenResponse discordRefreshTokenResponse
+	if uerr := common.Unmarshal(body, &tokenResponse); uerr != nil {
+		diag := discordDiagnostic{Status: res.StatusCode, RetryAfter: retryAfter, Category: discordCategoryBadResponse}
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] refresh token decode failed: %s", diag.Raw()))
+		// Unparseable body must NOT clear the refresh token.
+		return nil, false, fmt.Errorf("discord refresh token: %s", diag.Raw())
+	}
+
+	// Only an explicit invalid_grant clears the refresh token and forces
+	// reauthorization. invalid_client, 429, 5xx, body_too_large, timeout and
+	// network errors all leave the token intact so the existing gate pass
+	// survives transient outages.
 	if tokenResponse.Error == "invalid_grant" {
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] refresh token rejected: category=invalid_grant status=%d", res.StatusCode))
 		return nil, true, nil
 	}
+
 	if res.StatusCode != http.StatusOK || strings.TrimSpace(tokenResponse.AccessToken) == "" {
-		return nil, false, fmt.Errorf("discord token refresh failed: status=%d error=%s", res.StatusCode, tokenResponse.Error)
+		payload := discordErrorPayload{Error: tokenResponse.Error, ErrorDescription: tokenResponse.Description}
+		diag := discordDiagnostic{
+			Status:     res.StatusCode,
+			RetryAfter: retryAfter,
+			Category:   classifyDiscordPayload(res.StatusCode, payload),
+		}
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] refresh token failed: %s", diag.Raw()))
+		return nil, false, fmt.Errorf("discord refresh token: %s", diag.Raw())
 	}
+
 	return &OAuthToken{
 		AccessToken:  tokenResponse.AccessToken,
 		RefreshToken: tokenResponse.RefreshToken,
