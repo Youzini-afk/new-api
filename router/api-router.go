@@ -460,6 +460,16 @@ func SetApiRouter(router *gin.Engine) {
 			keyLookupRoute.GET("/", controller.LookupByKey)
 		}
 
+		// Error insight — admin-only governance analytics for relay errors.
+		errorInsightRoute := apiRouter.Group("/error_insight")
+		errorInsightRoute.Use(middleware.AdminAuth())
+		{
+			errorInsightRoute.GET("/summary", controller.GetErrorInsightSummary)
+			errorInsightRoute.GET("/signatures", controller.GetErrorInsightSignatures)
+			errorInsightRoute.GET("/logs", controller.GetErrorInsightLogs)
+			errorInsightRoute.DELETE("/signatures/:signature", controller.DeleteErrorInsightSignature)
+		}
+
 		// Deployments (model deployment management)
 		deploymentsRoute := apiRouter.Group("/deployments")
 		deploymentsRoute.Use(middleware.AdminAuth())

@@ -49,6 +49,7 @@ import { Route as AuthenticatedOperationsStatsIndexRouteImport } from './routes/
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedLogScreeningIndexRouteImport } from './routes/_authenticated/log-screening/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
+import { Route as AuthenticatedErrorInsightIndexRouteImport } from './routes/_authenticated/error-insight/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
@@ -284,6 +285,12 @@ const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
   path: '/keys/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedErrorInsightIndexRoute =
+  AuthenticatedErrorInsightIndexRouteImport.update({
+    id: '/error-insight/',
+    path: '/error-insight/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDashboardIndexRoute =
   AuthenticatedDashboardIndexRouteImport.update({
     id: '/dashboard/',
@@ -462,6 +469,7 @@ export interface FileRoutesByFullPath {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/error-insight/': typeof AuthenticatedErrorInsightIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/log-screening/': typeof AuthenticatedLogScreeningIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
@@ -525,6 +533,7 @@ export interface FileRoutesByTo {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
+  '/error-insight': typeof AuthenticatedErrorInsightIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/log-screening': typeof AuthenticatedLogScreeningIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
@@ -592,6 +601,7 @@ export interface FileRoutesById {
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/_authenticated/error-insight/': typeof AuthenticatedErrorInsightIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/log-screening/': typeof AuthenticatedLogScreeningIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
@@ -658,6 +668,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/channels/'
     | '/dashboard/'
+    | '/error-insight/'
     | '/keys/'
     | '/log-screening/'
     | '/models/'
@@ -721,6 +732,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/channels'
     | '/dashboard'
+    | '/error-insight'
     | '/keys'
     | '/log-screening'
     | '/models'
@@ -787,6 +799,7 @@ export interface FileRouteTypes {
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
+    | '/_authenticated/error-insight/'
     | '/_authenticated/keys/'
     | '/_authenticated/log-screening/'
     | '/_authenticated/models/'
@@ -1120,6 +1133,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedKeysIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/error-insight/': {
+      id: '/_authenticated/error-insight/'
+      path: '/error-insight'
+      fullPath: '/error-insight/'
+      preLoaderRoute: typeof AuthenticatedErrorInsightIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard/': {
       id: '/_authenticated/dashboard/'
       path: '/dashboard'
@@ -1386,6 +1406,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
+  AuthenticatedErrorInsightIndexRoute: typeof AuthenticatedErrorInsightIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedLogScreeningIndexRoute: typeof AuthenticatedLogScreeningIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
@@ -1413,6 +1434,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
+  AuthenticatedErrorInsightIndexRoute: AuthenticatedErrorInsightIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedLogScreeningIndexRoute: AuthenticatedLogScreeningIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
