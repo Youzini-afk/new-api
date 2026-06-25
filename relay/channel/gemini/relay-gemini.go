@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/governance"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -1535,15 +1536,20 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 
 		service.ResetStatusCode(newAPIError, c.GetString("status_code_mapping"))
 
+		// Governance: sanitize the Gemini block/empty error before writing to
+		// the client. The raw Gemini block reason is replaced by the
+		// governance-classified safe message. Billing semantics are
+		// preserved: we still return &usage, nil (not an error).
+		safe := governance.SanitizeRelayErrorForClient(c, newAPIError)
 		switch info.RelayFormat {
 		case types.RelayFormatClaude:
-			c.JSON(newAPIError.StatusCode, gin.H{
+			c.JSON(safe.StatusCode, gin.H{
 				"type":  "error",
-				"error": newAPIError.ToClaudeError(),
+				"error": safe.ClaudeError(),
 			})
 		default:
-			c.JSON(newAPIError.StatusCode, gin.H{
-				"error": newAPIError.ToOpenAIError(),
+			c.JSON(safe.StatusCode, gin.H{
+				"error": safe.OpenAIError,
 			})
 		}
 		return &usage, nil
