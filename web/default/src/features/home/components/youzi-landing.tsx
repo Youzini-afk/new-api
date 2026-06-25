@@ -371,8 +371,6 @@ function FloatingModelNodes() {
 }
 
 export function YouziLanding(props: YouziLandingProps) {
-  const { t } = useTranslation()
-
   return (
     <main className='bg-background text-foreground relative h-svh min-h-svh w-full overflow-hidden'>
       <YouziStarTunnelBackground />
@@ -390,10 +388,6 @@ export function YouziLanding(props: YouziLandingProps) {
         >
           Youziapi
         </h1>
-
-        <p className='landing-animate-fade-up text-foreground/70 mt-4 max-w-[min(86vw,760px)] text-base font-semibold tracking-[0.08em] [animation-delay:120ms] sm:text-xl md:text-2xl dark:text-pink-100/82'>
-          {t('Where AI calls become Youzi trails')}
-        </p>
       </section>
     </main>
   )
