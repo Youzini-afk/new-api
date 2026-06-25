@@ -379,11 +379,11 @@ export function YouziLanding(props: YouziLandingProps) {
 
       <section className='relative z-10 flex h-svh min-h-svh flex-col items-center justify-center px-5 text-center'>
         <h1
-          className='landing-animate-scale-in text-[clamp(4.5rem,13vw,10rem)] leading-none font-normal tracking-[-0.055em] text-[#d63384] select-none dark:text-[#ff85a2]'
+          className='landing-animate-scale-in bg-gradient-to-br from-[#7cb342] via-[#fdd835] to-[#fb8c00] bg-clip-text text-[clamp(4.5rem,13vw,10rem)] leading-none font-normal tracking-[-0.04em] select-none dark:from-[#b3e85a] dark:via-[#ffe14d] dark:to-[#ffa733]'
           style={{
-            fontFamily: 'Pacifico, "Segoe Script", "Marker Felt", cursive',
-            textShadow:
-              '0 0 28px rgba(255,133,162,0.48), 0 0 64px rgba(255,133,162,0.24), 0 2px 8px rgba(0,0,0,0.22)',
+            fontFamily: 'Lobster, "Segoe Script", "Marker Felt", cursive',
+            filter:
+              'drop-shadow(0 0 26px rgba(255, 200, 60, 0.42)) drop-shadow(0 2px 6px rgba(0,0,0,0.18))',
           }}
         >
           Youziapi

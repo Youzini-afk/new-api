@@ -71,7 +71,7 @@
         "@base-ui/react": "^1.5.0",
         "@fontsource-variable/lora": "^5.2.8",
         "@fontsource-variable/public-sans": "^5.2.7",
-        "@fontsource/pacifico": "^5.2.7",
+        "@fontsource/lobster": "^5.2.8",
         "@hookform/resolvers": "^5.4.0",
         "@hugeicons/core-free-icons": "^4.1.4",
         "@hugeicons/react": "^1.1.6",
@@ -392,7 +392,7 @@
 
     "@fontsource-variable/public-sans": ["@fontsource-variable/public-sans@5.2.7", "", {}, "sha512-4mvade2J3slKkvwRkS+p8T3szet/0vhWoSnuUJTVU81Uo2pRpSZY/Y8bSLRqpSwzIPxjVmRJ53oq6JKP/l/PSg=="],
 
-    "@fontsource/pacifico": ["@fontsource/pacifico@5.2.7", "", {}, "sha512-L+YiZn3Lb8rVN15zcLlti62doVxQeFpS+dJmulKkFrUo3dZIAxZLHwXoKaaHm+VVcOTrT/mmKCZqGOIWVmFV2w=="],
+    "@fontsource/lobster": ["@fontsource/lobster@5.2.8", "", {}, "sha512-5xlo4rcvefhac1tnwingFR9OT9wZYUVwlm4Iemx21flMCH8Z7mS4bNHosUtoRodPB8KLLFgywfjUbyt5rNRLng=="],
 
     "@giscus/react": ["@giscus/react@3.1.0", "", { "dependencies": { "giscus": "^1.6.0" }, "peerDependencies": { "react": "^16 || ^17 || ^18 || ^19", "react-dom": "^16 || ^17 || ^18 || ^19" } }, "sha512-0TCO2TvL43+oOdyVVGHDItwxD1UMKP2ZYpT6gXmhFOqfAJtZxTzJ9hkn34iAF/b6YzyJ4Um89QIt9z/ajmAEeg=="],
 
