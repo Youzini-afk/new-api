@@ -45,6 +45,7 @@ const schema = z.object({
   enabled: z.boolean(),
   minQuota: z.coerce.number().int().min(0),
   maxQuota: z.coerce.number().int().min(0),
+  maxUserQuota: z.coerce.number().int().min(0),
 })
 
 type Values = z.infer<typeof schema>
@@ -56,6 +57,7 @@ export function CheckinSettingsSection({
     enabled: boolean
     minQuota: number
     maxQuota: number
+    maxUserQuota: number
   }
 }) {
   const { t } = useTranslation()
@@ -67,6 +69,7 @@ export function CheckinSettingsSection({
       enabled: defaultValues.enabled,
       minQuota: defaultValues.minQuota,
       maxQuota: defaultValues.maxQuota,
+      maxUserQuota: defaultValues.maxUserQuota,
     },
   })
 
@@ -94,6 +97,13 @@ export function CheckinSettingsSection({
       updates.push({
         key: 'checkin_setting.max_quota',
         value: String(values.maxQuota),
+      })
+    }
+
+    if (values.maxUserQuota !== defaultValues.maxUserQuota) {
+      updates.push({
+        key: 'checkin_setting.max_user_quota',
+        value: String(values.maxUserQuota),
       })
     }
 
@@ -183,6 +193,30 @@ export function CheckinSettingsSection({
                     </FormControl>
                     <FormDescription>
                       {t('Maximum quota amount awarded for check-in')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='maxUserQuota'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Maximum user quota for check-in')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0}
+                        placeholder={t('0')}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Users with quota at or above this limit cannot check in. 0 means no limit.'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

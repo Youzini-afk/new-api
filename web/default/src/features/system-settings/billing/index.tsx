@@ -105,6 +105,14 @@ const defaultBillingSettings: BillingSettings = {
   'checkin_setting.enabled': false,
   'checkin_setting.min_quota': 1000,
   'checkin_setting.max_quota': 10000,
+  'checkin_setting.max_user_quota': 0,
+  'game_setting.lottery_enabled': false,
+  'game_setting.lottery_daily_buy_limit': 3,
+  'game_setting.lottery_min_stake_quota': 500000,
+  'game_setting.lottery_max_stake_quota': 50000000,
+  'game_setting.lottery_system_injected_quota': 0,
+  'game_setting.lottery_max_user_quota': 0,
+  'game_setting.lottery_draw_hour': 22,
 }
 
 export function BillingSettings() {

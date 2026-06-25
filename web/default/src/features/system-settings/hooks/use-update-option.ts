@@ -36,6 +36,25 @@ const STATUS_RELATED_KEYS = [
   'general_setting.quota_display_type',
   'general_setting.custom_currency_symbol',
   'general_setting.custom_currency_exchange_rate',
+  // Feature toggles exposed via /api/status (drive profile-page gating).
+  'checkin_setting.enabled',
+  'game_setting.lottery_enabled',
+]
+
+const LOTTERY_STATUS_RELATED_KEYS = [
+  'QuotaPerUnit',
+  'USDExchangeRate',
+  'DisplayInCurrencyEnabled',
+  'general_setting.quota_display_type',
+  'general_setting.custom_currency_symbol',
+  'general_setting.custom_currency_exchange_rate',
+  'game_setting.lottery_enabled',
+  'game_setting.lottery_daily_buy_limit',
+  'game_setting.lottery_min_stake_quota',
+  'game_setting.lottery_max_stake_quota',
+  'game_setting.lottery_system_injected_quota',
+  'game_setting.lottery_max_user_quota',
+  'game_setting.lottery_draw_hour',
 ]
 
 export function useUpdateOption() {
@@ -56,6 +75,10 @@ export function useUpdateOption() {
           } catch {
             /* empty */
           }
+        }
+
+        if (LOTTERY_STATUS_RELATED_KEYS.includes(variables.key)) {
+          queryClient.invalidateQueries({ queryKey: ['lottery-status'] })
         }
 
         toast.success(i18next.t('Setting updated successfully'))

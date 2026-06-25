@@ -330,6 +330,14 @@ export type BillingSettings = {
   'checkin_setting.enabled': boolean
   'checkin_setting.min_quota': number
   'checkin_setting.max_quota': number
+  'checkin_setting.max_user_quota': number
+  'game_setting.lottery_enabled': boolean
+  'game_setting.lottery_daily_buy_limit': number
+  'game_setting.lottery_min_stake_quota': number
+  'game_setting.lottery_max_stake_quota': number
+  'game_setting.lottery_system_injected_quota': number
+  'game_setting.lottery_max_user_quota': number
+  'game_setting.lottery_draw_hour': number
 }
 
 export type OperationsSettings = {

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { parseCurrencyDisplayType } from '@/lib/currency'
 import { CheckinSettingsSection } from '../general/checkin-settings-section'
+import { GameSettingsSection } from '../general/game-settings-section'
 import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
@@ -195,6 +196,25 @@ const BILLING_SECTIONS = [
           enabled: settings['checkin_setting.enabled'],
           minQuota: settings['checkin_setting.min_quota'],
           maxQuota: settings['checkin_setting.max_quota'],
+          maxUserQuota: settings['checkin_setting.max_user_quota'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'games',
+    titleKey: 'Games & Lottery',
+    build: (settings: BillingSettings) => (
+      <GameSettingsSection
+        defaultValues={{
+          lotteryEnabled: settings['game_setting.lottery_enabled'],
+          dailyBuyLimit: settings['game_setting.lottery_daily_buy_limit'],
+          minStakeQuota: settings['game_setting.lottery_min_stake_quota'],
+          maxStakeQuota: settings['game_setting.lottery_max_stake_quota'],
+          systemInjectedQuota:
+            settings['game_setting.lottery_system_injected_quota'],
+          maxUserQuota: settings['game_setting.lottery_max_user_quota'],
+          drawHour: settings['game_setting.lottery_draw_hour'],
         }}
       />
     ),
