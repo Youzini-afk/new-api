@@ -35,6 +35,13 @@ func applyPreMutationResultToUser(user *model.User, result *oauth.PreUserMutatio
 	if result.HasDiscordRefreshTokenUpdate {
 		user.DiscordRefreshToken = result.EncryptedDiscordRefreshToken
 	}
+	if result.HasDiscordProfileUpdate {
+		user.DiscordUsername = result.DiscordUsername
+		user.DiscordGlobalName = result.DiscordGlobalName
+		user.DiscordDiscriminator = result.DiscordDiscriminator
+		user.DiscordAvatarHash = result.DiscordAvatarHash
+		user.DiscordProfileSyncedAt = result.DiscordProfileSyncedAt
+	}
 }
 
 func addPreMutationResultUpdates(updates map[string]interface{}, result *oauth.PreUserMutationResult) {
@@ -52,6 +59,13 @@ func addPreMutationResultUpdates(updates map[string]interface{}, result *oauth.P
 	}
 	if result.HasDiscordRefreshTokenUpdate {
 		updates["discord_refresh_token"] = result.EncryptedDiscordRefreshToken
+	}
+	if result.HasDiscordProfileUpdate {
+		updates["discord_username"] = result.DiscordUsername
+		updates["discord_global_name"] = result.DiscordGlobalName
+		updates["discord_discriminator"] = result.DiscordDiscriminator
+		updates["discord_avatar_hash"] = result.DiscordAvatarHash
+		updates["discord_profile_synced_at"] = result.DiscordProfileSyncedAt
 	}
 }
 
@@ -259,9 +273,7 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 			"telegram_id": user.TelegramId,
 		}
 		addPreMutationResultUpdates(updates, preMutationResult)
-		err = model.DB.Transaction(func(tx *gorm.DB) error {
-			return tx.Model(&model.User{}).Where("id = ?", user.Id).Updates(updates).Error
-		})
+		err = model.DB.Model(&model.User{}).Where("id = ?", user.Id).Updates(updates).Error
 		if err != nil {
 			common.ApiError(c, err)
 			return
@@ -419,14 +431,16 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 
 			// Set the provider user ID on the user model and update
 			provider.SetProviderUserID(user, oauthUser.ProviderUserID)
-			if err := tx.Model(user).Updates(map[string]interface{}{
+			updates := map[string]interface{}{
 				"github_id":   user.GitHubId,
 				"discord_id":  user.DiscordId,
 				"oidc_id":     user.OidcId,
 				"linux_do_id": user.LinuxDOId,
 				"wechat_id":   user.WeChatId,
 				"telegram_id": user.TelegramId,
-			}).Error; err != nil {
+			}
+			addPreMutationResultUpdates(updates, preMutationResult)
+			if err := tx.Model(user).Updates(updates).Error; err != nil {
 				return err
 			}
 

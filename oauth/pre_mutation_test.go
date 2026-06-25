@@ -134,9 +134,9 @@ func TestRunPreUserMutation_NilProviderSafe(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestDiscordPreUserMutation_GateDisabled_NoOp verifies the Discord provider
-// is a no-op when neither gate is enabled (the default state), so normal
-// OAuth login/create/bind is unaffected in this phase.
+// TestDiscordPreUserMutation_GateDisabled_NoGate verifies the Discord provider
+// skips gate decisions when neither gate is enabled while still carrying safe
+// profile metadata for the controller to persist.
 func TestDiscordPreUserMutation_GateDisabled_NoOp(t *testing.T) {
 	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
 		settings.RegisterGateEnabled = false
@@ -144,14 +144,59 @@ func TestDiscordPreUserMutation_GateDisabled_NoOp(t *testing.T) {
 	})
 
 	p := &DiscordProvider{}
+	result := &PreUserMutationResult{}
 	err := p.PreUserMutation(context.Background(), PreUserMutationContext{
 		Flow: OAuthFlowCreate,
+		OAuthUser: &OAuthUser{
+			Username:    "discord_user",
+			DisplayName: "Discord User",
+			Extra: map[string]any{
+				"discord_discriminator": "1234",
+				"discord_avatar_hash":   "avatar-hash",
+			},
+		},
+		Result: result,
 	})
 	require.NoError(t, err)
+	assert.True(t, result.HasDiscordProfileUpdate)
+	assert.Equal(t, "discord_user", result.DiscordUsername)
+	assert.Equal(t, "Discord User", result.DiscordGlobalName)
+	assert.Equal(t, "1234", result.DiscordDiscriminator)
+	assert.Equal(t, "avatar-hash", result.DiscordAvatarHash)
+	assert.NotZero(t, result.DiscordProfileSyncedAt)
+	assert.False(t, result.HasDiscordGateUpdate)
+
 	err = p.PreUserMutation(context.Background(), PreUserMutationContext{
 		Flow: OAuthFlowLogin,
 	})
 	require.NoError(t, err)
+}
+
+func TestDiscordPreUserMutation_ProfileFieldsAreBounded(t *testing.T) {
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGateEnabled = false
+		settings.LoginGateEnabled = false
+	})
+
+	result := &PreUserMutationResult{}
+	err := (&DiscordProvider{}).PreUserMutation(context.Background(), PreUserMutationContext{
+		Flow: OAuthFlowCreate,
+		OAuthUser: &OAuthUser{
+			Username:    strings.Repeat("用", discordUsernameMaxRunes+10),
+			DisplayName: strings.Repeat("名", discordGlobalNameMaxRunes+10),
+			Extra: map[string]any{
+				"discord_discriminator": strings.Repeat("1", discordDiscriminatorMaxRunes+10),
+				"discord_avatar_hash":   strings.Repeat("a", discordAvatarHashMaxRunes+10),
+			},
+		},
+		Result: result,
+	})
+	require.NoError(t, err)
+	assert.True(t, result.HasDiscordProfileUpdate)
+	assert.Len(t, []rune(result.DiscordUsername), discordUsernameMaxRunes)
+	assert.Len(t, []rune(result.DiscordGlobalName), discordGlobalNameMaxRunes)
+	assert.Len(t, []rune(result.DiscordDiscriminator), discordDiscriminatorMaxRunes)
+	assert.Len(t, []rune(result.DiscordAvatarHash), discordAvatarHashMaxRunes)
 }
 
 func TestDiscordPreUserMutation_RegisterGatePassSetsResult(t *testing.T) {

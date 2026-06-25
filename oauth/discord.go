@@ -33,9 +33,11 @@ type discordOAuthResponse struct {
 }
 
 type discordUser struct {
-	UID  string `json:"id"`
-	ID   string `json:"username"`
-	Name string `json:"global_name"`
+	UID           string `json:"id"`
+	ID            string `json:"username"`
+	Name          string `json:"global_name"`
+	Discriminator string `json:"discriminator"`
+	Avatar        string `json:"avatar"`
 }
 
 type discordGuildMember struct {
@@ -50,6 +52,11 @@ const (
 	discordGateDecisionDeny    discordGateDecision = "deny"
 	discordGateDecisionBan     discordGateDecision = "ban"
 	discordGateDecisionUnknown discordGateDecision = "unknown"
+
+	discordUsernameMaxRunes      = 128
+	discordGlobalNameMaxRunes    = 128
+	discordDiscriminatorMaxRunes = 16
+	discordAvatarHashMaxRunes    = 128
 
 	discordGateDefaultFailMessage        = "Please join the required Discord server and complete role verification before continuing."
 	discordGateDefaultBanMessage         = "This Discord account is not allowed to access this service."
@@ -153,14 +160,16 @@ func (p *DiscordProvider) ExchangeToken(ctx context.Context, code string, c *gin
 func (p *DiscordProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*OAuthUser, error) {
 	logger.LogDebug(ctx, "[OAuth-Discord] GetUserInfo: fetching user info")
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://discord.com/api/v10/users/@me", nil)
+	endpoint := strings.TrimRight(discordAPIBaseURL, "/") + "/users/@me"
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
-	client := http.Client{
-		Timeout: 5 * time.Second,
+	client := discordHTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
 	}
 	res, err := client.Do(req)
 	if err != nil {
@@ -193,6 +202,12 @@ func (p *DiscordProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*
 		ProviderUserID: discordUser.UID,
 		Username:       discordUser.ID,
 		DisplayName:    discordUser.Name,
+		Extra: map[string]any{
+			"discord_username":      discordUser.ID,
+			"discord_global_name":   discordUser.Name,
+			"discord_discriminator": discordUser.Discriminator,
+			"discord_avatar_hash":   discordUser.Avatar,
+		},
 	}, nil
 }
 
@@ -217,6 +232,8 @@ func (p *DiscordProvider) GetProviderPrefix() string {
 // and login flows. It only validates Discord OAuth flows; non-Discord providers
 // do not implement this hook and remain unaffected.
 func (p *DiscordProvider) PreUserMutation(ctx context.Context, preCtx PreUserMutationContext) error {
+	fillDiscordProfileResult(preCtx.OAuthUser, preCtx.Result)
+
 	settings := system_setting.GetDiscordSettings()
 	gateEnabled := false
 	switch preCtx.Flow {
@@ -269,6 +286,51 @@ func (p *DiscordProvider) PreUserMutation(ctx context.Context, preCtx PreUserMut
 		return err
 	}
 	return nil
+}
+
+func fillDiscordProfileResult(oauthUser *OAuthUser, result *PreUserMutationResult) {
+	if oauthUser == nil || result == nil {
+		return
+	}
+	result.DiscordUsername = truncateDiscordProfileField(oauthUser.Username, discordUsernameMaxRunes)
+	result.DiscordGlobalName = truncateDiscordProfileField(oauthUser.DisplayName, discordGlobalNameMaxRunes)
+	if oauthUser.Extra != nil {
+		if value, ok := oauthUser.Extra["discord_username"].(string); ok {
+			result.DiscordUsername = truncateDiscordProfileField(value, discordUsernameMaxRunes)
+		}
+		if value, ok := oauthUser.Extra["discord_global_name"].(string); ok {
+			result.DiscordGlobalName = truncateDiscordProfileField(value, discordGlobalNameMaxRunes)
+		}
+		if value, ok := oauthUser.Extra["discord_discriminator"].(string); ok {
+			result.DiscordDiscriminator = truncateDiscordProfileField(value, discordDiscriminatorMaxRunes)
+		}
+		if value, ok := oauthUser.Extra["discord_avatar_hash"].(string); ok {
+			result.DiscordAvatarHash = truncateDiscordProfileField(value, discordAvatarHashMaxRunes)
+		}
+	}
+	if result.DiscordUsername == "" {
+		return
+	}
+	result.DiscordProfileSyncedAt = time.Now().Unix()
+	result.HasDiscordProfileUpdate = true
+}
+
+func truncateDiscordProfileField(value string, maxRunes int) string {
+	trimmed := strings.TrimSpace(value)
+	if maxRunes <= 0 {
+		return ""
+	}
+	if len([]rune(trimmed)) <= maxRunes {
+		return trimmed
+	}
+	buf := make([]rune, 0, maxRunes)
+	for _, r := range trimmed {
+		if len(buf) == maxRunes {
+			break
+		}
+		buf = append(buf, r)
+	}
+	return string(buf)
 }
 
 func discordGateNeedsRefreshToken(preCtx PreUserMutationContext) bool {

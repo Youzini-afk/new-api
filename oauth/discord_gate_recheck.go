@@ -116,13 +116,13 @@ func RecheckDiscordGate(ctx context.Context, user *model.User) (DiscordGateReche
 		}
 		extraUpdates["discord_refresh_token"] = encrypted
 	}
-
 	cfg, cfgErr := normalizedDiscordGateConfig()
 	if cfgErr != nil {
 		outcome.Result = discordGateResultError
 		outcome.Reason = "invalid_config"
 		outcome.Message = discordGateInvalidConfigMessage
 		outcome.GatePassed = false
+		addDiscordProfileUpdates(ctx, token, extraUpdates)
 		return persistDiscordGateOutcome(user, outcome, true, extraUpdates)
 	}
 
@@ -130,6 +130,7 @@ func RecheckDiscordGate(ctx context.Context, user *model.User) (DiscordGateReche
 	outcome.Result = string(gateResult.Decision)
 	outcome.Reason = gateResult.Reason
 	outcome.Message = discordGateUserMessage(gateResult, cfg)
+	addDiscordProfileUpdates(ctx, token, extraUpdates)
 	switch gateResult.Decision {
 	case discordGateDecisionPass:
 		outcome.GatePassed = true
@@ -147,6 +148,26 @@ func RecheckDiscordGate(ctx context.Context, user *model.User) (DiscordGateReche
 		outcome.Message = discordGateInvalidConfigMessage
 		return persistDiscordGateOutcome(user, outcome, true, extraUpdates)
 	}
+}
+
+func addDiscordProfileUpdates(ctx context.Context, token *OAuthToken, updates map[string]interface{}) {
+	if token == nil || strings.TrimSpace(token.AccessToken) == "" || updates == nil {
+		return
+	}
+	oauthUser, err := (&DiscordProvider{}).GetUserInfo(ctx, token)
+	if err != nil {
+		return
+	}
+	profileResult := &PreUserMutationResult{}
+	fillDiscordProfileResult(oauthUser, profileResult)
+	if !profileResult.HasDiscordProfileUpdate {
+		return
+	}
+	updates["discord_username"] = profileResult.DiscordUsername
+	updates["discord_global_name"] = profileResult.DiscordGlobalName
+	updates["discord_discriminator"] = profileResult.DiscordDiscriminator
+	updates["discord_avatar_hash"] = profileResult.DiscordAvatarHash
+	updates["discord_profile_synced_at"] = profileResult.DiscordProfileSyncedAt
 }
 
 // ForceDiscordGateReauth clears the Discord refresh token and marks the gate as
@@ -283,6 +304,21 @@ func persistDiscordGateOutcome(user *model.User, outcome DiscordGateRecheckOutco
 	if value, ok := extraUpdates["discord_gate_exempt"].(bool); ok {
 		user.DiscordGateExempt = value
 		outcome.Exempt = value
+	}
+	if value, ok := extraUpdates["discord_username"].(string); ok {
+		user.DiscordUsername = value
+	}
+	if value, ok := extraUpdates["discord_global_name"].(string); ok {
+		user.DiscordGlobalName = value
+	}
+	if value, ok := extraUpdates["discord_discriminator"].(string); ok {
+		user.DiscordDiscriminator = value
+	}
+	if value, ok := extraUpdates["discord_avatar_hash"].(string); ok {
+		user.DiscordAvatarHash = value
+	}
+	if value, ok := extraUpdates["discord_profile_synced_at"].(int64); ok {
+		user.DiscordProfileSyncedAt = value
 	}
 	outcome.GatePassed = user.DiscordGatePassed
 	outcome.Exempt = user.DiscordGateExempt

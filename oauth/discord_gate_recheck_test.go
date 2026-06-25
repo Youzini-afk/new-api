@@ -112,6 +112,9 @@ func TestRecheckDiscordGate_RefreshSuccessGatePassSavesNewToken(t *testing.T) {
 		switch r.URL.Path {
 		case "/oauth2/token":
 			_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer"}`))
+		case "/users/@me":
+			assert.Equal(t, "Bearer new-access", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"id":"discord-1","username":"remote-user","global_name":"Remote User","discriminator":"1234","avatar":"avatar-hash"}`))
 		case "/users/@me/guilds/guild-1/member":
 			assert.Equal(t, "Bearer new-access", r.Header.Get("Authorization"))
 			_, _ = w.Write([]byte(discordTestMemberJSON(time.Now().Add(-24*time.Hour), "role-1")))
@@ -130,9 +133,58 @@ func TestRecheckDiscordGate_RefreshSuccessGatePassSavesNewToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, discordGateResultPass, stored.DiscordLastCheckResult)
 	assert.True(t, stored.DiscordGatePassed)
+	assert.Equal(t, "remote-user", stored.DiscordUsername)
+	assert.Equal(t, "Remote User", stored.DiscordGlobalName)
+	assert.Equal(t, "1234", stored.DiscordDiscriminator)
+	assert.Equal(t, "avatar-hash", stored.DiscordAvatarHash)
+	assert.NotZero(t, stored.DiscordProfileSyncedAt)
 	decrypted, err := common.DecryptWithCryptoSecret(stored.DiscordRefreshToken)
 	require.NoError(t, err)
 	assert.Equal(t, "new-refresh", decrypted)
+}
+
+func TestRecheckDiscordGate_ProfileFetchFailureDoesNotChangeGateOutcome(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGate = discordGateConfig("guild-1", "role-1")
+	})
+	user := createDiscordGateUser(t, model.User{
+		DiscordId:              "discord-1",
+		DiscordRefreshToken:    encryptedDiscordRefreshToken(t, "refresh"),
+		DiscordGatePassed:      true,
+		DiscordUsername:        "old-user",
+		DiscordGlobalName:      "Old User",
+		DiscordDiscriminator:   "0001",
+		DiscordAvatarHash:      "old-avatar",
+		DiscordProfileSyncedAt: 100,
+	})
+	withDiscordTokenAndMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth2/token":
+			_, _ = w.Write([]byte(`{"access_token":"access"}`))
+		case "/users/@me":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/users/@me/guilds/guild-1/member":
+			_, _ = w.Write([]byte(discordTestMemberJSON(time.Now().Add(-24*time.Hour), "role-1")))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	outcome, err := RecheckDiscordGate(context.Background(), user)
+	require.NoError(t, err)
+	assert.Equal(t, discordGateResultPass, outcome.Result)
+	assert.True(t, outcome.GatePassed)
+
+	stored, err := model.GetUserById(user.Id, true)
+	require.NoError(t, err)
+	assert.True(t, stored.DiscordGatePassed)
+	assert.Equal(t, discordGateResultPass, stored.DiscordLastCheckResult)
+	assert.Equal(t, "old-user", stored.DiscordUsername)
+	assert.Equal(t, "Old User", stored.DiscordGlobalName)
+	assert.Equal(t, "0001", stored.DiscordDiscriminator)
+	assert.Equal(t, "old-avatar", stored.DiscordAvatarHash)
+	assert.Equal(t, int64(100), stored.DiscordProfileSyncedAt)
 }
 
 func TestRecheckDiscordGate_DenyAndBanClearGatePassed(t *testing.T) {
@@ -201,9 +253,13 @@ func TestRecheckDiscordGate_RefreshTransientErrorDoesNotClearExistingPass(t *tes
 	})
 	user := createDiscordGateUser(t, model.User{DiscordId: "discord-1", DiscordRefreshToken: encryptedDiscordRefreshToken(t, "refresh"), DiscordGatePassed: true})
 	withDiscordTokenAndMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/oauth2/token", r.URL.Path)
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"error":"temporarily_unavailable"}`))
+		switch r.URL.Path {
+		case "/oauth2/token":
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"temporarily_unavailable"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
 	})
 
 	outcome, err := RecheckDiscordGate(context.Background(), user)
@@ -225,8 +281,14 @@ func TestRecheckDiscordGate_InvalidConfigFailsClosed(t *testing.T) {
 	})
 	user := createDiscordGateUser(t, model.User{DiscordId: "discord-1", DiscordRefreshToken: encryptedDiscordRefreshToken(t, "refresh"), DiscordGatePassed: true})
 	withDiscordTokenAndMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/oauth2/token", r.URL.Path)
-		_, _ = w.Write([]byte(`{"access_token":"access"}`))
+		switch r.URL.Path {
+		case "/oauth2/token":
+			_, _ = w.Write([]byte(`{"access_token":"access"}`))
+		case "/users/@me":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
 	})
 
 	outcome, err := RecheckDiscordGate(context.Background(), user)

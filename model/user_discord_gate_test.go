@@ -20,6 +20,11 @@ func TestUser_DiscordGateFields_JSONNoRefreshLeak(t *testing.T) {
 		Id:                     42,
 		Username:               "discord_user",
 		DiscordId:              "111222333",
+		DiscordUsername:        "remote_user",
+		DiscordGlobalName:      "Remote User",
+		DiscordDiscriminator:   "1234",
+		DiscordAvatarHash:      "avatar-hash-must-not-leak",
+		DiscordProfileSyncedAt: 987654321,
 		DiscordRefreshToken:    "super-secret-refresh-token-must-not-leak",
 		DiscordGatePassed:      true,
 		DiscordGateExempt:      false,
@@ -38,8 +43,16 @@ func TestUser_DiscordGateFields_JSONNoRefreshLeak(t *testing.T) {
 		"refresh token leaked into user JSON")
 	assert.NotContains(t, body, "discord_refresh_token",
 		"discord_refresh_token key leaked into user JSON")
+	assert.NotContains(t, body, "avatar-hash-must-not-leak",
+		"Discord avatar hash leaked into user JSON")
+	assert.NotContains(t, body, "discord_avatar_hash",
+		"discord_avatar_hash key leaked into user JSON")
 
-	// The gate boolean contract fields ARE exposed to the frontend.
+	// The safe profile/gate contract fields ARE exposed to the frontend.
+	assert.Contains(t, body, `"discord_username":"remote_user"`)
+	assert.Contains(t, body, `"discord_global_name":"Remote User"`)
+	assert.Contains(t, body, `"discord_discriminator":"1234"`)
+	assert.Contains(t, body, `"discord_profile_synced_at":987654321`)
 	assert.Contains(t, body, `"discord_gate_passed":true`)
 	assert.Contains(t, body, `"discord_gate_exempt":false`)
 	assert.Contains(t, body, `"discord_last_check_at":123456789`)
@@ -95,6 +108,11 @@ func TestUser_DiscordGateFields_AutoMigrateColumns(t *testing.T) {
 	}
 
 	assert.Contains(t, names, "discord_refresh_token")
+	assert.Contains(t, names, "discord_username")
+	assert.Contains(t, names, "discord_global_name")
+	assert.Contains(t, names, "discord_discriminator")
+	assert.Contains(t, names, "discord_avatar_hash")
+	assert.Contains(t, names, "discord_profile_synced_at")
 	assert.Contains(t, names, "discord_gate_passed")
 	assert.Contains(t, names, "discord_gate_exempt")
 	assert.Contains(t, names, "discord_last_check_at")

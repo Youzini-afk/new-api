@@ -51,9 +51,15 @@ type PreUserMutationResult struct {
 	DiscordLastCheckReason       string
 	DiscordGateMessage           string
 	EncryptedDiscordRefreshToken string
+	DiscordUsername              string
+	DiscordGlobalName            string
+	DiscordDiscriminator         string
+	DiscordAvatarHash            string
+	DiscordProfileSyncedAt       int64
 	HasDiscordGateUpdate         bool
 	HasDiscordCheckUpdate        bool
 	HasDiscordRefreshTokenUpdate bool
+	HasDiscordProfileUpdate      bool
 }
 
 // PreUserMutationValidator is an OPTIONAL side-interface that OAuth providers
