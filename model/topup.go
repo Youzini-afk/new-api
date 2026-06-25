@@ -54,6 +54,13 @@ var (
 	// the remaining Stripe checkout fields the snapshot must agree on.
 	ErrStripeCurrencyMismatch = errors.New("stripe currency mismatch")
 	ErrStripeCustomerMismatch = errors.New("stripe customer mismatch")
+	// Creem-specific validation errors. The order.amount / product.price minor
+	// cents check covers paid-money mismatch via ErrPaidMoneyMismatch; these
+	// cover the remaining Creem checkout fields the snapshot must agree on
+	// (product id, currency, customer).
+	ErrCreemCurrencyMismatch = errors.New("creem currency mismatch")
+	ErrCreemProductMismatch  = errors.New("creem product mismatch")
+	ErrCreemCustomerMismatch = errors.New("creem customer mismatch")
 )
 
 func (topUp *TopUp) Insert() error {
@@ -394,6 +401,14 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	RecordTopupLog(userId, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, "admin")
 	return nil
 }
+
+// RechargeCreem is the legacy Creem wallet topup completion. It is unsafe: it
+// does not validate the verified webhook payload (amount/currency/product/
+// customer/status/type/metadata), does not use a CAS transition, and does not
+// check the user-update RowsAffected. The webhook MUST use CompleteCreemTopUp
+// instead. This function is retained only so existing call sites compile; it
+// is not called by the webhook and cannot be trivially rewritten as a wrapper
+// because it lacks the webhook payload fields needed for validation.
 func RechargeCreem(referenceId string, customerEmail string, customerName string, callerIp string) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
@@ -1007,5 +1022,333 @@ func validateStripeCallbackMatches(topUp *TopUp, user *User, customerID string, 
 	if !actualCents.Equal(expectedCents) {
 		return ErrPaidMoneyMismatch
 	}
+	return nil
+}
+
+// CreemTopUpWebhookPayload carries the verified Creem webhook fields the model
+// needs to validate the stored snapshot. The controller extracts these from the
+// parsed webhook event and passes them in; the model never imports the
+// controller package. Field names mirror the Creem webhook object structure.
+type CreemTopUpWebhookPayload struct {
+	TradeNo         string            // event.Object.RequestId (local reference id)
+	CheckoutStatus  string            // event.Object.Status (must == "completed")
+	OrderStatus     string            // event.Object.Order.Status (must == "paid")
+	OrderType       string            // event.Object.Order.Type (must == "onetime")
+	OrderProduct    string            // event.Object.Order.Product (must == ProductId)
+	OrderAmount     int               // event.Object.Order.Amount (minor cents, must == expectedMinor)
+	OrderCurrency   string            // event.Object.Order.Currency (must == ProductCurrency)
+	ProductId       string            // event.Object.Product.Id (non-empty, must == OrderProduct)
+	ProductPrice    int               // event.Object.Product.Price (minor cents, must == expectedMinor)
+	ProductCurrency string            // event.Object.Product.Currency (must == OrderCurrency)
+	CustomerId      string            // event.Object.Customer.Id (non-empty, must == OrderCustomer)
+	OrderCustomer   string            // event.Object.Order.Customer (must == CustomerId)
+	CustomerEmail   string            // event.Object.Customer.Email (fills user.Email only when empty)
+	CustomerName    string            // event.Object.Customer.Name (logged only)
+	Metadata        map[string]string // event.Object.Metadata (optional cross-checks)
+}
+
+// CreemTopUpCompletion captures the result of a Creem wallet topup completion.
+// Completed is true only when this call transitioned the order from pending to
+// success; a duplicate success notify whose verified payload still matches the
+// stored snapshot returns Completed=false with a nil error so the webhook can
+// ack 200 without re-processing, while a duplicate whose amount/currency/
+// product/customer differs returns the corresponding mismatch error.
+type CreemTopUpCompletion struct {
+	Completed     bool
+	UserId        int
+	QuotaToAdd    int64
+	PayMoney      float64
+	PaymentMethod string
+	CustomerID    string
+}
+
+// CompleteCreemTopUp finalizes a pending Creem wallet topup inside a single DB
+// transaction. It locks the topup row, then validates the verified webhook
+// payload against the stored snapshot — provider, payment method, checkout
+// status, order status, order type, product id consistency, amount/price minor
+// cents, currency, customer, and metadata cross-checks — before atomically
+// transitioning pending -> success via a conditional UPDATE (CAS) and
+// incrementing user quota / filling user.Email in the same transaction.
+//
+// The conditional UPDATE — not the row lock — is the authoritative concurrency
+// guard: exactly one completion's `UPDATE ... WHERE status=pending` matches and
+// credits quota; the loser sees RowsAffected=0 and resolves as an idempotent
+// duplicate. An already-success order returns Completed=false with a nil error
+// when the verified payload still matches, or a mismatch error otherwise. The
+// caller must ack 200 to Creem only after this returns nil.
+//
+// Quota to add is TopUp.Amount directly (the Creem product quota captured at
+// creation, NOT Money * QuotaPerUnit). Money is the expected paid money
+// snapshot; order.amount and product.price (minor cents) must both equal
+// round(Money * 100). amount_paid is intentionally NOT consulted.
+func CompleteCreemTopUp(payload CreemTopUpWebhookPayload, callerIp string) (*CreemTopUpCompletion, error) {
+	tradeNo := payload.TradeNo
+	if tradeNo == "" {
+		return nil, errors.New("未提供支付单号")
+	}
+
+	completion := &CreemTopUpCompletion{}
+	topUp := &TopUp{}
+
+	refCol := "`trade_no`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		refCol = `"trade_no"`
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+
+		if topUp.PaymentProvider != PaymentProviderCreem {
+			return ErrPaymentMethodMismatch
+		}
+		if topUp.PaymentMethod != PaymentMethodCreem {
+			return ErrPaymentMethodMismatch
+		}
+
+		// Read the user best-effort for the email-fill check and the
+		// missing-user rollback path. A missing user on the pending path is
+		// caught by the quota-update RowsAffected==1 guard (order stays
+		// pending).
+		storedUser, userFound := loadCreemUserForTx(tx, topUp.UserId)
+
+		// Idempotent duplicate: an already-success order must not re-add quota,
+		// flip status, or write a second log. The verified payload is still
+		// cross-checked against the stored snapshot so a mismatched duplicate
+		// surfaces as an error rather than being silently swallowed.
+		if topUp.Status == common.TopUpStatusSuccess {
+			if err := validateCreemCallbackMatches(topUp, payload); err != nil {
+				return err
+			}
+			completion.Completed = false
+			completion.UserId = topUp.UserId
+			completion.PaymentMethod = topUp.PaymentMethod
+			completion.PayMoney = topUp.Money
+			completion.CustomerID = strings.TrimSpace(payload.CustomerId)
+			return nil
+		}
+
+		// Non-pending (failed/expired) orders cannot be completed; do not
+		// validate the payload (mirrors CompleteEpayTopUp/CompleteStripeTopUp)
+		// — the status itself is the rejection reason.
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+
+		// Pending transition: validate the verified payload against the stored
+		// snapshot before attempting the CAS.
+		if err := validateCreemCallbackMatches(topUp, payload); err != nil {
+			return err
+		}
+
+		// Creem product quota is captured directly as TopUp.Amount at creation
+		// (no QuotaPerUnit multiplication). Must be positive.
+		quotaToAdd := topUp.Amount
+		if quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
+
+		// CAS transition: flip pending -> success only if the row is still
+		// pending. This is the authoritative concurrency guard — the row lock
+		// is best-effort (no-op on SQLite). A concurrent winner leaves
+		// status=success, so this UPDATE affects 0 rows and we fall through to
+		// duplicate handling below.
+		result := tx.Model(&TopUp{}).Where("id = ? AND status = ?", topUp.Id, common.TopUpStatusPending).Updates(map[string]interface{}{
+			"status":        common.TopUpStatusSuccess,
+			"complete_time": common.GetTimestamp(),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			// Lost the race to a concurrent completion. Re-read to decide: an
+			// already-success order is an idempotent duplicate (after re-checking
+			// the payload); any other status is a status error.
+			refreshed := &TopUp{}
+			if err := tx.Where("id = ?", topUp.Id).First(refreshed).Error; err != nil {
+				return ErrTopUpNotFound
+			}
+			if refreshed.Status == common.TopUpStatusSuccess {
+				if err := validateCreemCallbackMatches(refreshed, payload); err != nil {
+					return err
+				}
+				completion.Completed = false
+				completion.UserId = refreshed.UserId
+				completion.PaymentMethod = refreshed.PaymentMethod
+				completion.PayMoney = refreshed.Money
+				completion.CustomerID = strings.TrimSpace(payload.CustomerId)
+				return nil
+			}
+			return ErrTopUpStatusInvalid
+		}
+
+		// Increment user quota and fill email in the same transaction; require
+		// exactly one row affected so a missing user rolls back the whole
+		// completion (order stays pending) instead of leaving an ack'd-but-
+		// uncredited order. Email is only filled when the user does not already
+		// have one; an existing email is never overwritten.
+		updateFields := map[string]interface{}{
+			"quota": gorm.Expr("quota + ?", quotaToAdd),
+		}
+		webhookEmail := strings.TrimSpace(payload.CustomerEmail)
+		if userFound && strings.TrimSpace(storedUser.Email) == "" && webhookEmail != "" {
+			updateFields["email"] = webhookEmail
+		}
+		userResult := tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updateFields)
+		if userResult.Error != nil {
+			return userResult.Error
+		}
+		if userResult.RowsAffected != 1 {
+			return fmt.Errorf("user quota update affected %d rows, expected 1 (user_id=%d)", userResult.RowsAffected, topUp.UserId)
+		}
+
+		completion.Completed = true
+		completion.UserId = topUp.UserId
+		completion.QuotaToAdd = quotaToAdd
+		completion.PayMoney = topUp.Money
+		completion.PaymentMethod = topUp.PaymentMethod
+		completion.CustomerID = strings.TrimSpace(payload.CustomerId)
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Record log outside the transaction to avoid coupling log failures with
+	// the completion commit; only on an actual pending->success transition.
+	if completion.Completed {
+		RecordTopupLog(completion.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", logger.FormatQuota(int(completion.QuotaToAdd)), completion.PayMoney), callerIp, completion.PaymentMethod, PaymentProviderCreem)
+	}
+
+	return completion, nil
+}
+
+// loadCreemUserForTx reads the user row inside the completion transaction so
+// the email-fill check reflects the in-flight state. Returns (nil, false) when
+// the user is missing (or any read error) instead of erroring, so the caller
+// can route the missing-user case through the RowsAffected==1 quota-update
+// guard.
+func loadCreemUserForTx(tx *gorm.DB, userID int) (*User, bool) {
+	if tx == nil || userID == 0 {
+		return nil, false
+	}
+	user := &User{}
+	if err := tx.Where("id = ?", userID).First(user).Error; err != nil {
+		return nil, false
+	}
+	return user, true
+}
+
+// validateCreemCallbackMatches cross-checks the verified Creem webhook payload
+// against the stored snapshot. Used for both the pending transition and the
+// already-success duplicate path so a mismatched duplicate is reported rather
+// than silently ack'd. Checks:
+//   - checkout/object status == "completed"
+//   - order status == "paid"
+//   - order type == "onetime"
+//   - product id non-empty, and order.product == product.id
+//   - order.currency and product.currency non-empty and equal (upper-case trim)
+//   - customer id non-empty, and order.customer == customer.id
+//   - order.amount (minor cents) == round(TopUp.Money * 100)
+//   - product.price (minor cents) == round(TopUp.Money * 100)
+//   - metadata product_id (if present) == product.id
+//   - metadata reference_id (if present) == tradeNo
+//   - metadata quota (if present) == TopUp.Amount
+//   - metadata price_minor (if present) == expected minor cents
+//   - metadata currency (if present) == order/product currency
+//
+// Amount/price mismatches surface as ErrPaidMoneyMismatch (same sentinel as
+// Stripe/Epay); product, currency, and customer mismatches surface as the
+// Creem-specific sentinels so callers and tests can tell them apart.
+func validateCreemCallbackMatches(topUp *TopUp, payload CreemTopUpWebhookPayload) error {
+	if payload.CheckoutStatus != "completed" {
+		return fmt.Errorf("creem checkout status %q is not completed", payload.CheckoutStatus)
+	}
+	if payload.OrderStatus != "paid" {
+		return fmt.Errorf("creem order status %q is not paid", payload.OrderStatus)
+	}
+	if payload.OrderType != "onetime" {
+		return fmt.Errorf("creem order type %q is not onetime", payload.OrderType)
+	}
+
+	productId := strings.TrimSpace(payload.ProductId)
+	orderProduct := strings.TrimSpace(payload.OrderProduct)
+	if productId == "" {
+		return ErrCreemProductMismatch
+	}
+	if orderProduct != productId {
+		return ErrCreemProductMismatch
+	}
+
+	orderCur := strings.ToUpper(strings.TrimSpace(payload.OrderCurrency))
+	productCur := strings.ToUpper(strings.TrimSpace(payload.ProductCurrency))
+	if orderCur == "" || productCur == "" {
+		return ErrCreemCurrencyMismatch
+	}
+	if orderCur != productCur {
+		return ErrCreemCurrencyMismatch
+	}
+
+	customerId := strings.TrimSpace(payload.CustomerId)
+	orderCustomer := strings.TrimSpace(payload.OrderCustomer)
+	if customerId == "" {
+		return ErrCreemCustomerMismatch
+	}
+	if orderCustomer != customerId {
+		return ErrCreemCustomerMismatch
+	}
+
+	// expectedMinor = round(TopUp.Money * 100). Both order.amount and
+	// product.price are Creem minor cents and must equal this value. Decimal
+	// rounding tolerates float drift; a mismatch surfaces as
+	// ErrPaidMoneyMismatch so the order stays pending for reconciliation.
+	// amount_paid is intentionally NOT consulted.
+	expectedMinor := decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromInt(100)).Round(0)
+	expectedMinorInt := expectedMinor.IntPart()
+	if int64(payload.OrderAmount) != expectedMinorInt {
+		return ErrPaidMoneyMismatch
+	}
+	if int64(payload.ProductPrice) != expectedMinorInt {
+		return ErrPaidMoneyMismatch
+	}
+
+	// Metadata cross-checks: each field is optional, but when present it must
+	// agree with the stored snapshot so a tampered or mismatched metadata
+	// surfaces rather than being silently ack'd.
+	for key, value := range payload.Metadata {
+		switch key {
+		case "product_id":
+			if strings.TrimSpace(value) != productId {
+				return ErrCreemProductMismatch
+			}
+		case "reference_id":
+			if strings.TrimSpace(value) != payload.TradeNo {
+				return fmt.Errorf("creem metadata reference_id mismatch")
+			}
+		case "quota":
+			q, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			if err != nil {
+				return fmt.Errorf("creem metadata quota invalid %q: %w", value, err)
+			}
+			if q != topUp.Amount {
+				return fmt.Errorf("creem metadata quota mismatch")
+			}
+		case "price_minor":
+			pm, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			if err != nil {
+				return fmt.Errorf("creem metadata price_minor invalid %q: %w", value, err)
+			}
+			if pm != expectedMinorInt {
+				return ErrPaidMoneyMismatch
+			}
+		case "currency":
+			if strings.ToUpper(strings.TrimSpace(value)) != orderCur {
+				return ErrCreemCurrencyMismatch
+			}
+		}
+	}
+
 	return nil
 }

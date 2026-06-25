@@ -6,16 +6,18 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/shopspring/decimal"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/thanhpk/randstr"
@@ -82,27 +84,55 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "请选择产品"})
 		return
 	}
+	req.ProductId = strings.TrimSpace(req.ProductId)
 
 	// 解析产品列表
 	var products []CreemProduct
-	err := json.Unmarshal([]byte(setting.CreemProducts), &products)
+	err := common.Unmarshal([]byte(setting.CreemProducts), &products)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 产品配置解析失败 user_id=%d error=%q", c.GetInt("id"), err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "产品配置错误"})
 		return
 	}
 
-	// 查找对应的产品
+	// 查找对应的产品，并在快照中修剪 product id / currency
 	var selectedProduct *CreemProduct
-	for _, product := range products {
-		if product.ProductId == req.ProductId {
-			selectedProduct = &product
+	for i := range products {
+		if strings.TrimSpace(products[i].ProductId) == req.ProductId {
+			trimmed := products[i]
+			trimmed.ProductId = strings.TrimSpace(trimmed.ProductId)
+			trimmed.Currency = strings.TrimSpace(trimmed.Currency)
+			selectedProduct = &trimmed
 			break
 		}
 	}
 
 	if selectedProduct == nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "产品不存在"})
+		return
+	}
+
+	// 在插入待处理订单前验证所选产品快照。非正数的配额/价格、缺失的
+	// 产品 ID 或币种会创建一个永远无法通过 webhook 校验的订单，因此
+	// 必须在前面进行拦截，而不是让 genCreemLink 之后留下一个挂起的订单。
+	if selectedProduct.ProductId == "" {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 产品配置缺少 product_id user_id=%d", c.GetInt("id")))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "产品配置错误"})
+		return
+	}
+	if selectedProduct.Quota <= 0 {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 产品配置 quota 非正数 product_id=%s quota=%d", selectedProduct.ProductId, selectedProduct.Quota))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "产品配置错误"})
+		return
+	}
+	if selectedProduct.Price <= 0 {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 产品配置 price 非正数 product_id=%s price=%.2f", selectedProduct.ProductId, selectedProduct.Price))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "产品配置错误"})
+		return
+	}
+	if selectedProduct.Currency == "" {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 产品配置缺少 currency product_id=%s", selectedProduct.ProductId))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "产品配置错误"})
 		return
 	}
 
@@ -302,18 +332,28 @@ func CreemWebhook(c *gin.Context) {
 
 // 处理支付完成事件
 func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
-	// 验证订单状态
-	if event.Object.Order.Status != "paid" {
-		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem 订单状态未支付，忽略处理 request_id=%s order_id=%s order_status=%s", event.Object.RequestId, event.Object.Order.Id, event.Object.Order.Status))
-		c.Status(http.StatusOK)
-		return
-	}
-
 	// 获取引用ID（这是我们创建订单时传递的request_id）
 	referenceId := event.Object.RequestId
 	if referenceId == "" {
 		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Creem webhook 缺少 request_id event_id=%s order_id=%s", event.Id, event.Object.Order.Id))
 		c.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+
+	// Payment status gate: a signed checkout.completed must additionally
+	// carry checkout status "completed" AND order status "paid" before any
+	// fulfillment runs. CompleteSubscriptionOrder does not understand the
+	// Creem payload's amount/status semantics, so without this gate a
+	// verified-but-not-paid event (e.g. an asynchronous checkout.completed
+	// arriving while the order is still "pending"/"processing") would
+	// directly complete a SubscriptionOrder and provision a UserSubscription
+	// for an unpaid order. Leave the local pending order untouched and ack
+	// 200 (mirrors the verified-mismatch behavior of the wallet branch /
+	// Stripe). The wallet fallback's own validateCreemCallbackMatches gate
+	// remains in place as a defense-in-depth re-check.
+	if event.Object.Status != "completed" || event.Object.Order.Status != "paid" {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Creem webhook 拒绝非已支付事件 trade_no=%s event_id=%s order_id=%s checkout_status=%s order_status=%s", referenceId, event.Id, event.Object.Order.Id, event.Object.Status, event.Object.Order.Status))
+		c.Status(http.StatusOK)
 		return
 	}
 
@@ -330,49 +370,43 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 		return
 	}
 
-	// 验证订单类型，目前只处理一次性付款（充值）
-	if event.Object.Order.Type != "onetime" {
-		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem 暂不支持该订单类型，忽略处理 request_id=%s creem_order_id=%s order_type=%s", referenceId, event.Object.Order.Id, event.Object.Order.Type))
+	// Subscription not found -> wallet topup branch. Pass the verified webhook
+	// payload to CompleteCreemTopUp, which locks the row, validates the stored
+	// snapshot (provider/method/checkout status/order status/order type/product
+	// id/amount/currency/customer/metadata), and CAS-transitions pending ->
+	// success. A mismatch leaves the order pending for reconciliation; the
+	// webhook still acks 200 after a verified event (current Stripe behavior).
+	// The controller no longer does its own TopUp lookup/status/pending
+	// decision and never calls the unsafe legacy RechargeCreem.
+	payload := model.CreemTopUpWebhookPayload{
+		TradeNo:         referenceId,
+		CheckoutStatus:  event.Object.Status,
+		OrderStatus:     event.Object.Order.Status,
+		OrderType:       event.Object.Order.Type,
+		OrderProduct:    event.Object.Order.Product,
+		OrderAmount:     event.Object.Order.Amount,
+		OrderCurrency:   event.Object.Order.Currency,
+		ProductId:       event.Object.Product.Id,
+		ProductPrice:    event.Object.Product.Price,
+		ProductCurrency: event.Object.Product.Currency,
+		CustomerId:      event.Object.Customer.Id,
+		OrderCustomer:   event.Object.Order.Customer,
+		CustomerEmail:   event.Object.Customer.Email,
+		CustomerName:    event.Object.Customer.Name,
+		Metadata:        event.Object.Metadata,
+	}
+	completion, err := model.CompleteCreemTopUp(payload, c.ClientIP())
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 充值处理失败 trade_no=%s creem_order_id=%s client_ip=%s checkout_status=%s order_status=%s order_type=%s order_amount=%d order_currency=%s product_id=%s product_price=%d product_currency=%s customer_id=%s error=%q", referenceId, event.Object.Order.Id, c.ClientIP(), event.Object.Status, event.Object.Order.Status, event.Object.Order.Type, event.Object.Order.Amount, event.Object.Order.Currency, event.Object.Product.Id, event.Object.Product.Price, event.Object.Product.Currency, event.Object.Customer.Id, err.Error()))
 		c.Status(http.StatusOK)
 		return
 	}
 
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem 支付完成回调 trade_no=%s creem_order_id=%s amount_paid=%d currency=%s product_name=%q customer_email=%q customer_name=%q", referenceId, event.Object.Order.Id, event.Object.Order.AmountPaid, event.Object.Order.Currency, event.Object.Product.Name, event.Object.Customer.Email, event.Object.Customer.Name))
-
-	// 查询本地订单确认存在
-	topUp := model.GetTopUpByTradeNo(referenceId)
-	if topUp == nil {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Creem 充值订单不存在 trade_no=%s creem_order_id=%s", referenceId, event.Object.Order.Id))
-		c.AbortWithStatus(http.StatusBadRequest)
-		return
+	if completion.Completed {
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem 充值成功 trade_no=%s creem_order_id=%s user_id=%d quota=%d money=%.2f client_ip=%s", referenceId, event.Object.Order.Id, completion.UserId, completion.QuotaToAdd, completion.PayMoney, c.ClientIP()))
+	} else {
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem 重复到账幂等忽略 trade_no=%s creem_order_id=%s user_id=%d client_ip=%s", referenceId, event.Object.Order.Id, completion.UserId, c.ClientIP()))
 	}
-
-	if topUp.Status != common.TopUpStatusPending {
-		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem 充值订单状态非 pending，忽略处理 trade_no=%s status=%s creem_order_id=%s", referenceId, topUp.Status, event.Object.Order.Id))
-		c.Status(http.StatusOK) // 已处理过的订单，返回成功避免重复处理
-		return
-	}
-
-	// 处理充值，传入客户邮箱和姓名信息
-	customerEmail := event.Object.Customer.Email
-	customerName := event.Object.Customer.Name
-
-	// 防护性检查，确保邮箱和姓名不为空字符串
-	if customerEmail == "" {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Creem 回调客户邮箱为空 trade_no=%s creem_order_id=%s", referenceId, event.Object.Order.Id))
-	}
-	if customerName == "" {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Creem 回调客户姓名为空 trade_no=%s creem_order_id=%s", referenceId, event.Object.Order.Id))
-	}
-
-	err := model.RechargeCreem(referenceId, customerEmail, customerName, c.ClientIP())
-	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 充值处理失败 trade_no=%s creem_order_id=%s client_ip=%s error=%q", referenceId, event.Object.Order.Id, c.ClientIP(), err.Error()))
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
-
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem 充值成功 trade_no=%s creem_order_id=%s quota=%d money=%.2f client_ip=%s", referenceId, event.Object.Order.Id, topUp.Amount, topUp.Money, c.ClientIP()))
 	c.Status(http.StatusOK)
 }
 
@@ -407,7 +441,9 @@ var genCreemLink = func(ctx context.Context, referenceId string, product *CreemP
 		logger.LogInfo(ctx, fmt.Sprintf("Creem 使用测试环境 api_url=%s", apiUrl))
 	}
 
-	// 构建请求数据，确保包含用户邮箱
+	// 构建请求数据，确保包含用户邮箱。元数据快照包含 product_id /
+	// currency / price_minor，以便 webhook 可以交叉检查存储的 TopUp 快照
+	// 是否与已验证的 payload 相匹配。
 	requestData := CreemCheckoutRequest{
 		ProductId: product.ProductId,
 		RequestId: referenceId, // 这个作为订单ID传递给Creem
@@ -416,16 +452,11 @@ var genCreemLink = func(ctx context.Context, referenceId string, product *CreemP
 		}{
 			Email: email, // 用户邮箱会在支付页面预填充
 		},
-		Metadata: map[string]string{
-			"username":     username,
-			"reference_id": referenceId,
-			"product_name": product.Name,
-			"quota":        fmt.Sprintf("%d", product.Quota),
-		},
+		Metadata: creemCheckoutMetadata(referenceId, product, username),
 	}
 
 	// 序列化请求数据
-	jsonData, err := json.Marshal(requestData)
+	jsonData, err := common.Marshal(requestData)
 	if err != nil {
 		return "", fmt.Errorf("序列化请求数据失败: %v", err)
 	}
@@ -466,7 +497,7 @@ var genCreemLink = func(ctx context.Context, referenceId string, product *CreemP
 	}
 	// 解析响应
 	var checkoutResp CreemCheckoutResponse
-	err = json.Unmarshal(body, &checkoutResp)
+	err = common.Unmarshal(body, &checkoutResp)
 	if err != nil {
 		return "", fmt.Errorf("解析响应失败: %v", err)
 	}
@@ -477,4 +508,25 @@ var genCreemLink = func(ctx context.Context, referenceId string, product *CreemP
 
 	logger.LogInfo(ctx, fmt.Sprintf("Creem 支付链接创建成功 trade_no=%s response_id=%s checkout_url=%q", referenceId, checkoutResp.Id, checkoutResp.CheckoutUrl))
 	return checkoutResp.CheckoutUrl, nil
+}
+
+// creemCheckoutMetadata builds the metadata map embedded in the Creem checkout
+// request. Each field is cross-checked by model.CompleteCreemTopUp on webhook
+// completion (when present), so the values must mirror the stored TopUp
+// snapshot captured at creation: reference_id == TradeNo, product_id ==
+// product.ProductId, quota == product.Quota (== TopUp.Amount), price_minor ==
+// round(product.Price * 100) (== TopUp.Money * 100), currency ==
+// product.Currency. Extracted so the controller-level test can verify the
+// metadata contents deterministically without a network round-trip.
+func creemCheckoutMetadata(referenceId string, product *CreemProduct, username string) map[string]string {
+	priceMinor := decimal.NewFromFloat(product.Price).Mul(decimal.NewFromInt(100)).Round(0).String()
+	return map[string]string{
+		"username":     username,
+		"reference_id": referenceId,
+		"product_name": product.Name,
+		"quota":        fmt.Sprintf("%d", product.Quota),
+		"product_id":   product.ProductId,
+		"currency":     product.Currency,
+		"price_minor":  priceMinor,
+	}
 }
