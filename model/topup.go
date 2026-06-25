@@ -3,12 +3,14 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type TopUp struct {
@@ -45,6 +47,7 @@ var (
 	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
 	ErrTopUpNotFound         = errors.New("topup not found")
 	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
+	ErrPaidMoneyMismatch     = errors.New("paid money mismatch")
 )
 
 func (topUp *TopUp) Insert() error {
@@ -585,5 +588,175 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("Waffo Pancake充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money))
 	}
 
+	return nil
+}
+
+// EpayTopUpCompletion captures the result of an Epay top-up completion.
+type EpayTopUpCompletion struct {
+	// Completed is true only when this call transitioned the order from
+	// pending to success. A duplicate success notify whose verified payload
+	// still matches the stored method/money returns Completed=false with a nil
+	// error so callers can ack success without re-processing; a duplicate whose
+	// method or paid money differs returns the corresponding mismatch error.
+	Completed     bool
+	UserId        int
+	QuotaToAdd    int
+	PayMoney      float64
+	PaymentMethod string
+}
+
+// CompleteEpayTopUp finalizes a pending Epay top-up inside a single DB
+// transaction. It locks the topup row, validates provider/payment-method/paid
+// money, then atomically transitions the order from pending to success via a
+// conditional UPDATE (CAS) and increments user quota.
+//
+// The conditional UPDATE — not the row lock — is the authoritative concurrency
+// guard: even when the row lock is a no-op (SQLite) or two instances race,
+// exactly one completion's `UPDATE ... WHERE status=pending` matches and
+// credits quota; the loser sees RowsAffected=0 and resolves as an idempotent
+// duplicate. An already-success order returns Completed=false with a nil error
+// when the verified callback still matches the stored method/money, or a
+// mismatch error otherwise. The caller must ack "success" to the gateway only
+// after this returns nil.
+func CompleteEpayTopUp(tradeNo string, paymentMethod string, paidMoney string, callerIp string) (*EpayTopUpCompletion, error) {
+	if tradeNo == "" {
+		return nil, errors.New("未提供支付单号")
+	}
+
+	completion := &EpayTopUpCompletion{}
+	topUp := &TopUp{}
+
+	refCol := "`trade_no`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		refCol = `"trade_no"`
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+
+		if topUp.PaymentProvider != PaymentProviderEpay {
+			return ErrPaymentMethodMismatch
+		}
+
+		// Idempotent duplicate: an already-success order must not re-add quota,
+		// flip status, or write a second log. The verified callback payload is
+		// still cross-checked against the stored method/money so a mismatched
+		// duplicate surfaces as an error rather than being silently swallowed.
+		if topUp.Status == common.TopUpStatusSuccess {
+			if err := validateEpayCallbackMatches(topUp, paymentMethod, paidMoney); err != nil {
+				return err
+			}
+			completion.Completed = false
+			completion.UserId = topUp.UserId
+			completion.PaymentMethod = topUp.PaymentMethod
+			completion.PayMoney = topUp.Money
+			return nil
+		}
+
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+
+		// Validate the verified callback payload against the stored order
+		// before attempting the transition.
+		if err := validateEpayCallbackMatches(topUp, paymentMethod, paidMoney); err != nil {
+			return err
+		}
+
+		dAmount := decimal.NewFromInt(topUp.Amount)
+		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+		quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
+		if quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
+
+		// CAS transition: flip pending -> success only if the row is still
+		// pending. This is the authoritative concurrency guard — the row lock is
+		// best-effort. A concurrent winner leaves status=success, so this UPDATE
+		// affects 0 rows and we fall through to duplicate/status handling below.
+		result := tx.Model(&TopUp{}).Where("id = ? AND status = ?", topUp.Id, common.TopUpStatusPending).Updates(map[string]interface{}{
+			"status":        common.TopUpStatusSuccess,
+			"complete_time": common.GetTimestamp(),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			// Lost the race to a concurrent completion. Re-read to decide: an
+			// already-success order is an idempotent duplicate (after re-checking
+			// the callback); any other status is a status error.
+			refreshed := &TopUp{}
+			if err := tx.Where("id = ?", topUp.Id).First(refreshed).Error; err != nil {
+				return ErrTopUpNotFound
+			}
+			if refreshed.Status == common.TopUpStatusSuccess {
+				if err := validateEpayCallbackMatches(refreshed, paymentMethod, paidMoney); err != nil {
+					return err
+				}
+				completion.Completed = false
+				completion.UserId = refreshed.UserId
+				completion.PaymentMethod = refreshed.PaymentMethod
+				completion.PayMoney = refreshed.Money
+				return nil
+			}
+			return ErrTopUpStatusInvalid
+		}
+
+		// Increment user quota in the same transaction; require exactly one row
+		// affected so a missing user rolls back the whole completion (order
+		// stays pending) instead of leaving an ack'd-but-uncredited order.
+		quotaResult := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd))
+		if quotaResult.Error != nil {
+			return quotaResult.Error
+		}
+		if quotaResult.RowsAffected != 1 {
+			return fmt.Errorf("user quota update affected %d rows, expected 1 (user_id=%d)", quotaResult.RowsAffected, topUp.UserId)
+		}
+
+		completion.Completed = true
+		completion.UserId = topUp.UserId
+		completion.QuotaToAdd = quotaToAdd
+		completion.PayMoney = topUp.Money
+		completion.PaymentMethod = topUp.PaymentMethod
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Record log outside the transaction to avoid coupling log failures with the
+	// completion commit; only on an actual pending->success transition.
+	if completion.Completed {
+		RecordTopupLog(completion.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.FormatQuota(completion.QuotaToAdd), completion.PayMoney), callerIp, completion.PaymentMethod, PaymentProviderEpay)
+	}
+
+	return completion, nil
+}
+
+// validateEpayCallbackMatches cross-checks the verified callback payload
+// against the stored order: the payment method must match exactly (no silent
+// rewrite) and the paid money must equal the stored money at cent precision
+// (decimal equality tolerates float drift like "9.9900" == "9.99"). Used for
+// both the pending transition and the already-success duplicate path so a
+// mismatched duplicate is reported rather than silently ack'd.
+func validateEpayCallbackMatches(topUp *TopUp, paymentMethod string, paidMoney string) error {
+	if topUp.PaymentMethod != paymentMethod {
+		return ErrPaymentMethodMismatch
+	}
+	topUpMoneyStr := strconv.FormatFloat(topUp.Money, 'f', 2, 64)
+	expectedMoney, err := decimal.NewFromString(topUpMoneyStr)
+	if err != nil {
+		return fmt.Errorf("invalid topup money %q: %w", topUpMoneyStr, err)
+	}
+	actualMoney, err := decimal.NewFromString(paidMoney)
+	if err != nil {
+		return fmt.Errorf("invalid paid money %q: %w", paidMoney, err)
+	}
+	if !actualMoney.Equal(expectedMoney) {
+		return ErrPaidMoneyMismatch
+	}
 	return nil
 }
