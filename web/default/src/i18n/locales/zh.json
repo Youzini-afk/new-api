@@ -5233,6 +5233,17 @@
     "Enforce (Charge)": "强制扣费（实际收费）",
     "No extra billing. Rules are preserved but have no effect.": "不进行额外计费。规则会保留，但不会生效。",
     "Records potential extra charges in consume logs without charging users.": "在消费日志中记录可能的额外费用，但不会向用户扣费。",
-    "Reserves potential extra quota before the upstream call and charges it only if usage still matches.": "上游调用前预留可能的额外额度，只有实际用量仍匹配时才扣费。"
+    "Reserves potential extra quota before the upstream call and charges it only if usage still matches.": "上游调用前预留可能的额外额度，只有实际用量仍匹配时才扣费。",
+    "Logo must be a valid URL or uploaded image": "徽标必须是有效 URL 或上传的图片",
+    "Logo file must be PNG, JPEG, WebP, or GIF": "徽标文件必须是 PNG、JPEG、WebP 或 GIF",
+    "Logo source image must be smaller than {{size}} MB": "徽标原图必须小于 {{size}} MB",
+    "Uploaded image data": "已上传图片数据",
+    "Logo image uploaded. Save changes to apply it.": "徽标图片已上传。保存更改后生效。",
+    "Logo image compressed and uploaded. Save changes to apply it.": "徽标图片已压缩并上传。保存更改后生效。",
+    "Failed to compress logo image below {{size}} KB. Please choose a smaller image.": "无法将徽标图片压缩到 {{size}} KB 以下。请选择更小的图片。",
+    "Upload logo image": "上传徽标图片",
+    "Clear logo": "清除徽标",
+    "Logo preview": "徽标预览",
+    "Use a remote image URL, or upload a local PNG/JPEG/WebP/GIF up to {{sourceSize}} MB. Large images are compressed to {{storedSize}} KB before saving.": "可以使用远程图片 URL，也可以上传不超过 {{sourceSize}} MB 的本地 PNG/JPEG/WebP/GIF。较大的图片会先压缩到 {{storedSize}} KB 再保存。"
   }
 }

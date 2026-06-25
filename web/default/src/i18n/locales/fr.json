@@ -5233,6 +5233,17 @@
     "Enforce (Charge)": "Enforce (Charge)",
     "No extra billing. Rules are preserved but have no effect.": "No extra billing. Rules are preserved but have no effect.",
     "Records potential extra charges in consume logs without charging users.": "Records potential extra charges in consume logs without charging users.",
-    "Reserves potential extra quota before the upstream call and charges it only if usage still matches.": "Reserves potential extra quota before the upstream call and charges it only if usage still matches."
+    "Reserves potential extra quota before the upstream call and charges it only if usage still matches.": "Reserves potential extra quota before the upstream call and charges it only if usage still matches.",
+    "Logo must be a valid URL or uploaded image": "Logo must be a valid URL or uploaded image",
+    "Logo file must be PNG, JPEG, WebP, or GIF": "Logo file must be PNG, JPEG, WebP, or GIF",
+    "Logo source image must be smaller than {{size}} MB": "Logo source image must be smaller than {{size}} MB",
+    "Uploaded image data": "Uploaded image data",
+    "Logo image uploaded. Save changes to apply it.": "Logo image uploaded. Save changes to apply it.",
+    "Logo image compressed and uploaded. Save changes to apply it.": "Logo image compressed and uploaded. Save changes to apply it.",
+    "Failed to compress logo image below {{size}} KB. Please choose a smaller image.": "Failed to compress logo image below {{size}} KB. Please choose a smaller image.",
+    "Upload logo image": "Upload logo image",
+    "Clear logo": "Clear logo",
+    "Logo preview": "Logo preview",
+    "Use a remote image URL, or upload a local PNG/JPEG/WebP/GIF up to {{sourceSize}} MB. Large images are compressed to {{storedSize}} KB before saving.": "Use a remote image URL, or upload a local PNG/JPEG/WebP/GIF up to {{sourceSize}} MB. Large images are compressed to {{storedSize}} KB before saving."
   }
 }

@@ -57,6 +57,7 @@ export const STATIC_I18N_KEYS = [
   'stale',
   'Master instances run scheduled background tasks.',
   'Worker instances do not run master-only background tasks.',
+  'Use a remote image URL, or upload a local PNG/JPEG/WebP/GIF up to {{sourceSize}} MB. Large images are compressed to {{storedSize}} KB before saving.',
 
   // Pricing constants
   'Name',
