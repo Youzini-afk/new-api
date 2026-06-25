@@ -121,6 +121,7 @@ func GetStatus(c *gin.Context) {
 		"privacy_policy_enabled":      legalSetting.PrivacyPolicy != "",
 		"checkin_enabled":             operation_setting.GetCheckinSetting().Enabled,
 		"lottery_enabled":             operation_setting.GetGameSetting().LotteryEnabled,
+		"roulette_enabled":            operation_setting.GetGameSetting().RouletteEnabled,
 	}
 
 	// 根据启用状态注入可选内容

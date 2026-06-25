@@ -124,6 +124,11 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/game/lottery", controller.GetLotteryStatus)
 				selfRoute.POST("/game/lottery/buy", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.BuyLotteryTicket)
 
+				// Roulette routes (Phase 7B, paid instant spin, default disabled).
+				// 旧 gy 6 人免费满员开奖的 /join 路由不迁移（正期望水龙头）。
+				selfRoute.GET("/game/roulette", controller.GetRouletteStatus)
+				selfRoute.POST("/game/roulette/spin", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SpinRoulette)
+
 				// Custom OAuth bindings
 				selfRoute.GET("/oauth/bindings", controller.GetUserOAuthBindings)
 				selfRoute.DELETE("/oauth/bindings/:provider_id", controller.UnbindCustomOAuth)
