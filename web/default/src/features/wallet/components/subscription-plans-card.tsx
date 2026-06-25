@@ -57,6 +57,7 @@ import type {
   PlanRecord,
   UserSubscriptionRecord,
 } from '@/features/subscriptions/types'
+import { isReservedHostedProviderType } from '../lib'
 import type { PaymentMethod, TopupInfo } from '../types'
 
 interface SubscriptionPlansCardProps {
@@ -67,8 +68,11 @@ interface SubscriptionPlansCardProps {
 }
 
 function getEpayMethods(payMethods: PaymentMethod[] = []): PaymentMethod[] {
+  // Standard Epay methods only — reserved hosted provider types are surfaced
+  // through dedicated hooks/sections (and gated by their own creation flags
+  // for the wallet flow, or by plan-level id fields for subscriptions).
   return payMethods.filter(
-    (m) => m?.type && m.type !== 'stripe' && m.type !== 'creem'
+    (m) => !!m?.type && !isReservedHostedProviderType(m.type)
   )
 }
 
@@ -113,9 +117,10 @@ export function SubscriptionPlansCard({
   const [purchaseOpen, setPurchaseOpen] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<PlanRecord | null>(null)
 
-  const enableStripe = !!topupInfo?.enable_stripe_topup
-  const enableCreem = !!topupInfo?.enable_creem_topup
-  const enableWaffoPancake = !!topupInfo?.enable_waffo_pancake_topup
+  // Epay subscription shares the wallet PayMethods list, so it still depends on
+  // the wallet online-topup gate. Hosted subscription providers (Stripe /
+  // Creem / Waffo Pancake) are gated by the plan's own provider id fields
+  // inside the dialog and must NOT depend on wallet topup flags.
   const enableOnlineTopUp = !!topupInfo?.enable_online_topup
   const epayMethods = useMemo(
     () => getEpayMethods(topupInfo?.pay_methods),
@@ -631,9 +636,6 @@ export function SubscriptionPlansCard({
           }
         }}
         plan={selectedPlan}
-        enableStripe={enableStripe}
-        enableCreem={enableCreem}
-        enableWaffoPancake={enableWaffoPancake}
         enableOnlineTopUp={enableOnlineTopUp}
         epayMethods={epayMethods}
         userQuota={userQuota}

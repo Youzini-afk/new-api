@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
 import { formatQuota } from '@/lib/format'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { extractPaymentError, isSafeHttpCheckoutUrl } from '@/features/wallet/lib'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -55,9 +56,6 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   plan: PlanRecord | null
-  enableStripe?: boolean
-  enableCreem?: boolean
-  enableWaffoPancake?: boolean
   enableOnlineTopUp?: boolean
   epayMethods?: PaymentMethod[]
   purchaseLimit?: number
@@ -83,10 +81,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const plan = props.plan?.plan
   if (!plan) return null
 
-  const hasStripe = props.enableStripe && !!plan.stripe_price_id
-  const hasCreem = props.enableCreem && !!plan.creem_product_id
-  const hasWaffoPancake =
-    props.enableWaffoPancake && !!plan.waffo_pancake_product_id
+  // Hosted subscription providers (Stripe / Creem / Waffo Pancake) are shown
+  // whenever the plan has its own provider id field — they must NOT depend on
+  // wallet topup enable flags, which only reflect wallet product IDs. If the
+  // backend rejects (missing API / webhook / compliance), the failure toast
+  // surfaces the backend reason via extractPaymentError.
+  const hasStripe = !!plan.stripe_price_id
+  const hasCreem = !!plan.creem_product_id
+  const hasWaffoPancake = !!plan.waffo_pancake_product_id
+  // Epay subscription reuses the shared PayMethods list, so it still depends
+  // on the wallet online-topup gate (which controls whether Epay is callable).
   const hasEpay =
     props.enableOnlineTopUp && (props.epayMethods || []).length > 0
   const hasAnyPayment = hasStripe || hasCreem || hasWaffoPancake || hasEpay
@@ -116,16 +120,17 @@ export function SubscriptionPurchaseDialog(props: Props) {
     setPaying(true)
     try {
       const res = await paySubscriptionStripe({ plan_id: plan.id })
-      if (res.message === 'success' && res.data?.pay_link) {
-        window.open(res.data.pay_link, '_blank')
+      const payLink = res.data?.pay_link
+      if (res.message === 'success' && payLink) {
+        if (!isSafeHttpCheckoutUrl(payLink)) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
+        window.open(payLink, '_blank')
         toast.success(t('Payment page opened'))
         props.onOpenChange(false)
       } else {
-        toast.error(
-          res.message && res.message !== 'success'
-            ? res.message
-            : t('Payment request failed')
-        )
+        toast.error(extractPaymentError(res, t('Payment request failed')))
       }
     } catch {
       toast.error(t('Payment request failed'))
@@ -138,16 +143,17 @@ export function SubscriptionPurchaseDialog(props: Props) {
     setPaying(true)
     try {
       const res = await paySubscriptionCreem({ plan_id: plan.id })
-      if (res.message === 'success' && res.data?.checkout_url) {
-        window.open(res.data.checkout_url, '_blank')
+      const checkoutUrl = res.data?.checkout_url
+      if (res.message === 'success' && checkoutUrl) {
+        if (!isSafeHttpCheckoutUrl(checkoutUrl)) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
+        window.open(checkoutUrl, '_blank')
         toast.success(t('Payment page opened'))
         props.onOpenChange(false)
       } else {
-        toast.error(
-          res.message && res.message !== 'success'
-            ? res.message
-            : t('Payment request failed')
-        )
+        toast.error(extractPaymentError(res, t('Payment request failed')))
       }
     } catch {
       toast.error(t('Payment request failed'))
@@ -162,15 +168,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
     setPaying(true)
     try {
       const res = await paySubscriptionWaffoPancake({ plan_id: plan.id })
-      if (res.message === 'success' && res.data?.checkout_url) {
+      const checkoutUrl = res.data?.checkout_url
+      if (res.message === 'success' && checkoutUrl) {
+        if (!isSafeHttpCheckoutUrl(checkoutUrl)) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
         toast.success(t('Redirecting to payment page...'))
-        window.location.href = res.data.checkout_url
+        window.location.href = checkoutUrl
       } else {
-        toast.error(
-          res.message && res.message !== 'success'
-            ? res.message
-            : t('Payment request failed')
-        )
+        toast.error(extractPaymentError(res, t('Payment request failed')))
       }
     } catch {
       toast.error(t('Payment request failed'))
@@ -194,9 +201,14 @@ export function SubscriptionPurchaseDialog(props: Props) {
         plan_id: plan.id,
         payment_method: selectedEpayMethod,
       })
-      if (res.message === 'success' && res.url) {
+      const url = res.url
+      if (res.message === 'success' && url) {
+        if (!isSafeHttpCheckoutUrl(url)) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
         const form = document.createElement('form')
-        form.action = res.url
+        form.action = url
         form.method = 'POST'
         if (!isSafari) {
           form.target = '_blank'
@@ -214,11 +226,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
         toast.success(t('Payment initiated'))
         props.onOpenChange(false)
       } else {
-        toast.error(
-          res.message && res.message !== 'success'
-            ? res.message
-            : t('Payment request failed')
-        )
+        toast.error(extractPaymentError(res, t('Payment request failed')))
       }
     } catch {
       toast.error(t('Payment request failed'))
@@ -240,11 +248,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
         void props.onPurchaseSuccess?.()
         props.onOpenChange(false)
       } else {
-        toast.error(
-          res.message && res.message !== 'success'
-            ? res.message
-            : t('Payment request failed')
-        )
+        toast.error(extractPaymentError(res, t('Payment request failed')))
       }
     } catch {
       toast.error(t('Payment request failed'))

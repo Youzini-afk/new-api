@@ -108,31 +108,44 @@ export async function deleteUserSubscription(
 // User-facing Subscription Payment
 // ============================================================================
 
+// All subscription pay endpoints run through these wrappers with
+// `skipBusinessError: true`. The dialog owns the failure toast (using the
+// shared extractPaymentError helper) so the global axios interceptor does not
+// show a duplicate business-error toast on the same failure.
+
 export async function paySubscriptionStripe(
   data: SubscriptionPayRequest
 ): Promise<SubscriptionPayResponse> {
-  const res = await api.post('/api/subscription/stripe/pay', data)
+  const res = await api.post('/api/subscription/stripe/pay', data, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
   return res.data
 }
 
 export async function paySubscriptionCreem(
   data: SubscriptionPayRequest
 ): Promise<SubscriptionPayResponse> {
-  const res = await api.post('/api/subscription/creem/pay', data)
+  const res = await api.post('/api/subscription/creem/pay', data, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
   return res.data
 }
 
 export async function paySubscriptionWaffoPancake(
   data: SubscriptionPayRequest
 ): Promise<SubscriptionPayResponse> {
-  const res = await api.post('/api/subscription/waffo-pancake/pay', data)
+  const res = await api.post('/api/subscription/waffo-pancake/pay', data, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
   return res.data
 }
 
 export async function paySubscriptionBalance(
   data: SubscriptionPayRequest
 ): Promise<SubscriptionPayResponse> {
-  const res = await api.post('/api/subscription/balance/pay', data)
+  const res = await api.post('/api/subscription/balance/pay', data, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
   return res.data
 }
 
@@ -165,14 +178,18 @@ export async function listWaffoPancakeSubscriptionProductOptions(): Promise<
   return res.data
 }
 
+// Epay subscription pay: backend responds with
+// `{ message: "success", data: formParams, url }`, where `url` is the Epay
+// endpoint the form should POST to (top-level response field). The
+// `SubscriptionPayResponse` type already models `url` at the top level, so
+// the response is returned as-is.
 export async function paySubscriptionEpay(
   data: SubscriptionPayRequest & { payment_method: string }
-): Promise<SubscriptionPayResponse & { url?: string }> {
-  const res = await api.post('/api/subscription/epay/pay', data)
-  return {
-    ...res.data,
-    url: res.data.url || (res as unknown as { url?: string }).url,
-  }
+): Promise<SubscriptionPayResponse> {
+  const res = await api.post('/api/subscription/epay/pay', data, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
 }
 
 // ============================================================================

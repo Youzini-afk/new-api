@@ -31,6 +31,8 @@ import {
   isStripePayment,
   isWaffoPancakePayment,
   submitPaymentForm,
+  extractPaymentError,
+  isSafeHttpCheckoutUrl,
 } from '../lib'
 
 // ============================================================================
@@ -84,36 +86,51 @@ export function usePayment() {
         const isStripe = isStripePayment(paymentType)
         const amount = Math.floor(topupAmount)
 
-        const response = isStripe
-          ? await requestStripePayment({
-              amount,
-              payment_method: 'stripe',
-            })
-          : await requestPayment({
-              amount,
-              payment_method: paymentType,
-            })
+        if (isStripe) {
+          const response = await requestStripePayment({
+            amount,
+            payment_method: 'stripe',
+          })
 
-        if (!isApiSuccess(response)) {
-          toast.error(response.message || i18next.t('Payment request failed'))
-          return false
-        }
+          if (!isApiSuccess(response)) {
+            toast.error(extractPaymentError(response))
+            return false
+          }
 
-        // Handle Stripe payment
-        if (isStripe && response.data?.pay_link) {
-          window.open(response.data.pay_link as string, '_blank')
-          toast.success(i18next.t('Redirecting to payment page...'))
-          return true
-        }
-
-        // Handle non-Stripe payment
-        if (!isStripe && response.data) {
-          const url = (response as unknown as { url?: string }).url
-          if (url) {
-            submitPaymentForm(url, response.data)
+          const payLink = response.data?.pay_link
+          if (payLink) {
+            if (!isSafeHttpCheckoutUrl(payLink)) {
+              toast.error(i18next.t('Invalid payment redirect URL'))
+              return false
+            }
+            window.open(payLink, '_blank')
             toast.success(i18next.t('Redirecting to payment page...'))
             return true
           }
+
+          return false
+        }
+
+        // Non-Stripe (Epay) payment
+        const response = await requestPayment({
+          amount,
+          payment_method: paymentType,
+        })
+
+        if (!isApiSuccess(response)) {
+          toast.error(extractPaymentError(response))
+          return false
+        }
+
+        const url = response.url
+        if (response.data && url) {
+          if (!isSafeHttpCheckoutUrl(url)) {
+            toast.error(i18next.t('Invalid payment redirect URL'))
+            return false
+          }
+          submitPaymentForm(url, response.data)
+          toast.success(i18next.t('Redirecting to payment page...'))
+          return true
         }
 
         return false

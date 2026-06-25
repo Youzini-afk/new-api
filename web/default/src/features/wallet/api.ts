@@ -95,6 +95,10 @@ export async function calculateStripeAmount(
 
 /**
  * Request regular payment
+ *
+ * Backend responds with `{ message: "success", data: formParams, url }`,
+ * where `url` is the Epay endpoint that the form should POST to (top-level
+ * response field, not nested inside `data`).
  */
 export async function requestPayment(
   request: PaymentRequest
@@ -102,10 +106,7 @@ export async function requestPayment(
   const res = await api.post('/api/user/pay', request, {
     skipBusinessError: true,
   } as Record<string, unknown>)
-  return {
-    ...res.data,
-    url: res.data.url || (res as unknown as { url?: string }).url,
-  }
+  return res.data
 }
 
 /**

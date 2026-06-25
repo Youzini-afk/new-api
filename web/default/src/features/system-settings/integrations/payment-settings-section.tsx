@@ -996,7 +996,7 @@ export function PaymentSettingsSection({
                       </FormControl>
                       <FormDescription>
                         {t(
-                          'Configured as PayMethods JSON. The type value decides which payment flow is used: stripe for Stripe, waffo_pancake for Waffo Pancake, and other values are sent to Epay as the type parameter.'
+                          'Configures Epay payment methods only (for example alipay, wxpay). Stripe, Creem, and Waffo Pancake are configured in their own sections/tabs and are shown automatically when their creation gate is satisfied; do not add them here.'
                         )}
                       </FormDescription>
                       <FormMessage />
@@ -1415,11 +1415,18 @@ export function PaymentSettingsSection({
                         <SettingsSwitchContent>
                           <FormLabel>{t('Promotion codes')}</FormLabel>
                           <FormDescription>
-                            {t('Allow users to enter promo codes')}
+                            {t(
+                              'Allow users to enter promo codes. Wallet topup uses fixed PriceId + Quantity mode and always sends AllowPromotionCodes=false to protect the amount snapshot, so this setting does not affect wallet topup.'
+                            )}
                           </FormDescription>
                         </SettingsSwitchContent>
                         <FormControl>
                           <Switch
+                            // Wallet topup forces AllowPromotionCodes=false on the
+                            // backend regardless of this flag, and the current
+                            // Stripe integration only serves wallet topup, so the
+                            // switch is disabled to avoid misleading admins.
+                            disabled
                             checked={field.value}
                             onCheckedChange={field.onChange}
                           />

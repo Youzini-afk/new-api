@@ -80,7 +80,9 @@ export interface UserSubscriptionRecord {
 // ============================================================================
 
 export interface ApiResponse<T = unknown> {
-  success: boolean
+  // Subscriptions endpoints signal success via `message: "success"` only, so
+  // `success` may be absent on success responses as well as failures.
+  success?: boolean
   message?: string
   data?: T
 }
@@ -95,21 +97,26 @@ export interface SubscriptionPayRequest {
 }
 
 export interface SubscriptionPayResponse {
-  success: boolean
+  // Most subscription pay endpoints respond with `message: "success"` and omit
+  // `success`, so treat it as optional. Failures still use `message`/`data`
+  // for the real reason (see extractPaymentError).
+  success?: boolean
   message?: string
   data?: {
     // Stripe-style hosted checkout link.
     pay_link?: string
     // Waffo Pancake / Creem hosted checkout URL.
     checkout_url?: string
+    // Creem / Waffo Pancake order id.
+    order_id?: string
     // Pancake-only: order metadata + self-service buyer session token,
     // surfaced for future flows (refund / cancel from new-api's own UI).
     session_id?: string
     expires_at?: number | string
-    order_id?: string
     token?: string
     token_expires_at?: number | string
   }
+  // Epay: top-level form action URL the form should POST to.
   url?: string
 }
 

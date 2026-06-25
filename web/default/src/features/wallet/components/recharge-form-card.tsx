@@ -41,6 +41,7 @@ import {
   getMinTopupAmount,
   calculatePresetPricing,
 } from '../lib'
+import { PAYMENT_TYPES } from '../constants'
 import type {
   PaymentMethod,
   PresetAmount,
@@ -130,8 +131,26 @@ export function RechargeFormCard({
     enableWaffoTopup ||
     enableWaffoPancakeTopup
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
-  const hasStandardPaymentMethods =
-    Array.isArray(topupInfo?.pay_methods) && topupInfo.pay_methods.length > 0
+  const hostedPaymentMethods: PaymentMethod[] = []
+  if (topupInfo?.enable_stripe_topup) {
+    hostedPaymentMethods.push({
+      name: 'Stripe',
+      type: PAYMENT_TYPES.STRIPE,
+      min_topup: topupInfo.stripe_min_topup,
+    })
+  }
+  if (enableWaffoPancakeTopup) {
+    hostedPaymentMethods.push({
+      name: 'Waffo Pancake',
+      type: PAYMENT_TYPES.WAFFO_PANCAKE,
+      min_topup: topupInfo?.waffo_pancake_min_topup,
+    })
+  }
+  const displayedPaymentMethods = [
+    ...(topupInfo?.pay_methods || []),
+    ...hostedPaymentMethods,
+  ]
+  const hasDisplayedPaymentMethods = displayedPaymentMethods.length > 0
   const hasWaffoPaymentMethods =
     Array.isArray(waffoPayMethods) && waffoPayMethods.length > 0
   const minTopup = getMinTopupAmount(topupInfo)
@@ -308,9 +327,9 @@ export function RechargeFormCard({
                 <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
                   {t('Payment Method')}
                 </Label>
-                {hasStandardPaymentMethods ? (
+                {hasDisplayedPaymentMethods ? (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    {topupInfo?.pay_methods?.map((method) => {
+                    {displayedPaymentMethods.map((method) => {
                       const minTopup = method.min_topup || 0
                       const disabled = minTopup > topupAmount
                       const disabledReason = disabled

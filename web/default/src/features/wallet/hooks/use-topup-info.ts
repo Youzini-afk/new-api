@@ -22,6 +22,7 @@ import {
   generatePresetAmounts,
   mergePresetAmounts,
   getMinTopupAmount,
+  isReservedHostedProviderType,
 } from '../lib'
 import type {
   TopupInfo,
@@ -77,7 +78,15 @@ function parsePaymentMethods(
             : normalizedMinTopup,
       }
     })
-    .filter((item) => item.name && item.type && item.type !== 'waffo')
+    .filter(
+      (item) =>
+        // Keep only Epay methods: drop empty types and any reserved hosted
+        // provider types (stripe / creem / waffo / waffo_pancake) that are
+        // surfaced through dedicated hooks/sections instead.
+        !!item.name &&
+        !!item.type &&
+        !isReservedHostedProviderType(item.type)
+    )
 }
 
 function parseWaffoPayMethods(data: unknown): WaffoPayMethod[] {
