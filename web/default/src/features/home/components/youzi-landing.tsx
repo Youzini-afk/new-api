@@ -379,7 +379,7 @@ export function YouziLanding(props: YouziLandingProps) {
 
       <section className='relative z-10 flex h-svh min-h-svh flex-col items-center justify-center px-5 text-center'>
         <h1
-          className='landing-animate-scale-in bg-gradient-to-br from-[#7cb342] via-[#fdd835] to-[#fb8c00] bg-clip-text text-[clamp(4.5rem,13vw,10rem)] leading-none font-normal tracking-[-0.04em] select-none dark:from-[#b3e85a] dark:via-[#ffe14d] dark:to-[#ffa733]'
+          className='landing-animate-scale-in bg-gradient-to-r from-[#4db6ac] via-[#c5e1a5] to-[#fdd835] bg-clip-text text-[clamp(4.5rem,13vw,10rem)] leading-none font-normal tracking-[-0.04em] text-transparent select-none dark:from-[#80cbc4] dark:via-[#dcedc8] dark:to-[#ffe14d]'
           style={{
             fontFamily: 'Lobster, "Segoe Script", "Marker Felt", cursive',
             filter:
