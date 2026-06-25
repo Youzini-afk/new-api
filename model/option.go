@@ -263,6 +263,16 @@ func UpdateOption(key string, value string) error {
 	if err := setting.ValidateSensitiveRegexOptions(key, value); err != nil {
 		return err
 	}
+	// Phase 10C — validate/normalize the short-message extra billing config
+	// so internal callers that bypass the controller cannot persist an
+	// invalid config (and `config.UpdateConfigFromMap` no longer silently
+	// drops malformed JSON). The normalized JSON string is what gets written
+	// to the DB and OptionMap, keeping the persisted format stable.
+	normalizedValue, err := operation_setting.NormalizeShortMsgExtraBillingOption(key, value)
+	if err != nil {
+		return err
+	}
+	value = normalizedValue
 	// Save to database first
 	option := Option{
 		Key: key,
@@ -302,7 +312,15 @@ func UpdateOptionsBulk(values map[string]string) error {
 		if err := setting.ValidateSensitiveRegexOptions(k, v); err != nil {
 			return err
 		}
-		filtered[k] = v
+		// Phase 10C — validate/normalize the short-message extra billing
+		// config so internal callers cannot persist an invalid config via
+		// the bulk path either. Substitute the normalized JSON string for
+		// the original so the persisted shape stays stable.
+		normalizedValue, err := operation_setting.NormalizeShortMsgExtraBillingOption(k, v)
+		if err != nil {
+			return err
+		}
+		filtered[k] = normalizedValue
 	}
 	if len(filtered) == 0 {
 		return nil

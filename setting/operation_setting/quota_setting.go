@@ -1,6 +1,12 @@
 package operation_setting
 
-import "github.com/QuantumNous/new-api/setting/config"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/config"
+)
 
 type QuotaSetting struct {
 	EnableFreeModelPreConsume bool `json:"enable_free_model_pre_consume"` // 是否对免费模型启用预消耗
@@ -329,4 +335,202 @@ func init() {
 
 func GetQuotaSetting() *QuotaSetting {
 	return &quotaSetting
+}
+
+// ShortMsgExtraBillingOptionKey is the option-store key under which the
+// short-message extra billing config is persisted (registered as the
+// `quota_setting` config module with the `short_msg_extra_billing` leaf).
+const ShortMsgExtraBillingOptionKey = "quota_setting.short_msg_extra_billing"
+
+// shortMsgExtraBillingAllowedResponseModes lists the stable internal text
+// modes that a rule's ResponseModes may restrict to. Unknown values are
+// rejected at validation time to prevent typos silently widening or
+// narrowing a rule's scope. The set mirrors shortMsgExtraBillingTextMode in
+// the service layer.
+var shortMsgExtraBillingAllowedResponseModes = map[string]struct{}{
+	"chat_completions":  {},
+	"completions":       {},
+	"responses":         {},
+	"responses_compact": {},
+	"claude":            {},
+	"gemini":            {},
+}
+
+// ParseAndValidateShortMsgExtraBillingConfig parses, normalizes and validates
+// a raw JSON config string for the ShortMsgExtraBillingConfig. On success it
+// returns the normalized config and a stable JSON serialization suitable for
+// persistence. On error it returns the zero config, an empty string, and the
+// error.
+//
+// Validation mirrors the Phase 10B evaluator/preflight behavior so that the
+// frontend can never be the only line of defense:
+//
+//   - mode must be "off", "shadow", or "enforce"; an empty mode is
+//     normalized to "off" (the fail-closed default).
+//   - Any mode may carry an empty rules list (no rule matches => no-op).
+//   - When rules are present, each rule must satisfy:
+//   - id non-empty (trimmed), model non-empty (trimmed),
+//   - trigger == "input_tokens_below" (the only supported trigger),
+//   - threshold > 0,
+//   - fee_quota > 0.
+//   - response_modes (when present) may only contain values from
+//     shortMsgExtraBillingAllowedResponseModes. Entries are trimmed and
+//     de-duplicated while preserving first-seen order. Unknown values are
+//     rejected.
+//   - duplicate rule ids are rejected to avoid audit ambiguity.
+//   - negative threshold / fee_quota are rejected (the > 0 check covers this).
+//
+// Empty/whitespace-only input is normalized to the disabled default. The
+// persisted format is produced via common.Marshal so field order is stable;
+// empty rules are normalized to nil so the output matches the default config
+// shape. The function never mutates the input raw string.
+//
+// All JSON (un)marshal calls go through the common wrapper per the project
+// JSON rule (no direct encoding/json in business code).
+func ParseAndValidateShortMsgExtraBillingConfig(raw string) (ShortMsgExtraBillingConfig, string, error) {
+	var cfg ShortMsgExtraBillingConfig
+	trimmedRaw := strings.TrimSpace(raw)
+	if trimmedRaw == "" {
+		// Empty input is the disabled default. Reuse the same shape as the
+		// package-level quotaSetting initializer so normalized output is
+		// byte-stable for the same logical config.
+		cfg = ShortMsgExtraBillingConfig{Mode: ShortMsgExtraBillingModeOff, Rules: nil}
+	} else {
+		if err := common.Unmarshal([]byte(trimmedRaw), &cfg); err != nil {
+			return ShortMsgExtraBillingConfig{}, "", fmt.Errorf("short_msg_extra_billing: 无效 JSON: %w", err)
+		}
+	}
+
+	// Normalize mode: empty => off.
+	cfg.Mode = strings.TrimSpace(cfg.Mode)
+	if cfg.Mode == "" {
+		cfg.Mode = ShortMsgExtraBillingModeOff
+	}
+
+	switch cfg.Mode {
+	case ShortMsgExtraBillingModeOff, ShortMsgExtraBillingModeShadow, ShortMsgExtraBillingModeEnforce:
+		// valid mode
+	default:
+		return ShortMsgExtraBillingConfig{}, "", fmt.Errorf("short_msg_extra_billing: mode 必须是 off/shadow/enforce, 实际为 %q", cfg.Mode)
+	}
+
+	// Normalize rules. Validation applies regardless of mode: an invalid rule
+	// saved under "off" today would silently activate when an admin flips the
+	// mode to "shadow" tomorrow. Empty rules are normalized to nil so the
+	// persisted JSON shape matches the default config.
+	if len(cfg.Rules) > 0 {
+		normalized := make([]ShortMsgExtraBillingRule, 0, len(cfg.Rules))
+		seenIDs := make(map[string]struct{}, len(cfg.Rules))
+		for i := range cfg.Rules {
+			rule := cfg.Rules[i]
+			rule.ID = strings.TrimSpace(rule.ID)
+			rule.Model = strings.TrimSpace(rule.Model)
+			rule.Trigger = strings.TrimSpace(rule.Trigger)
+			modes, modeErr := normalizeShortMsgExtraBillingResponseModes(rule.ResponseModes)
+			if modeErr != nil {
+				return ShortMsgExtraBillingConfig{}, "", fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) response_modes 无效: %w", i, rule.ID, modeErr)
+			}
+			rule.ResponseModes = modes
+
+			if err := validateShortMsgExtraBillingRule(rule, i); err != nil {
+				return ShortMsgExtraBillingConfig{}, "", err
+			}
+			if _, dup := seenIDs[rule.ID]; dup {
+				return ShortMsgExtraBillingConfig{}, "", fmt.Errorf("short_msg_extra_billing: 重复 rule id %q", rule.ID)
+			}
+			seenIDs[rule.ID] = struct{}{}
+			normalized = append(normalized, rule)
+		}
+		cfg.Rules = normalized
+	} else {
+		cfg.Rules = nil
+	}
+
+	normalized, err := common.Marshal(cfg)
+	if err != nil {
+		return ShortMsgExtraBillingConfig{}, "", fmt.Errorf("short_msg_extra_billing: 序列化失败: %w", err)
+	}
+	return cfg, string(normalized), nil
+}
+
+// validateShortMsgExtraBillingRule validates a single normalized rule. It
+// returns an error covering empty id/model, unsupported trigger, and
+// non-positive threshold/fee_quota. The caller is expected to have already
+// trimmed whitespace and normalized response_modes.
+func validateShortMsgExtraBillingRule(rule ShortMsgExtraBillingRule, idx int) error {
+	if rule.ID == "" {
+		return fmt.Errorf("short_msg_extra_billing: rule[%d] id 不能为空", idx)
+	}
+	if rule.Model == "" {
+		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) model 不能为空", idx, rule.ID)
+	}
+	if rule.Trigger != ShortMsgExtraBillingTriggerInputTokensBelow {
+		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) trigger 必须是 %q, 实际为 %q",
+			idx, rule.ID, ShortMsgExtraBillingTriggerInputTokensBelow, rule.Trigger)
+	}
+	if rule.Threshold <= 0 {
+		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) threshold 必须 > 0, 实际为 %d",
+			idx, rule.ID, rule.Threshold)
+	}
+	if rule.FeeQuota <= 0 {
+		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) fee_quota 必须 > 0, 实际为 %d",
+			idx, rule.ID, rule.FeeQuota)
+	}
+	return nil
+}
+
+// normalizeShortMsgExtraBillingResponseModes trims, validates and de-duplicates
+// the response_modes list. Entries are trimmed of surrounding whitespace; the
+// first-seen occurrence wins for de-duplication so the original order is
+// preserved. Unknown or blank values produce an error.
+//
+// A nil input means the field was omitted/null and intentionally applies to any
+// text mode. An explicit empty array is rejected so API/UI callers cannot
+// accidentally represent "all text modes" as "no selected modes".
+func normalizeShortMsgExtraBillingResponseModes(modes []string) ([]string, error) {
+	if modes == nil {
+		return nil, nil
+	}
+	if len(modes) == 0 {
+		return nil, fmt.Errorf("response_modes 不能为空；如需匹配全部文本模式，请省略该字段或使用 null")
+	}
+	out := make([]string, 0, len(modes))
+	seen := make(map[string]struct{}, len(modes))
+	for _, m := range modes {
+		trimmed := strings.TrimSpace(m)
+		if trimmed == "" {
+			return nil, fmt.Errorf("response_modes 不能包含空白值")
+		}
+		if _, ok := shortMsgExtraBillingAllowedResponseModes[trimmed]; !ok {
+			return nil, fmt.Errorf("未知值 %q (允许: chat_completions, completions, responses, responses_compact, claude, gemini)", trimmed)
+		}
+		if _, dup := seen[trimmed]; dup {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out, nil
+}
+
+// NormalizeShortMsgExtraBillingOption validates and normalizes the persisted
+// value for the ShortMsgExtraBillingOptionKey option. For any other key it
+// returns (value, nil) untouched so callers can route every option through
+// this helper without an extra branch. For the owned key it parses, validates
+// and re-marshals the value to a stable JSON string suitable for persistence.
+//
+// This is the canonical entry point used by both controller.UpdateOption and
+// model.UpdateOption / model.UpdateOptionsBulk so that internal callers cannot
+// bypass the controller and persist an invalid config: any validation failure
+// surfaces as a Go error, and successful callers should substitute the
+// returned normalized string for the original before persisting.
+func NormalizeShortMsgExtraBillingOption(key, value string) (string, error) {
+	if key != ShortMsgExtraBillingOptionKey {
+		return value, nil
+	}
+	_, normalized, err := ParseAndValidateShortMsgExtraBillingConfig(value)
+	if err != nil {
+		return "", err
+	}
+	return normalized, nil
 }

@@ -396,6 +396,22 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case operation_setting.ShortMsgExtraBillingOptionKey:
+		// Phase 10C — server-side validation/normalization for the
+		// short-message extra billing config. The frontend can never be the
+		// only line of defense: any invalid JSON / unknown mode / trigger /
+		// non-positive threshold|fee / unknown response_mode / duplicate
+		// rule id is rejected here, and the persisted value is the normalized
+		// JSON string returned by the validator.
+		_, normalized, err := operation_setting.ParseAndValidateShortMsgExtraBillingConfig(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		option.Value = normalized
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {

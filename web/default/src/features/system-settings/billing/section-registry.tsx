@@ -21,6 +21,7 @@ import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { GameSettingsSection } from '../general/game-settings-section'
 import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
+import { ShortMessageBillingSection } from '../general/short-message-billing-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
 import type { BillingSettings } from '../types'
@@ -229,6 +230,15 @@ const BILLING_SECTIONS = [
           rouletteRtpBps: settings['game_setting.roulette_rtp_bps'],
           rouletteWheel: settings['game_setting.roulette_wheel'],
         }}
+      />
+    ),
+  },
+  {
+    id: 'short-message-billing',
+    titleKey: 'Short Message Billing',
+    build: (settings: BillingSettings) => (
+      <ShortMessageBillingSection
+        defaultValue={settings['quota_setting.short_msg_extra_billing']}
       />
     ),
   },

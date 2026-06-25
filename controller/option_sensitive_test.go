@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -205,4 +206,78 @@ func TestUpdateOption_RejectsBanSyncKeysAtController(t *testing.T) {
 		common.OptionMapRWMutex.RUnlock()
 		assert.False(t, present, "banned key %q must not enter OptionMap", key)
 	}
+}
+
+// TestUpdateOption_ShortMsgExtraBillingValidation verifies the Phase 10C
+// server-side guard for `quota_setting.short_msg_extra_billing`: invalid
+// JSON / unknown mode / trigger / threshold / fee_quota / model / id /
+// response_mode / duplicate rule id are rejected before persistence, while a
+// valid config is normalized and applied to the in-memory QuotaSetting.
+func TestUpdateOption_ShortMsgExtraBillingValidation(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+
+	// Snapshot and restore the in-memory QuotaSetting so the test does not
+	// leak global state to other tests in the package.
+	orig := *operation_setting.GetQuotaSetting()
+	t.Cleanup(func() {
+		*operation_setting.GetQuotaSetting() = orig
+	})
+
+	// Invalid JSON -> rejected, not persisted.
+	ctx, recorder := newOptionUpdateContext(t, operation_setting.ShortMsgExtraBillingOptionKey, `{not-json`)
+	UpdateOption(ctx)
+	resp := decodeLogScreeningResponse(t, recorder)
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Message, "无效 JSON")
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Option{}).Where("key = ?", operation_setting.ShortMsgExtraBillingOptionKey).Count(&count).Error)
+	assert.Equal(t, int64(0), count, "invalid config must not be persisted")
+
+	// Unknown mode -> rejected.
+	ctx, recorder = newOptionUpdateContext(t, operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"bogus","rules":[]}`)
+	UpdateOption(ctx)
+	resp = decodeLogScreeningResponse(t, recorder)
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Message, "mode 必须是")
+
+	// Rule with negative threshold -> rejected.
+	ctx, recorder = newOptionUpdateContext(t, operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":-1,"fee_quota":1}]}`)
+	UpdateOption(ctx)
+	resp = decodeLogScreeningResponse(t, recorder)
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Message, "threshold 必须 > 0")
+
+	// Rule with unknown response mode -> rejected.
+	ctx, recorder = newOptionUpdateContext(t, operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1,"response_modes":["bogus"]}]}`)
+	UpdateOption(ctx)
+	resp = decodeLogScreeningResponse(t, recorder)
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Message, "response_modes 无效")
+
+	// Duplicate rule id -> rejected.
+	ctx, recorder = newOptionUpdateContext(t, operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1},{"id":"r1","model":"m2","trigger":"input_tokens_below","threshold":1,"fee_quota":1}]}`)
+	UpdateOption(ctx)
+	resp = decodeLogScreeningResponse(t, recorder)
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Message, "重复 rule id")
+
+	// Valid config with whitespace + duplicate response modes -> accepted,
+	// normalized, and applied to the in-memory QuotaSetting.
+	ctx, recorder = newOptionUpdateContext(t, operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"shadow","rules":[{"id":"  r1  ","model":"  gpt-4o-mini  ","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"response_modes":["  claude ","claude"," gemini "]}]}`)
+	UpdateOption(ctx)
+	resp = decodeLogScreeningResponse(t, recorder)
+	require.True(t, resp.Success, "valid config should persist: %s", resp.Message)
+
+	qs := operation_setting.GetQuotaSetting()
+	require.Equal(t, operation_setting.ShortMsgExtraBillingModeShadow, qs.ShortMsgExtraBilling.Mode)
+	require.Len(t, qs.ShortMsgExtraBilling.Rules, 1)
+	assert.Equal(t, "r1", qs.ShortMsgExtraBilling.Rules[0].ID, "id should be trimmed in-memory")
+	assert.Equal(t, "gpt-4o-mini", qs.ShortMsgExtraBilling.Rules[0].Model, "model should be trimmed in-memory")
+	assert.Equal(t, []string{"claude", "gemini"}, qs.ShortMsgExtraBilling.Rules[0].ResponseModes, "response_modes should be trimmed+deduped in-memory")
+
+	// The persisted row holds the normalized JSON string, not the raw input.
+	var opt model.Option
+	require.NoError(t, model.DB.First(&opt, model.Option{Key: operation_setting.ShortMsgExtraBillingOptionKey}).Error)
+	assert.JSONEq(t, `{"mode":"shadow","rules":[{"id":"r1","model":"gpt-4o-mini","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"waive_when_completion_tokens_zero":false,"response_modes":["claude","gemini"]}]}`, opt.Value)
 }

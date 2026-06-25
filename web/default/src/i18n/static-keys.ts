@@ -45,6 +45,13 @@ export const STATIC_I18N_KEYS = [
   'Routing Reliability',
   'Maintenance',
 
+  // Short-message extra billing mode cards
+  'Shadow (Audit Only)',
+  'Enforce (Charge)',
+  'No extra billing. Rules are preserved but have no effect.',
+  'Records potential extra charges in consume logs without charging users.',
+  'Reserves potential extra quota before the upstream call and charges it only if usage still matches.',
+
   // System info
   'online',
   'stale',

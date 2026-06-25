@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -179,9 +180,9 @@ func TestUpdateOptionsBulk_SkipsBanSyncLegacyKeys(t *testing.T) {
 
 	values := map[string]string{
 		"CheckSensitiveAutoBanSyncEnabled": "true",
-		"AutoBanSync":                       "true",
-		"ban_sync.enabled":                  "true",
-		"SensitiveEmptyUABlockedErrorCode":  "bulk_custom_err",
+		"AutoBanSync":                      "true",
+		"ban_sync.enabled":                 "true",
+		"SensitiveEmptyUABlockedErrorCode": "bulk_custom_err",
 	}
 	require.NoError(t, UpdateOptionsBulk(values))
 
@@ -314,4 +315,99 @@ func TestUpdateOption_RejectsInvalidSensitiveRegex(t *testing.T) {
 	require.NoError(t, err)
 	err = UpdateOption("SensitiveEmptyUABlockedHTTPStatusCode", "418")
 	require.NoError(t, err)
+}
+
+// TestUpdateOption_ShortMsgExtraBillingValidateAndNormalize verifies the
+// model-layer Phase 10C guard: model.UpdateOption (which bypasses the
+// controller) must reject invalid `quota_setting.short_msg_extra_billing`
+// values and must persist + apply the normalized form for valid values.
+func TestUpdateOption_ShortMsgExtraBillingValidateAndNormalize(t *testing.T) {
+	InitOptionMap()
+
+	// Snapshot and restore the in-memory QuotaSetting so the test does not
+	// leak global state to other tests in the package.
+	orig := *operation_setting.GetQuotaSetting()
+	t.Cleanup(func() {
+		*operation_setting.GetQuotaSetting() = orig
+	})
+
+	// Invalid JSON -> rejected, nothing persisted.
+	require.NoError(t, DB.Where("key = ?", operation_setting.ShortMsgExtraBillingOptionKey).Delete(&Option{}).Error)
+	err := UpdateOption(operation_setting.ShortMsgExtraBillingOptionKey, `{not-json`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "无效 JSON")
+	var count int64
+	require.NoError(t, DB.Model(&Option{}).Where("key = ?", operation_setting.ShortMsgExtraBillingOptionKey).Count(&count).Error)
+	assert.Equal(t, int64(0), count, "invalid config must not be persisted")
+
+	// Unknown mode -> rejected.
+	err = UpdateOption(operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"bogus"}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mode 必须是")
+
+	// Rule with non-positive fee_quota -> rejected.
+	err = UpdateOption(operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":0}]}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fee_quota 必须 > 0")
+
+	// Valid config -> persisted + applied + normalized (whitespace trimmed,
+	// duplicate response_modes dropped).
+	raw := `{"mode":"shadow","rules":[{"id":"  r1  ","model":"  gpt-4o-mini  ","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"response_modes":[" claude ","claude"," gemini "]}]}`
+	require.NoError(t, UpdateOption(operation_setting.ShortMsgExtraBillingOptionKey, raw))
+
+	qs := operation_setting.GetQuotaSetting()
+	require.Equal(t, operation_setting.ShortMsgExtraBillingModeShadow, qs.ShortMsgExtraBilling.Mode)
+	require.Len(t, qs.ShortMsgExtraBilling.Rules, 1)
+	assert.Equal(t, "r1", qs.ShortMsgExtraBilling.Rules[0].ID)
+	assert.Equal(t, "gpt-4o-mini", qs.ShortMsgExtraBilling.Rules[0].Model)
+	assert.Equal(t, []string{"claude", "gemini"}, qs.ShortMsgExtraBilling.Rules[0].ResponseModes)
+
+	// The DB row holds the normalized form, not the raw input.
+	var opt Option
+	require.NoError(t, DB.WithContext(context.Background()).First(&opt, Option{Key: operation_setting.ShortMsgExtraBillingOptionKey}).Error)
+	assert.JSONEq(t, `{"mode":"shadow","rules":[{"id":"r1","model":"gpt-4o-mini","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"waive_when_completion_tokens_zero":false,"response_modes":["claude","gemini"]}]}`, opt.Value)
+}
+
+// TestUpdateOptionsBulk_ShortMsgExtraBillingValidateAndNormalize verifies the
+// bulk path also validates and substitutes the normalized value so internal
+// callers cannot bypass the controller to persist an invalid config.
+func TestUpdateOptionsBulk_ShortMsgExtraBillingValidateAndNormalize(t *testing.T) {
+	InitOptionMap()
+
+	orig := *operation_setting.GetQuotaSetting()
+	t.Cleanup(func() {
+		*operation_setting.GetQuotaSetting() = orig
+	})
+
+	// Bulk with one invalid value -> entire transaction rejected, nothing
+	// persisted for any key in the batch.
+	require.NoError(t, DB.Where("key = ?", operation_setting.ShortMsgExtraBillingOptionKey).Delete(&Option{}).Error)
+	require.NoError(t, DB.Where("key = ?", "SensitiveEmptyUABlockedErrorCode").Delete(&Option{}).Error)
+	err := UpdateOptionsBulk(map[string]string{
+		operation_setting.ShortMsgExtraBillingOptionKey: `{"mode":"bogus"}`,
+		"SensitiveEmptyUABlockedErrorCode":              "bulk_err",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mode 必须是")
+	// Neither key persisted (transaction rolled back).
+	for _, key := range []string{operation_setting.ShortMsgExtraBillingOptionKey, "SensitiveEmptyUABlockedErrorCode"} {
+		var count int64
+		require.NoError(t, DB.Model(&Option{}).Where("key = ?", key).Count(&count).Error)
+		assert.Equal(t, int64(0), count, "key %q must not be persisted on failed bulk", key)
+	}
+
+	// Bulk with all valid values -> persisted + normalized.
+	require.NoError(t, UpdateOptionsBulk(map[string]string{
+		operation_setting.ShortMsgExtraBillingOptionKey: `{"mode":"enforce","rules":[{"id":"r1","model":"gpt-4o-mini","trigger":"input_tokens_below","threshold":50,"fee_quota":250}]}`,
+		"SensitiveEmptyUABlockedErrorCode":              "bulk_err",
+	}))
+	qs := operation_setting.GetQuotaSetting()
+	require.Equal(t, operation_setting.ShortMsgExtraBillingModeEnforce, qs.ShortMsgExtraBilling.Mode)
+	require.Len(t, qs.ShortMsgExtraBilling.Rules, 1)
+	assert.Equal(t, "r1", qs.ShortMsgExtraBilling.Rules[0].ID)
+
+	var opt Option
+	require.NoError(t, DB.First(&opt, Option{Key: operation_setting.ShortMsgExtraBillingOptionKey}).Error)
+	// Normalized form is persisted (no extra whitespace, stable field order).
+	assert.JSONEq(t, `{"mode":"enforce","rules":[{"id":"r1","model":"gpt-4o-mini","trigger":"input_tokens_below","threshold":50,"fee_quota":250,"waive_when_completion_tokens_zero":false}]}`, opt.Value)
 }

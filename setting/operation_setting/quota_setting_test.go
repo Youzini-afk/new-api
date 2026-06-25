@@ -1,7 +1,10 @@
 package operation_setting
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/QuantumNous/new-api/common"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -437,3 +440,155 @@ func TestEvaluateShortMsgExtraBillingShadow_EmptyTextModeFailsClosedEvenWithEmpt
 		require.False(t, res.HasReportableInfo())
 	})
 }
+
+// ---------------------------------------------------------------------------
+// ParseAndValidateShortMsgExtraBillingConfig — Phase 10C server-side guard
+// ---------------------------------------------------------------------------
+
+// validRuleJSON returns a JSON-encoded rule with whitespace padding around
+// id/model/response_modes so the normalizer's trim/dedupe behavior is
+// observable.
+const validRuleJSON = `{"id":"  r1  ","model":"  gpt-4o-mini  ","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"response_modes":["  claude ","gemini","claude"]}`
+
+func TestParseAndValidateShortMsgExtraBillingConfig_ValidModesAndNormalize(t *testing.T) {
+	t.Run("off with no rules", func(t *testing.T) {
+		cfg, normalized, err := ParseAndValidateShortMsgExtraBillingConfig(`{"mode":"off"}`)
+		require.NoError(t, err)
+		require.Equal(t, ShortMsgExtraBillingModeOff, cfg.Mode)
+		require.Nil(t, cfg.Rules)
+		// Stable JSON shape: rules field is null (matches the package-level
+		// default initializer).
+		assert.JSONEq(t, `{"mode":"off","rules":null}`, normalized)
+	})
+
+	t.Run("shadow with one valid rule", func(t *testing.T) {
+		cfg, normalized, err := ParseAndValidateShortMsgExtraBillingConfig(`{"mode":"shadow","rules":[` + validRuleJSON + `]}`)
+		require.NoError(t, err)
+		require.Equal(t, ShortMsgExtraBillingModeShadow, cfg.Mode)
+		require.Len(t, cfg.Rules, 1)
+		assert.Equal(t, "r1", cfg.Rules[0].ID, "id should be trimmed")
+		assert.Equal(t, "gpt-4o-mini", cfg.Rules[0].Model, "model should be trimmed")
+		// Response modes are trimmed and de-duplicated, first-seen order kept.
+		assert.Equal(t, []string{"claude", "gemini"}, cfg.Rules[0].ResponseModes)
+		// The persisted value parses back to the same logical config.
+		var reparsed ShortMsgExtraBillingConfig
+		require.NoError(t, common.Unmarshal([]byte(normalized), &reparsed))
+		assert.Equal(t, cfg, reparsed)
+	})
+
+	t.Run("enforce with one valid rule", func(t *testing.T) {
+		cfg, _, err := ParseAndValidateShortMsgExtraBillingConfig(`{"mode":"enforce","rules":[{"id":"r1","model":"gpt-4o-mini","trigger":"input_tokens_below","threshold":10,"fee_quota":1}]}`)
+		require.NoError(t, err)
+		require.Equal(t, ShortMsgExtraBillingModeEnforce, cfg.Mode)
+		require.Len(t, cfg.Rules, 1)
+	})
+
+	t.Run("empty rules under shadow is allowed", func(t *testing.T) {
+		cfg, normalized, err := ParseAndValidateShortMsgExtraBillingConfig(`{"mode":"shadow","rules":[]}`)
+		require.NoError(t, err)
+		require.Equal(t, ShortMsgExtraBillingModeShadow, cfg.Mode)
+		require.Nil(t, cfg.Rules, "empty rules should normalize to nil for stable storage")
+		assert.JSONEq(t, `{"mode":"shadow","rules":null}`, normalized)
+	})
+
+	t.Run("rule with missing response_modes applies to all text modes", func(t *testing.T) {
+		cfg, _, err := ParseAndValidateShortMsgExtraBillingConfig(`{"mode":"shadow","rules":[{"id":"r1","model":"gpt-4o-mini","trigger":"input_tokens_below","threshold":1,"fee_quota":1}]}`)
+		require.NoError(t, err)
+		require.Len(t, cfg.Rules, 1)
+		assert.Nil(t, cfg.Rules[0].ResponseModes)
+	})
+}
+
+func TestParseAndValidateShortMsgExtraBillingConfig_EmptyModeNormalizesToOff(t *testing.T) {
+	cfg, normalized, err := ParseAndValidateShortMsgExtraBillingConfig(`{"mode":"","rules":[]}`)
+	require.NoError(t, err)
+	require.Equal(t, ShortMsgExtraBillingModeOff, cfg.Mode, "empty mode must normalize to off")
+	assert.JSONEq(t, `{"mode":"off","rules":null}`, normalized)
+}
+
+func TestParseAndValidateShortMsgExtraBillingConfig_EmptyInputDefaultsToOff(t *testing.T) {
+	for _, raw := range []string{"", "   ", "\n\t"} {
+		cfg, normalized, err := ParseAndValidateShortMsgExtraBillingConfig(raw)
+		require.NoError(t, err, "raw %q should not error", raw)
+		require.Equal(t, ShortMsgExtraBillingModeOff, cfg.Mode)
+		assert.JSONEq(t, `{"mode":"off","rules":null}`, normalized)
+	}
+}
+
+func TestParseAndValidateShortMsgExtraBillingConfig_Rejections(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		wantMsg string
+	}{
+		{"invalid JSON", `{not-json`, "无效 JSON"},
+		{"unknown mode", `{"mode":"bogus"}`, "mode 必须是"},
+		{"unknown trigger", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"output_tokens_above","threshold":1,"fee_quota":1}]}`, "trigger 必须是"},
+		{"threshold zero", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":0,"fee_quota":1}]}`, "threshold 必须 > 0"},
+		{"threshold negative", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":-5,"fee_quota":1}]}`, "threshold 必须 > 0"},
+		{"fee_quota zero", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":0}]}`, "fee_quota 必须 > 0"},
+		{"fee_quota negative", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":-1}]}`, "fee_quota 必须 > 0"},
+		{"empty model", `{"mode":"shadow","rules":[{"id":"r1","model":"","trigger":"input_tokens_below","threshold":1,"fee_quota":1}]}`, "model 不能为空"},
+		{"empty id", `{"mode":"shadow","rules":[{"id":"","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1}]}`, "id 不能为空"},
+		{"unknown response mode", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1,"response_modes":["chat_completions","bogus"]}]}`, "response_modes 无效"},
+		{"empty response modes array", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1,"response_modes":[]}]}`, "response_modes 无效"},
+		{"blank response mode", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1,"response_modes":["   "]}]}`, "response_modes 无效"},
+		{"duplicate rule id", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1},{"id":"r1","model":"m2","trigger":"input_tokens_below","threshold":1,"fee_quota":1}]}`, "重复 rule id"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, normalized, err := ParseAndValidateShortMsgExtraBillingConfig(tc.raw)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantMsg)
+			// On error the function returns the zero config + empty string so
+			// callers never accidentally persist a half-validated value.
+			assert.Equal(t, ShortMsgExtraBillingConfig{}, cfg)
+			assert.Equal(t, "", normalized)
+		})
+	}
+}
+
+func TestParseAndValidateShortMsgExtraBillingConfig_ResponseModesTrimDedupe(t *testing.T) {
+	cfg, normalized, err := ParseAndValidateShortMsgExtraBillingConfig(`{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1,"response_modes":["  claude ","claude"," gemini ","claude"]}]}`)
+	require.NoError(t, err)
+	require.Len(t, cfg.Rules, 1)
+	// Whitespace stripped; first-seen order kept; dups dropped.
+	assert.Equal(t, []string{"claude", "gemini"}, cfg.Rules[0].ResponseModes)
+
+	// The normalized JSON round-trips back to the same logical value.
+	var reparsed ShortMsgExtraBillingConfig
+	require.NoError(t, common.Unmarshal([]byte(normalized), &reparsed))
+	assert.Equal(t, cfg, reparsed)
+}
+
+func TestParseAndValidateShortMsgExtraBillingConfig_DoesNotMutateInput(t *testing.T) {
+	raw := `{"mode":"shadow","rules":[{"id":"  r1  ","model":"  m  ","trigger":"input_tokens_below","threshold":1,"fee_quota":1,"response_modes":[" claude ","claude"]}]}`
+
+	_, _, err := ParseAndValidateShortMsgExtraBillingConfig(raw)
+	require.NoError(t, err)
+	// The input string is untouched.
+	assert.Equal(t, `{"mode":"shadow","rules":[{"id":"  r1  ","model":"  m  ","trigger":"input_tokens_below","threshold":1,"fee_quota":1,"response_modes":[" claude ","claude"]}]}`, raw)
+}
+
+func TestNormalizeShortMsgExtraBillingOption_OwnedKeyNormalizes(t *testing.T) {
+	normalized, err := NormalizeShortMsgExtraBillingOption(ShortMsgExtraBillingOptionKey, `{"mode":"shadow","rules":[]}`)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"mode":"shadow","rules":null}`, normalized)
+}
+
+func TestNormalizeShortMsgExtraBillingOption_RejectsInvalid(t *testing.T) {
+	_, err := NormalizeShortMsgExtraBillingOption(ShortMsgExtraBillingOptionKey, `{"mode":"bogus"}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mode 必须是")
+}
+
+func TestNormalizeShortMsgExtraBillingOption_NonOwnedKeyPassThrough(t *testing.T) {
+	// Any other key is returned untouched so callers can route every option
+	// through this helper without an extra branch.
+	normalized, err := NormalizeShortMsgExtraBillingOption("SomeOther.Key", `{"foo":"bar"}`)
+	require.NoError(t, err)
+	assert.Equal(t, `{"foo":"bar"}`, normalized)
+}
+
+// keep strings import referenced when this file is compiled standalone.
+var _ = strings.TrimSpace
