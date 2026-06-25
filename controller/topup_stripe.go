@@ -62,6 +62,15 @@ func (*StripeAdaptor) RequestAmount(c *gin.Context, req *StripePayRequest) {
 }
 
 func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
+	// Creation gate: refuse before genStripeLink / order insert if compliance
+	// is unconfirmed, the API secret is missing or malformed, the webhook
+	// secret is missing, or the wallet StripePriceId is unset. The webhook
+	// gate (isStripeWebhookEnabled) only checks StripeWebhookSecret so
+	// already-pending orders can still be fulfilled after the fact.
+	if !isStripeTopUpEnabled() {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "当前管理员未配置支付信息"})
+		return
+	}
 	if req.PaymentMethod != model.PaymentMethodStripe {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "不支持的支付渠道"})
 		return

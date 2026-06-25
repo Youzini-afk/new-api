@@ -40,15 +40,20 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐未启用")
 		return
 	}
-	if plan.StripePriceId == "" {
+	if strings.TrimSpace(plan.StripePriceId) == "" {
 		common.ApiErrorMsg(c, "该套餐未配置 StripePriceId")
 		return
 	}
-	if !strings.HasPrefix(setting.StripeApiSecret, "sk_") && !strings.HasPrefix(setting.StripeApiSecret, "rk_") {
+	apiSecret := strings.TrimSpace(setting.StripeApiSecret)
+	if apiSecret == "" || (!strings.HasPrefix(apiSecret, "sk_") && !strings.HasPrefix(apiSecret, "rk_")) {
 		common.ApiErrorMsg(c, "Stripe 未配置或密钥无效")
 		return
 	}
-	if setting.StripeWebhookSecret == "" {
+	// Use the shared webhook gate so the creation path and the later webhook
+	// verification agree on what "configured" means: a whitespace-only
+	// StripeWebhookSecret must fail here (TrimSpace) instead of slipping
+	// through only to be rejected when the webhook arrives.
+	if !isStripeWebhookEnabled() {
 		common.ApiErrorMsg(c, "Stripe Webhook 未配置")
 		return
 	}

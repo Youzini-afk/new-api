@@ -2,9 +2,11 @@ package controller
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -54,8 +56,18 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 		common.ApiErrorMsg(c, "该套餐未配置 CreemProductId")
 		return
 	}
-	if setting.CreemWebhookSecret == "" && !setting.CreemTestMode {
+	// Creation gate for subscription Creem: require webhook verification
+	// material (test mode allows no secret, matching verifyCreemSignature)
+	// AND an API key. The API key must be checked BEFORE the pending
+	// SubscriptionOrder insert because genCreemLink only fails on a missing
+	// key after the order has already been written, which would strand a
+	// pending order that can never be redeemed.
+	if !isCreemWebhookEnabled() {
 		common.ApiErrorMsg(c, "Creem Webhook 未配置")
+		return
+	}
+	if strings.TrimSpace(setting.CreemApiKey) == "" {
+		common.ApiErrorMsg(c, "Creem API 密钥未配置")
 		return
 	}
 
@@ -122,6 +134,15 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 	checkoutUrl, err := genCreemLink(c.Request.Context(), referenceId, product, user.Email, user.Username)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 订阅支付链接创建失败 trade_no=%s product_id=%s error=%q", referenceId, product.ProductId, err.Error()))
+		// genCreemLink failed after the pending SubscriptionOrder was
+		// inserted. Expire it so a dangling pending order that can never be
+		// redeemed is not stranded. ExpireSubscriptionOrder only transitions
+		// pending -> expired and checks the payment provider, so it is safe
+		// even if the row was concurrently completed/expired.
+		if expireErr := model.ExpireSubscriptionOrder(referenceId, model.PaymentProviderCreem); expireErr != nil &&
+			!errors.Is(expireErr, model.ErrSubscriptionOrderNotFound) {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 订阅支付链接创建失败后标记订单过期失败 trade_no=%s error=%q", referenceId, expireErr.Error()))
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}

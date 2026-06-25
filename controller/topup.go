@@ -193,6 +193,14 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
 		return
 	}
+	// Creation gate: refuse before tradeNo / order insert if compliance is
+	// unconfirmed, the verification config is missing, or no wallet pay
+	// method is exposed. The webhook gate (isEpayWebhookEnabled) is narrower
+	// so already-pending orders can still be completed after the fact.
+	if !isEpayTopUpEnabled() {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "当前管理员未配置支付信息"})
+		return
+	}
 	if req.Amount < getMinTopup() {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", getMinTopup())})
 		return

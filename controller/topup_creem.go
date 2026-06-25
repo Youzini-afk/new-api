@@ -64,6 +64,15 @@ type CreemAdaptor struct {
 }
 
 func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
+	// Creation gate: refuse before product parse / order insert if compliance
+	// is unconfirmed, the API key is missing, the wallet product list is
+	// empty, or the webhook secret is missing in production. The webhook gate
+	// (isCreemWebhookEnabled) is narrower so already-pending orders can
+	// still be fulfilled after the fact.
+	if !isCreemTopUpEnabled() {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "当前管理员未配置支付信息"})
+		return
+	}
 	if req.PaymentMethod != model.PaymentMethodCreem {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "不支持的支付渠道"})
 		return
@@ -126,6 +135,15 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 	checkoutUrl, err := genCreemLink(c.Request.Context(), referenceId, selectedProduct, user.Email, user.Username)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 创建支付链接失败 user_id=%d trade_no=%s product_id=%s error=%q", id, referenceId, selectedProduct.ProductId, err.Error()))
+		// genCreemLink failed after the pending TopUp was inserted. Mark it
+		// failed so a dangling pending order that can never be redeemed is
+		// not stranded. UpdatePendingTopUpStatus only transitions pending ->
+		// target and checks the payment provider, so it is safe even if the
+		// row was concurrently completed/expired.
+		if updateErr := model.UpdatePendingTopUpStatus(referenceId, model.PaymentProviderCreem, common.TopUpStatusFailed); updateErr != nil &&
+			!errors.Is(updateErr, model.ErrTopUpNotFound) && !errors.Is(updateErr, model.ErrTopUpStatusInvalid) {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 创建支付链接失败后标记订单失败失败 user_id=%d trade_no=%s error=%q", id, referenceId, updateErr.Error()))
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}
@@ -372,7 +390,12 @@ type CreemCheckoutResponse struct {
 	Id          string `json:"id"`
 }
 
-func genCreemLink(ctx context.Context, referenceId string, product *CreemProduct, email string, username string) (string, error) {
+// genCreemLink builds a Creem checkout link. It is a function variable so the
+// controller-level tests can deterministically simulate a checkout-link
+// creation failure (the live function only fails after a network round-trip,
+// which is non-deterministic in CI) and prove the pending local order is
+// marked failed/expired instead of being stranded.
+var genCreemLink = func(ctx context.Context, referenceId string, product *CreemProduct, email string, username string) (string, error) {
 	if setting.CreemApiKey == "" {
 		return "", fmt.Errorf("未配置Creem API密钥")
 	}

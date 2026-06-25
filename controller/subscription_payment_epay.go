@@ -32,6 +32,20 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		return
 	}
 
+	// Creation gate for subscription Epay: require the webhook verification
+	// config (so a successful payment can later be fulfilled) and that the
+	// requested pay method is in the wallet PayMethods list. We deliberately
+	// do NOT require isEpayTopUpEnabled() — the subscription flow uses the
+	// shared wallet pay-method surface for instrument selection, but its
+	// amounts come from the per-plan PriceAmount rather than the wallet
+	// topup amount table — but the verification config + GetEpayClient nil
+	// check below together guarantee no pending order is inserted if creation
+	// cannot proceed.
+	if !isEpayWebhookEnabled() {
+		common.ApiErrorMsg(c, "当前管理员未配置支付信息")
+		return
+	}
+
 	plan, err := model.GetSubscriptionPlanById(req.PlanId)
 	if err != nil {
 		common.ApiError(c, err)
