@@ -49,22 +49,21 @@ interface ModelPreset {
 }
 
 const MODEL_PRESETS: ModelPreset[] = [
-  { key: 'openai|#10a37f', symbol: '◎', color: '#10a37f' },
-  { key: 'claude|#d97757', symbol: '✦', color: '#d97757' },
-  { key: 'gemini|#8ab4f8', symbol: '✧', color: '#8ab4f8' },
-  { key: 'meta|#1a73e8', symbol: '∞', color: '#1a73e8' },
-  { key: 'deepseek|#4d6bfe', symbol: '⌘', color: '#4d6bfe' },
-  { key: 'qwen|#6657fa', symbol: '◇', color: '#6657fa' },
-  { key: 'mistral|#f26e24', symbol: '✺', color: '#f26e24' },
-  { key: 'azure|#00a4ef', symbol: '▣', color: '#00a4ef' },
-  { key: 'grok|#cbd5e1', symbol: '𝕏', color: '#cbd5e1' },
-  { key: 'sora|#4d6bfe', symbol: '▻', color: '#4d6bfe' },
-  { key: 'kimi|#a78bfa', symbol: '☾', color: '#a78bfa' },
-  { key: 'glm|#00cc99', symbol: '⌬', color: '#00cc99' },
-  { key: 'cohere|#ff9db5', symbol: '◆', color: '#ff9db5' },
-  { key: 'midjourney|#94a3b8', symbol: '⛵', color: '#94a3b8' },
-  { key: 'baidu|#2932e1', symbol: '✣', color: '#2932e1' },
-  { key: 'stability|#7a52ff', symbol: '✹', color: '#7a52ff' },
+  { key: 'yuzu|#10a37f', symbol: '🍊', color: '#10a37f' },
+  { key: 'yuzu|#d97757', symbol: '🍊', color: '#d97757' },
+  { key: 'yuzu|#8ab4f8', symbol: '🍊', color: '#8ab4f8' },
+  { key: 'yuzu|#1a73e8', symbol: '🍊', color: '#1a73e8' },
+  { key: 'yuzu|#4d6bfe', symbol: '🍊', color: '#4d6bfe' },
+  { key: 'yuzu|#6657fa', symbol: '🍊', color: '#6657fa' },
+  { key: 'yuzu|#f26e24', symbol: '🍊', color: '#f26e24' },
+  { key: 'yuzu|#00a4ef', symbol: '🍊', color: '#00a4ef' },
+  { key: 'yuzu|#cbd5e1', symbol: '🍊', color: '#cbd5e1' },
+  { key: 'yuzu|#a78bfa', symbol: '🍊', color: '#a78bfa' },
+  { key: 'yuzu|#00cc99', symbol: '🍊', color: '#00cc99' },
+  { key: 'yuzu|#ff9db5', symbol: '🍊', color: '#ff9db5' },
+  { key: 'yuzu|#94a3b8', symbol: '🍊', color: '#94a3b8' },
+  { key: 'yuzu|#2932e1', symbol: '🍊', color: '#2932e1' },
+  { key: 'yuzu|#7a52ff', symbol: '🍊', color: '#7a52ff' },
 ]
 
 // --- Chip baking (off-screen sprite per preset) ---
