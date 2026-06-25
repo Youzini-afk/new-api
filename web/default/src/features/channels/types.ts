@@ -106,6 +106,12 @@ export interface ChannelOtherSettings {
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
   advanced_custom?: AdvancedCustomConfig
+  // Channel fallback (safe path). Only these three fields are wired to relay
+  // behavior today; retry_* fields are persisted/validated by the backend but
+  // not yet acted on, so they are intentionally NOT exposed in the UI.
+  fallback_channel_id?: number
+  fallback_on_error?: boolean
+  fallback_on_empty_reply?: boolean
 }
 
 export interface AdvancedCustomConfig {
