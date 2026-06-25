@@ -170,7 +170,7 @@ export function YouziLanding(props: YouziLandingProps) {
               'drop-shadow(0 0 26px rgba(255, 200, 60, 0.42)) drop-shadow(0 2px 6px rgba(0,0,0,0.18))',
           }}
         >
-          Youziapi
+          Youzi
         </h1>
       </section>
     </main>
