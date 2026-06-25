@@ -5277,6 +5277,11 @@
     "Overwrite": "覆盖",
     "Discord profile synced {{time}}": "Discord 资料已同步：{{time}}",
     "Avatar source": "头像来源",
-    "Uploaded": "已上传"
+    "Uploaded": "已上传",
+    "Youziapi · API Constellation": "Youziapi · API 星轨网关",
+    "Route every AI call with Youziapi": "让 Youziapi 承载每一次 AI 调用",
+    "the Youzi star trail": "Youzi 星轨",
+    "One unified gateway across 50+ providers. Tracked, billed, and routed with the care of a constellation.": "一座网关，汇聚 50+ 上游。像星轨般精准调度，计量与路由皆有迹可循。",
+    "Live Gateway Demo": "实时网关演示"
   }
 }

@@ -105,15 +105,24 @@ export function Stats(_props: StatsProps) {
   ]
 
   return (
-    <div className='border-border/40 bg-muted/10 relative z-10 border-y'>
+    <div className='border-border/40 bg-muted/10 relative z-10 border-y backdrop-blur-sm'>
+      {/* faint constellation tint */}
+      <div
+        aria-hidden
+        className='pointer-events-none absolute inset-0 opacity-40 dark:opacity-30'
+        style={{
+          background:
+            'radial-gradient(ellipse 60% 80% at 50% 50%, oklch(0.7 0.12 320 / 12%) 0%, transparent 70%)',
+        }}
+      />
       <div className='mx-auto max-w-6xl px-6 py-10 md:py-12'>
         <div className='grid grid-cols-2 gap-8 md:grid-cols-4 md:gap-12'>
           {stats.map((s) => (
             <div
               key={s.label}
-              className='flex flex-col items-center text-center'
+              className='relative flex flex-col items-center text-center'
             >
-              <span className='text-2xl font-bold tracking-tight md:text-3xl'>
+              <span className='bg-gradient-to-b from-fuchsia-600 to-violet-600 bg-clip-text text-2xl font-bold tracking-tight text-transparent md:text-3xl dark:from-fuchsia-300 dark:to-violet-300'>
                 <Counter end={s.end} suffix={s.suffix} decimals={s.decimals} />
               </span>
               <span className='text-muted-foreground mt-1.5 text-xs'>

@@ -27,6 +27,7 @@ import {
   HeartHandshake,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { AnimateInView } from '@/components/animate-in-view'
 
 interface FeaturesProps {
@@ -180,6 +181,15 @@ export function Features(_props: FeaturesProps) {
 
   return (
     <section className='relative z-10 px-6 py-24 md:py-32'>
+      {/* soft constellation tint at the top */}
+      <div
+        aria-hidden
+        className='pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 opacity-50 dark:opacity-30'
+        style={{
+          background:
+            'radial-gradient(ellipse 50% 100% at 50% 0%, oklch(0.7 0.16 320 / 14%) 0%, transparent 70%)',
+        }}
+      />
       <div className='mx-auto max-w-6xl'>
         <AnimateInView className='mb-16 max-w-lg'>
           <p className='text-muted-foreground mb-3 text-xs font-medium tracking-widest uppercase'>

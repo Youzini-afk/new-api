@@ -5277,6 +5277,11 @@
     "Overwrite": "Overwrite",
     "Discord profile synced {{time}}": "Discord profile synced {{time}}",
     "Avatar source": "Avatar source",
-    "Uploaded": "Uploaded"
+    "Uploaded": "Uploaded",
+    "Youziapi · API Constellation": "Youziapi · chòm sao API",
+    "Route every AI call with Youziapi": "Định tuyến mọi lệnh gọi AI qua Youziapi",
+    "the Youzi star trail": "dải sao Youzi",
+    "One unified gateway across 50+ providers. Tracked, billed, and routed with the care of a constellation.": "Một cổng hợp nhất cho hơn 50 nhà cung cấp. Theo dõi, tính phí và định tuyến tỉ mỉ như một chòm sao.",
+    "Live Gateway Demo": "Demo cổng trực tiếp"
   }
 }
