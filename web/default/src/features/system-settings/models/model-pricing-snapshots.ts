@@ -49,7 +49,10 @@ export type ModelPricingSnapshot = {
   hasConflict: boolean
 }
 
-export type ModelPricingStatus = 'priced' | 'unset'
+export type ModelPricingStatus =
+  | 'enabled_priced'
+  | 'enabled_unset'
+  | 'configured_only'
 
 export type ModelRow = ModelPricingSnapshot & {
   saved?: ModelPricingSnapshot
@@ -91,16 +94,22 @@ export const getModeVariant = (
   return 'success'
 }
 
-export const getModelPricingStatus = (
-  row: ModelPricingSnapshot
-): ModelPricingStatus => {
+export const isModelPriced = (row: ModelPricingSnapshot): boolean => {
   if (row.billingMode === 'tiered_expr') {
-    return row.billingExpr?.trim() ? 'priced' : 'unset'
+    return Boolean(row.billingExpr?.trim())
   }
   if (row.billingMode === 'per-request') {
-    return hasPricingValue(row.price) ? 'priced' : 'unset'
+    return hasPricingValue(row.price)
   }
-  return hasPricingValue(row.ratio) ? 'priced' : 'unset'
+  return hasPricingValue(row.ratio)
+}
+
+export const getModelPricingStatus = (
+  row: ModelPricingSnapshot,
+  isEnabled: boolean
+): ModelPricingStatus => {
+  if (!isEnabled) return 'configured_only'
+  return isModelPriced(row) ? 'enabled_priced' : 'enabled_unset'
 }
 
 const getExpressionSummary = (

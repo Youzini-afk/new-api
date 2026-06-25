@@ -5225,6 +5225,9 @@
     "Pricing status": "定价状态",
     "Unpriced models": "未设置价格模型",
     "Priced models": "已设置价格模型",
-    "No models match your filters": "没有符合筛选条件的模型"
+    "No models match your filters": "没有符合筛选条件的模型",
+    "Enabled, priced": "渠道存在且已定价",
+    "Enabled, unpriced": "渠道存在但未定价",
+    "Configured but not enabled": "仅有定价配置（渠道未启用）"
   }
 }

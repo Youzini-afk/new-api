@@ -5225,6 +5225,9 @@
     "Pricing status": "Pricing status",
     "Unpriced models": "Unpriced models",
     "Priced models": "Priced models",
-    "No models match your filters": "No models match your filters"
+    "No models match your filters": "No models match your filters",
+    "Enabled, priced": "Enabled, priced",
+    "Enabled, unpriced": "Enabled, unpriced",
+    "Configured but not enabled": "Configured but not enabled"
   }
 }

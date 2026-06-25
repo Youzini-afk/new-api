@@ -25,7 +25,6 @@ import { StatusBadge } from '@/components/status-badge'
 import {
   getModeLabel,
   getModeVariant,
-  getModelPricingStatus,
   getPriceDetail,
   getPriceSummary,
   type ModelRow,
@@ -143,14 +142,19 @@ export function buildModelRatioColumns({
     },
     {
       id: 'pricingStatus',
-      accessorFn: (row) => getModelPricingStatus(row),
+      accessorFn: (row) => row.pricingStatus,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title={t('Pricing status')} />
       ),
-      cell: ({ row }) =>
-        row.original.pricingStatus === 'unset'
-          ? t('Unpriced models')
-          : t('Priced models'),
+      cell: ({ row }) => {
+        if (row.original.pricingStatus === 'enabled_unset') {
+          return t('Enabled, unpriced')
+        }
+        if (row.original.pricingStatus === 'enabled_priced') {
+          return t('Enabled, priced')
+        }
+        return t('Configured but not enabled')
+      },
       filterFn: (row, id, value) =>
         filterBySelectedValues(row.getValue(id), value),
       enableHiding: false,

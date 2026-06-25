@@ -214,6 +214,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
 
     const savedByName = new Map(savedRows.map((row) => [row.name, row]))
     const draftByName = new Map(draftRows.map((row) => [row.name, row]))
+    const enabledModelSet = new Set(enabledModelNames)
     const modelNames = new Set([
       ...enabledModelNames,
       ...savedByName.keys(),
@@ -245,7 +246,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
           isDraftDeleted: Boolean(saved && !draft),
           isDraftNew: Boolean(!saved && draft),
           isEnabledOnly: Boolean(!saved && !draft),
-          pricingStatus: getModelPricingStatus(displayed),
+          pricingStatus: getModelPricingStatus(
+            displayed,
+            enabledModelSet.has(name)
+          ),
         }
       })
       .filter((row) => !row.isDraftDeleted)
@@ -302,7 +306,11 @@ const ModelRatioVisualEditorComponent = forwardRef<
           acc[model.pricingStatus] += 1
           return acc
         },
-        { priced: 0, unset: 0 } as Record<'priced' | 'unset', number>
+        {
+          enabled_priced: 0,
+          enabled_unset: 0,
+          configured_only: 0,
+        } as Record<ModelRow['pricingStatus'], number>
       ),
     [models]
   )
@@ -698,14 +706,19 @@ const ModelRatioVisualEditorComponent = forwardRef<
                 title: t('Pricing status'),
                 options: [
                   {
-                    label: 'Unpriced models',
-                    value: 'unset',
-                    count: pricingStatusCounts.unset,
+                    label: 'Enabled, unpriced',
+                    value: 'enabled_unset',
+                    count: pricingStatusCounts.enabled_unset,
                   },
                   {
-                    label: 'Priced models',
-                    value: 'priced',
-                    count: pricingStatusCounts.priced,
+                    label: 'Enabled, priced',
+                    value: 'enabled_priced',
+                    count: pricingStatusCounts.enabled_priced,
+                  },
+                  {
+                    label: 'Configured but not enabled',
+                    value: 'configured_only',
+                    count: pricingStatusCounts.configured_only,
                   },
                 ],
               },
