@@ -17,9 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Link } from '@tanstack/react-router'
+import { Languages, Moon, Sun } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { NotificationPopover } from '@/components/notification-popover'
+import { ProfileDropdown } from '@/components/profile-dropdown'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,19 +30,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useTheme } from '@/context/theme-provider'
-import { useStatus } from '@/hooks/use-status'
+import { useNotifications } from '@/hooks/use-notifications'
 import { INTERFACE_LANGUAGE_OPTIONS } from '@/i18n/languages'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { YouziStarTunnelBackground } from './youzi-star-tunnel-background'
 
 interface YouziLandingProps {
   isAuthenticated: boolean
-}
-
-interface BottomLink {
-  label: string
-  href: string
-  external?: boolean
 }
 
 interface FloatingNode {
@@ -52,6 +50,13 @@ interface FloatingNode {
   delay: string
   duration: string
 }
+
+const TOP_NAV_LINKS = [
+  { label: 'Home', href: '/' },
+  { label: 'Console', href: '/dashboard' },
+  { label: 'Model Market', href: '/pricing' },
+  { label: 'Rankings', href: '/rankings' },
+] as const
 
 const FLOATING_NODES: FloatingNode[] = [
   {
@@ -226,49 +231,22 @@ const FLOATING_NODES: FloatingNode[] = [
   },
 ]
 
-function useBottomLinks(): BottomLink[] {
-  const { t } = useTranslation()
-  const { status } = useStatus()
-  const docsUrl =
-    (status?.docs_link as string | undefined) || 'https://docs.newapi.pro'
-
-  return [
-    { label: t('Docs'), href: docsUrl, external: docsUrl.startsWith('http') },
-    { label: t('API Reference'), href: '/keys' },
-    { label: t('Provider Guide'), href: '/dashboard/channel' },
-    {
-      label: 'GitHub',
-      href: 'https://github.com/QuantumNous/new-api',
-      external: true,
-    },
-    { label: t('Status'), href: '/dashboard' },
-  ]
-}
-
-function SlashSeparator() {
-  return (
-    <span
-      aria-hidden='true'
-      className='text-foreground/25 select-none dark:text-pink-200/35'
-    >
-      /
-    </span>
-  )
-}
-
 function ThemeControl() {
   const { resolvedTheme, setTheme } = useTheme()
   const { t } = useTranslation()
   const isDark = resolvedTheme === 'dark'
-  const nextLabel = isDark ? t('Light') : t('Dark')
+  const nextLabel = isDark
+    ? t('Switch to light mode')
+    : t('Switch to dark mode')
 
   return (
     <button
       type='button'
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
-      className='text-foreground/60 hover:bg-foreground/5 hover:text-foreground rounded-full px-2.5 py-1 text-xs font-semibold tracking-wide transition-colors sm:text-sm dark:text-pink-100/80 dark:hover:bg-pink-100/10 dark:hover:text-pink-100'
+      className='text-foreground/90 hover:bg-foreground/8 grid size-9 place-items-center rounded-full transition-colors dark:text-white dark:hover:bg-white/10'
+      aria-label={nextLabel}
     >
-      {nextLabel}
+      {isDark ? <Moon className='size-5' /> : <Sun className='size-5' />}
     </button>
   )
 }
@@ -283,12 +261,13 @@ function LanguageControl() {
         render={
           <button
             type='button'
-            className='text-foreground/60 hover:bg-foreground/5 hover:text-foreground rounded-full px-2.5 py-1 text-xs font-semibold tracking-wide transition-colors sm:text-sm dark:text-pink-100/80 dark:hover:bg-pink-100/10 dark:hover:text-pink-100'
+            className='text-foreground/90 hover:bg-foreground/8 grid size-9 place-items-center rounded-full transition-colors dark:text-white dark:hover:bg-white/10'
             aria-label={t('Language')}
           />
         }
       >
-        {currentLanguage}
+        <Languages className='size-5' />
+        <span className='sr-only'>{currentLanguage}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align='end' className='min-w-36'>
         {INTERFACE_LANGUAGE_OPTIONS.map((lang) => (
@@ -301,6 +280,63 @@ function LanguageControl() {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+function LandingTopBar(props: { isAuthenticated: boolean }) {
+  const { t } = useTranslation()
+  const user = useAuthStore((state) => state.auth.user)
+  const notifications = useNotifications()
+
+  return (
+    <header className='absolute top-4 right-4 z-30 sm:top-5 sm:right-7'>
+      <nav
+        aria-label={t('Main navigation')}
+        className='text-foreground/85 flex max-w-[calc(100vw-2rem)] items-center gap-1 rounded-full border border-transparent bg-transparent px-1 py-1 text-sm font-semibold backdrop-blur-[2px] dark:text-white/90'
+      >
+        <div className='hidden items-center gap-1 sm:flex'>
+          {TOP_NAV_LINKS.map((link) => (
+            <Link
+              key={link.href}
+              to={link.href}
+              className='hover:bg-foreground/8 hover:text-foreground rounded-full px-3 py-2 transition-colors dark:hover:bg-white/10 dark:hover:text-white'
+            >
+              {t(link.label)}
+            </Link>
+          ))}
+          <span
+            aria-hidden='true'
+            className='bg-foreground/10 mx-2 h-5 w-px dark:bg-white/10'
+          />
+        </div>
+
+        <LanguageControl />
+        <ThemeControl />
+
+        {props.isAuthenticated && user ? (
+          <>
+            <NotificationPopover
+              open={notifications.popoverOpen}
+              onOpenChange={notifications.setPopoverOpen}
+              unreadCount={notifications.unreadCount}
+              activeTab={notifications.activeTab}
+              onTabChange={notifications.setActiveTab}
+              notice={notifications.notice}
+              announcements={notifications.announcements}
+              loading={notifications.loading}
+            />
+            <ProfileDropdown />
+          </>
+        ) : (
+          <Link
+            to='/sign-in'
+            className='hover:bg-foreground/8 hover:text-foreground rounded-full px-3 py-2 text-xs font-semibold transition-colors sm:text-sm dark:hover:bg-white/10 dark:hover:text-white'
+          >
+            {t('Sign In')}
+          </Link>
+        )}
+      </nav>
+    </header>
   )
 }
 
@@ -336,27 +372,12 @@ function FloatingModelNodes() {
 
 export function YouziLanding(props: YouziLandingProps) {
   const { t } = useTranslation()
-  const bottomLinks = useBottomLinks()
-  const authLink = props.isAuthenticated ? '/dashboard' : '/sign-in'
-  const authLabel = props.isAuthenticated ? t('Console') : t('Sign In')
 
   return (
     <main className='bg-background text-foreground relative h-svh min-h-svh w-full overflow-hidden'>
       <YouziStarTunnelBackground />
       <FloatingModelNodes />
-
-      <div className='absolute top-4 right-4 z-20 flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-end gap-1 sm:top-6 sm:right-7'>
-        <Link
-          to={authLink}
-          className='text-foreground/65 hover:bg-foreground/5 hover:text-foreground rounded-full px-2.5 py-1 text-xs font-semibold tracking-wide transition-colors sm:text-sm dark:text-pink-100/85 dark:hover:bg-pink-100/10 dark:hover:text-pink-100'
-        >
-          {authLabel}
-        </Link>
-        <SlashSeparator />
-        <ThemeControl />
-        <SlashSeparator />
-        <LanguageControl />
-      </div>
+      <LandingTopBar isAuthenticated={props.isAuthenticated} />
 
       <section className='relative z-10 flex h-svh min-h-svh flex-col items-center justify-center px-5 text-center'>
         <h1
@@ -374,44 +395,6 @@ export function YouziLanding(props: YouziLandingProps) {
           {t('Where AI calls become Youzi trails')}
         </p>
       </section>
-
-      <div className='absolute right-0 bottom-7 left-0 z-20 flex flex-col items-center gap-3 px-6 sm:bottom-8'>
-        <nav
-          className='text-foreground/45 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-[11px] font-medium tracking-wide sm:text-xs dark:text-pink-100/45'
-          aria-label={t('Footer')}
-        >
-          {bottomLinks.map((link, index) => (
-            <span key={link.href} className='inline-flex items-center gap-x-3'>
-              {link.external || !link.href.startsWith('/') ? (
-                <a
-                  href={link.href}
-                  target={link.external ? '_blank' : undefined}
-                  rel={link.external ? 'noopener noreferrer' : undefined}
-                  className='transition-colors hover:text-[#d63384] dark:hover:text-[#ff85a2]'
-                >
-                  {link.label}
-                </a>
-              ) : (
-                <Link
-                  to={link.href}
-                  className='transition-colors hover:text-[#d63384] dark:hover:text-[#ff85a2]'
-                >
-                  {link.label}
-                </Link>
-              )}
-              {index < bottomLinks.length - 1 && (
-                <span aria-hidden='true' className='opacity-50 select-none'>
-                  ·
-                </span>
-              )}
-            </span>
-          ))}
-        </nav>
-
-        <p className='text-foreground/32 text-center text-[10px] tracking-[0.05em] sm:text-[11px] dark:text-pink-100/35'>
-          {t('OpenAI-compatible · Multi-provider routing · Usage insights')}
-        </p>
-      </div>
     </main>
   )
 }

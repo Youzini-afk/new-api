@@ -23,9 +23,13 @@ export const STATIC_I18N_KEYS = [
   'Home',
   'Console',
   'Model Square',
+  'Model Market',
   'Rankings',
   'Docs',
   'About',
+  'Main navigation',
+  'Switch to light mode',
+  'Switch to dark mode',
 
   // Sidebar views (drill-in workspaces)
   'System Settings',

@@ -5285,6 +5285,9 @@
     "One unified gateway across 50+ providers. Tracked, billed, and routed with the care of a constellation.": "一座网关，汇聚 50+ 上游。像星轨般精准调度，计量与路由皆有迹可循。",
     "Live Gateway Demo": "实时网关演示",
     "Language": "语言",
-    "OpenAI-compatible · Multi-provider routing · Usage insights": "兼容 OpenAI 协议 · 多供应商路由 · 用量与日志观测"
+    "Main navigation": "主导航",
+    "Switch to light mode": "切换到浅色模式",
+    "Switch to dark mode": "切换到深色模式",
+    "Model Market": "模型广场"
   }
 }

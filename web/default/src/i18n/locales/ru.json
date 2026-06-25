@@ -5285,6 +5285,9 @@
     "One unified gateway across 50+ providers. Tracked, billed, and routed with the care of a constellation.": "Единый шлюз для 50+ провайдеров. Отслеживание, биллинг и маршрутизация с точностью созвездия.",
     "Live Gateway Demo": "Демо шлюза в реальном времени",
     "Language": "Язык",
-    "OpenAI-compatible · Multi-provider routing · Usage insights": "OpenAI-совместимость · Маршрутизация между провайдерами · Аналитика использования"
+    "Main navigation": "Основная навигация",
+    "Switch to light mode": "Переключить на светлую тему",
+    "Switch to dark mode": "Переключить на тёмную тему",
+    "Model Market": "Маркет моделей"
   }
 }
