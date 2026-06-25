@@ -44,32 +44,30 @@ interface YouziStarTunnelBackgroundProps {
 // FLOATING_NODES list). Each pair bakes one reusable chip sprite. ---
 interface ModelPreset {
   key: string
-  symbol: string
   color: string
 }
 
 const MODEL_PRESETS: ModelPreset[] = [
-  { key: 'yuzu|#10a37f', symbol: '🍊', color: '#10a37f' },
-  { key: 'yuzu|#d97757', symbol: '🍊', color: '#d97757' },
-  { key: 'yuzu|#8ab4f8', symbol: '🍊', color: '#8ab4f8' },
-  { key: 'yuzu|#1a73e8', symbol: '🍊', color: '#1a73e8' },
-  { key: 'yuzu|#4d6bfe', symbol: '🍊', color: '#4d6bfe' },
-  { key: 'yuzu|#6657fa', symbol: '🍊', color: '#6657fa' },
-  { key: 'yuzu|#f26e24', symbol: '🍊', color: '#f26e24' },
-  { key: 'yuzu|#00a4ef', symbol: '🍊', color: '#00a4ef' },
-  { key: 'yuzu|#cbd5e1', symbol: '🍊', color: '#cbd5e1' },
-  { key: 'yuzu|#a78bfa', symbol: '🍊', color: '#a78bfa' },
-  { key: 'yuzu|#00cc99', symbol: '🍊', color: '#00cc99' },
-  { key: 'yuzu|#ff9db5', symbol: '🍊', color: '#ff9db5' },
-  { key: 'yuzu|#94a3b8', symbol: '🍊', color: '#94a3b8' },
-  { key: 'yuzu|#2932e1', symbol: '🍊', color: '#2932e1' },
-  { key: 'yuzu|#7a52ff', symbol: '🍊', color: '#7a52ff' },
+  { key: 'yuzu|#10a37f', color: '#10a37f' },
+  { key: 'yuzu|#d97757', color: '#d97757' },
+  { key: 'yuzu|#8ab4f8', color: '#8ab4f8' },
+  { key: 'yuzu|#1a73e8', color: '#1a73e8' },
+  { key: 'yuzu|#4d6bfe', color: '#4d6bfe' },
+  { key: 'yuzu|#6657fa', color: '#6657fa' },
+  { key: 'yuzu|#f26e24', color: '#f26e24' },
+  { key: 'yuzu|#00a4ef', color: '#00a4ef' },
+  { key: 'yuzu|#cbd5e1', color: '#cbd5e1' },
+  { key: 'yuzu|#a78bfa', color: '#a78bfa' },
+  { key: 'yuzu|#00cc99', color: '#00cc99' },
+  { key: 'yuzu|#ff9db5', color: '#ff9db5' },
+  { key: 'yuzu|#94a3b8', color: '#94a3b8' },
+  { key: 'yuzu|#2932e1', color: '#2932e1' },
+  { key: 'yuzu|#7a52ff', color: '#7a52ff' },
 ]
 
 // --- Chip baking (off-screen sprite per preset) ---
 const CHIP_BAKE_SIZE = 160
 const CHIP_RADIUS = 38
-const CHIP_SYMBOL_PX = 48
 const CHIP_DISPLAY_SIZE = 100
 
 // --- Tunnel constants (aligned with nashiyard reference) ---
@@ -148,11 +146,11 @@ function prefersReducedMotion(): boolean {
 
 /**
  * Bake a 160×160 off-screen chip sprite: a colored disc with a soft glow
- * shadow, a 1.5px inner highlight ring, a thin outer dark ring, and the
- * unicode symbol centered in white. Runtime only calls drawImage on the
- * returned canvas — no per-frame gradient/text allocations.
+ * shadow, a 1.5px inner highlight ring, a thin outer dark ring, and a hand
+ * drawn yuzu/citrus icon. Runtime only calls drawImage on the returned canvas
+ * — no per-frame gradient/text allocations.
  */
-function bakeChip(symbol: string, color: string): HTMLCanvasElement {
+function bakeChip(color: string): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = CHIP_BAKE_SIZE
   canvas.height = CHIP_BAKE_SIZE
@@ -183,15 +181,75 @@ function bakeChip(symbol: string, color: string): HTMLCanvasElement {
   c.arc(mid, mid, CHIP_RADIUS + 1, 0, Math.PI * 2)
   c.stroke()
 
-  // Unicode symbol centered. Font stack covers symbol/math blocks; emoji
-  // blocks are intentionally avoided to keep the white fill applied.
-  c.fillStyle = '#ffffff'
-  c.font = `${CHIP_SYMBOL_PX}px ui-sans-serif, system-ui, -apple-system, "Segoe UI Symbol", "DejaVu Sans", sans-serif`
-  c.textAlign = 'center'
-  c.textBaseline = 'middle'
-  c.fillText(symbol, mid, mid + 2)
+  drawYuzuIcon(c, mid)
 
   return canvas
+}
+
+function drawYuzuIcon(c: CanvasRenderingContext2D, mid: number) {
+  c.save()
+  c.translate(mid, mid + 3)
+
+  // Fruit body: warm yellow center with orange rind. This avoids relying on
+  // platform emoji fonts, which render monochrome in some canvas stacks.
+  const fruit = c.createRadialGradient(-8, -10, 3, 0, 2, 28)
+  fruit.addColorStop(0, '#fff9c4')
+  fruit.addColorStop(0.42, '#ffeb3b')
+  fruit.addColorStop(0.78, '#fdd835')
+  fruit.addColorStop(1, '#f9a825')
+  c.fillStyle = fruit
+  c.beginPath()
+  c.ellipse(0, 5, 25, 22, 0, 0, Math.PI * 2)
+  c.fill()
+
+  c.strokeStyle = 'rgba(245, 127, 23, 0.72)'
+  c.lineWidth = 2.4
+  c.beginPath()
+  c.ellipse(0, 5, 25, 22, 0, 0, Math.PI * 2)
+  c.stroke()
+
+  // Segment lines, kept chunky enough to survive small projected sizes.
+  c.strokeStyle = 'rgba(255,255,255,0.52)'
+  c.lineWidth = 2
+  c.lineCap = 'round'
+  for (const angle of [-0.78, -0.32, 0.32, 0.78]) {
+    c.beginPath()
+    c.moveTo(0, 3)
+    c.quadraticCurveTo(Math.sin(angle) * 10, 10, Math.sin(angle) * 18, 21)
+    c.stroke()
+  }
+  c.beginPath()
+  c.moveTo(-16, -3)
+  c.quadraticCurveTo(0, 3, 16, -3)
+  c.stroke()
+
+  // Highlight.
+  c.fillStyle = 'rgba(255,255,255,0.45)'
+  c.beginPath()
+  c.ellipse(-9, -6, 7, 4, -0.55, 0, Math.PI * 2)
+  c.fill()
+
+  // Stem and leaf.
+  c.strokeStyle = '#6d4c1d'
+  c.lineWidth = 2.8
+  c.beginPath()
+  c.moveTo(0, -17)
+  c.quadraticCurveTo(4, -23, 11, -24)
+  c.stroke()
+
+  const leaf = c.createLinearGradient(7, -30, 27, -17)
+  leaf.addColorStop(0, '#dce775')
+  leaf.addColorStop(0.55, '#8bc34a')
+  leaf.addColorStop(1, '#26a69a')
+  c.fillStyle = leaf
+  c.strokeStyle = 'rgba(0, 77, 64, 0.4)'
+  c.lineWidth = 1.4
+  c.beginPath()
+  c.ellipse(17, -24, 12, 6, -0.35, 0, Math.PI * 2)
+  c.fill()
+  c.stroke()
+
+  c.restore()
 }
 
 export function YouziStarTunnelBackground(
@@ -240,7 +298,7 @@ export function YouziStarTunnelBackground(
     // Bake chip sprites synchronously — unicode glyphs need no async loading.
     const chips: Record<string, HTMLCanvasElement> = {}
     for (const preset of MODEL_PRESETS) {
-      chips[preset.key] = bakeChip(preset.symbol, preset.color)
+      chips[preset.key] = bakeChip(preset.color)
     }
 
     const isMobile =
