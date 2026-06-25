@@ -17,6 +17,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -178,6 +179,16 @@ func decodeAvatarResponse(t *testing.T, recorder *httptest.ResponseRecorder) ava
 	var resp avatarAPIResponse
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &resp))
 	return resp
+}
+
+func newDiscordAvatarSyncContext(t *testing.T, userID int, body string) (*gin.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/user/self/avatar/discord", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", userID)
+	return ctx, recorder
 }
 
 // TestUploadAvatar_AcceptsValidPNG exercises the happy path for PNG upload and
@@ -541,4 +552,104 @@ func TestSetupLogin_ReturnsAvatarFields(t *testing.T) {
 	require.True(t, resp.Success)
 	assert.Equal(t, "/api/user/avatar/1/ghi.png", resp.Data.AvatarURL)
 	assert.Equal(t, "uploaded", resp.Data.AvatarSource)
+}
+
+func TestSyncSelfDiscordAvatar_RequiresLogin(t *testing.T) {
+	setupAvatarTestDB(t)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/user/self/avatar/discord", strings.NewReader(`{}`))
+
+	SyncSelfDiscordAvatar(ctx)
+
+	resp := decodeAvatarResponse(t, recorder)
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Message, "authenticated")
+}
+
+func TestSyncSelfDiscordAvatar_UnboundUserReturnsBusinessError(t *testing.T) {
+	db := setupAvatarTestDB(t)
+	user := seedAvatarUser(t, db, "discord-avatar-unbound")
+	ctx, recorder := newDiscordAvatarSyncContext(t, user.Id, `{}`)
+
+	SyncSelfDiscordAvatar(ctx)
+
+	resp := decodeAvatarResponse(t, recorder)
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Message, "Discord account is not bound")
+}
+
+func TestSyncSelfDiscordAvatar_ProtectedUploadedWithoutForce(t *testing.T) {
+	db := setupAvatarTestDB(t)
+	user := seedAvatarUser(t, db, "discord-avatar-protected")
+	require.NoError(t, db.Model(&model.User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"discord_id":            "123456789012345678",
+		"discord_avatar_hash":   "protected_hash",
+		"discord_refresh_token": "super-secret-token",
+		"avatar_url":            "/api/user/avatar/1/uploaded.png",
+		"avatar_source":         model.AvatarSourceUploaded,
+	}).Error)
+	ctx, recorder := newDiscordAvatarSyncContext(t, user.Id, `{"force":false}`)
+
+	SyncSelfDiscordAvatar(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.NotContains(t, recorder.Body.String(), "protected_hash")
+	assert.NotContains(t, recorder.Body.String(), "super-secret-token")
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Skipped      bool   `json:"skipped"`
+			Reason       string `json:"reason"`
+			AvatarURL    string `json:"avatar_url"`
+			AvatarSource string `json:"avatar_source"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &resp))
+	require.True(t, resp.Success)
+	assert.True(t, resp.Data.Skipped)
+	assert.Equal(t, service.DiscordAvatarReasonUploadedProtected, resp.Data.Reason)
+	assert.Equal(t, model.AvatarSourceUploaded, resp.Data.AvatarSource)
+}
+
+func TestSyncSelfDiscordAvatar_ForceOverwritesUploaded(t *testing.T) {
+	db := setupAvatarTestDB(t)
+	user := seedAvatarUser(t, db, "discord-avatar-force")
+	require.NoError(t, db.Model(&model.User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"discord_id":            "123456789012345678",
+		"discord_avatar_hash":   "force_hash",
+		"discord_refresh_token": "super-secret-token",
+		"avatar_url":            "/api/user/avatar/1/uploaded.png",
+		"avatar_source":         model.AvatarSourceUploaded,
+	}).Error)
+	withDiscordProfileAvatarServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(validPNGBytes(t, 4, 4))
+	})
+	ctx, recorder := newDiscordAvatarSyncContext(t, user.Id, `{"force":true}`)
+
+	SyncSelfDiscordAvatar(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.NotContains(t, recorder.Body.String(), "force_hash")
+	assert.NotContains(t, recorder.Body.String(), "super-secret-token")
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Synced       bool   `json:"synced"`
+			Reason       string `json:"reason"`
+			AvatarURL    string `json:"avatar_url"`
+			AvatarSource string `json:"avatar_source"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &resp))
+	require.True(t, resp.Success)
+	assert.True(t, resp.Data.Synced)
+	assert.Equal(t, service.DiscordAvatarReasonStored, resp.Data.Reason)
+	assert.Contains(t, resp.Data.AvatarURL, "/api/user/avatar/")
+	assert.Equal(t, model.AvatarSourceDiscord, resp.Data.AvatarSource)
+
+	var stored model.User
+	require.NoError(t, db.First(&stored, user.Id).Error)
+	assert.Equal(t, model.AvatarSourceDiscord, stored.AvatarSource)
+	assert.Equal(t, resp.Data.AvatarURL, stored.AvatarURL)
 }

@@ -44,6 +44,7 @@ func TestMain(m *testing.M) {
 	if err := db.AutoMigrate(
 		&model.Task{},
 		&model.User{},
+		&model.UserAvatar{},
 		&model.Token{},
 		&model.Log{},
 		&model.Channel{},
@@ -72,6 +73,7 @@ func truncate(t *testing.T) {
 	t.Cleanup(func() {
 		model.DB.Exec("DELETE FROM tasks")
 		model.DB.Exec("DELETE FROM users")
+		model.DB.Exec("DELETE FROM user_avatars")
 		model.DB.Exec("DELETE FROM tokens")
 		model.DB.Exec("DELETE FROM logs")
 		model.DB.Exec("DELETE FROM channels")

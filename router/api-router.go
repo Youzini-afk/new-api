@@ -92,6 +92,7 @@ func SetApiRouter(router *gin.Engine) {
 				// Avatar upload / delete. PUT /api/user/self is NOT used so
 				// avatar_url cannot be written through the generic self update.
 				selfRoute.POST("/self/avatar", middleware.CriticalRateLimit(), middleware.RequestBodyLimit(5*1024*1024), controller.UploadSelfAvatar)
+				selfRoute.POST("/self/avatar/discord", middleware.CriticalRateLimit(), middleware.RequestBodyLimit(1024), controller.SyncSelfDiscordAvatar)
 				selfRoute.DELETE("/self/avatar", controller.DeleteSelfAvatar)
 				selfRoute.GET("/token", controller.GenerateAccessToken)
 				selfRoute.GET("/passkey", controller.PasskeyStatus)

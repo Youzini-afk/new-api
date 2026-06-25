@@ -93,6 +93,71 @@ func TestStoreUserAvatarRollsBackForMissingUser(t *testing.T) {
 	assert.Zero(t, count)
 }
 
+func TestStoreUserAvatarWithSourceGuard_AutoSyncSourceRules(t *testing.T) {
+	for name, tc := range map[string]struct {
+		initialSource string
+		force         bool
+		wantStored    bool
+		wantErr       error
+		wantSource    string
+	}{
+		"empty auto stores":      {initialSource: "", wantStored: true, wantSource: AvatarSourceDiscord},
+		"discord auto stores":    {initialSource: AvatarSourceDiscord, wantStored: true, wantSource: AvatarSourceDiscord},
+		"uploaded auto protects": {initialSource: AvatarSourceUploaded, wantErr: ErrAvatarSourceProtected, wantSource: AvatarSourceUploaded},
+		"unknown auto protects":  {initialSource: "external", wantErr: ErrAvatarSourceProtected, wantSource: "external"},
+		"force overwrites":       {initialSource: AvatarSourceUploaded, force: true, wantStored: true, wantSource: AvatarSourceDiscord},
+	} {
+		t.Run(name, func(t *testing.T) {
+			truncateTables(t)
+			user := &User{Username: "avatar-guard-" + strings.ReplaceAll(name, " ", "-"), Password: "x", Role: 1, AffCode: "guard-" + strings.ReplaceAll(name, " ", "-")}
+			require.NoError(t, DB.Create(user).Error)
+			if tc.initialSource != "" {
+				require.NoError(t, SetUserAvatarFields(user.Id, "/api/user/avatar/old/hash.png", tc.initialSource))
+			}
+
+			pngBytes := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, byte(len(name))}
+			sum := sha256.Sum256(pngBytes)
+			sha := hex.EncodeToString(sum[:])
+			stored, err := StoreUserAvatarWithSourceGuard(user.Id, "image/png", sha, pngBytes, "/api/user/avatar/1/"+sha+".png", AvatarSourceDiscord, tc.force)
+
+			if tc.wantErr != nil {
+				assert.ErrorIs(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.wantStored, stored)
+
+			var reloaded User
+			require.NoError(t, DB.Where("id = ?", user.Id).First(&reloaded).Error)
+			assert.Equal(t, tc.wantSource, reloaded.AvatarSource)
+			count := int64(0)
+			require.NoError(t, DB.Model(&UserAvatar{}).Where("user_id = ?", user.Id).Count(&count).Error)
+			if tc.wantStored {
+				assert.Equal(t, int64(1), count)
+				_, err = GetUserAvatarByUserAndHash(user.Id, sha)
+				require.NoError(t, err)
+			} else {
+				assert.Zero(t, count, "protected guard must not leave an orphan/stale blob")
+			}
+		})
+	}
+}
+
+func TestStoreUserAvatarWithSourceGuard_MissingUserDoesNotLeaveBlob(t *testing.T) {
+	truncateTables(t)
+	pngBytes := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 7}
+	sum := sha256.Sum256(pngBytes)
+	sha := hex.EncodeToString(sum[:])
+
+	stored, err := StoreUserAvatarWithSourceGuard(12345, "image/png", sha, pngBytes, "/api/user/avatar/12345/"+sha+".png", AvatarSourceDiscord, false)
+	assert.False(t, stored)
+	assert.ErrorIs(t, err, ErrAvatarConditionalNoUser)
+
+	count := int64(0)
+	require.NoError(t, DB.Model(&UserAvatar{}).Where("user_id = ?", 12345).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
 // TestUserDeleteRemovesAvatar verifies account deletion removes the blob and
 // makes old avatar URLs stop resolving.
 func TestUserDeleteRemovesAvatar(t *testing.T) {

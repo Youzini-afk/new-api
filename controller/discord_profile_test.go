@@ -1,7 +1,11 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -23,6 +28,33 @@ type oauthTestSession map[interface{}]interface{}
 func (s oauthTestSession) ID() string { return "" }
 func (s oauthTestSession) Get(key interface{}) interface{} {
 	return s[key]
+}
+
+func discordProfilePNG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 3, 3))
+	for y := 0; y < 3; y++ {
+		for x := 0; x < 3; x++ {
+			img.Set(x, y, color.RGBA{R: 80, G: byte(x * 30), B: byte(y * 30), A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	require.NoError(t, png.Encode(&buf, img))
+	return buf.Bytes()
+}
+
+func withDiscordProfileAvatarServer(t *testing.T, handler http.HandlerFunc) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	oldBase := service.DiscordAvatarCDNBaseURL
+	oldClient := service.DiscordAvatarHTTPClient
+	service.DiscordAvatarCDNBaseURL = server.URL
+	service.DiscordAvatarHTTPClient = server.Client()
+	t.Cleanup(func() {
+		server.Close()
+		service.DiscordAvatarCDNBaseURL = oldBase
+		service.DiscordAvatarHTTPClient = oldClient
+	})
 }
 func (s oauthTestSession) Set(key interface{}, val interface{}) {
 	s[key] = val
@@ -41,8 +73,9 @@ func (s oauthTestSession) Options(options sessions.Options)           {}
 func (s oauthTestSession) Save() error                                { return nil }
 
 type discordProfileControllerProvider struct {
-	token     *oauth.OAuthToken
-	oauthUser *oauth.OAuthUser
+	token          *oauth.OAuthToken
+	oauthUser      *oauth.OAuthUser
+	preMutationErr error
 }
 
 func (p discordProfileControllerProvider) GetName() string { return "Discord" }
@@ -65,6 +98,9 @@ func (p discordProfileControllerProvider) SetProviderUserID(user *model.User, pr
 }
 func (p discordProfileControllerProvider) GetProviderPrefix() string { return "discord_" }
 func (p discordProfileControllerProvider) PreUserMutation(ctx context.Context, preCtx oauth.PreUserMutationContext) error {
+	if p.preMutationErr != nil {
+		return p.preMutationErr
+	}
 	if preCtx.Result == nil || preCtx.OAuthUser == nil {
 		return nil
 	}
@@ -136,6 +172,139 @@ func TestDiscordProfile_CreatePersistsMetadata(t *testing.T) {
 	assert.Equal(t, "1234", stored.DiscordDiscriminator)
 	assert.Equal(t, "avatar-create", stored.DiscordAvatarHash)
 	assert.NotZero(t, stored.DiscordProfileSyncedAt)
+}
+
+func TestDiscordAvatarOAuth_CreateBestEffortFailureDoesNotBlock(t *testing.T) {
+	db := setupAvatarTestDB(t)
+	withDiscordProfileOAuthSettings(t)
+	withDiscordProfileAvatarServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	user, err := findOrCreateOAuthUser(
+		newOAuthHelperContext(),
+		&oauth.DiscordProvider{},
+		discordProfileOAuthUser("123456789012345678", "remotecreatefail", "Remote Create Fail", "1234", "avatar_create_fail"),
+		&oauth.OAuthToken{AccessToken: "access-token"},
+		oauthTestSession{},
+	)
+	require.NoError(t, err)
+	require.NotZero(t, user.Id)
+	syncDiscordAvatarBestEffort(newOAuthHelperContext(), &oauth.DiscordProvider{}, user)
+
+	var stored model.User
+	require.NoError(t, db.Where("id = ?", user.Id).First(&stored).Error)
+	assert.Empty(t, stored.AvatarURL)
+	assert.Empty(t, stored.AvatarSource)
+}
+
+func TestDiscordAvatarOAuth_LoginBestEffortUpdatesInMemoryUser(t *testing.T) {
+	db := setupAvatarTestDB(t)
+	withDiscordProfileOAuthSettings(t)
+	pngBytes := discordProfilePNG(t)
+	withDiscordProfileAvatarServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(pngBytes)
+	})
+	localUser := &model.User{
+		Username:          "local-avatar-login",
+		Password:          "password_hash",
+		Role:              common.RoleCommonUser,
+		Status:            common.UserStatusEnabled,
+		Group:             "default",
+		DiscordId:         "123456789012345678",
+		DiscordAvatarHash: "avatar_login",
+	}
+	require.NoError(t, db.Create(localUser).Error)
+
+	user, err := findOrCreateOAuthUser(
+		newOAuthHelperContext(),
+		&oauth.DiscordProvider{},
+		discordProfileOAuthUser("123456789012345678", "remote-login", "Remote Login", "4321", "avatar_login"),
+		&oauth.OAuthToken{AccessToken: "access-token"},
+		oauthTestSession{},
+	)
+	require.NoError(t, err)
+	syncDiscordAvatarBestEffort(newOAuthHelperContext(), &oauth.DiscordProvider{}, user)
+
+	assert.Equal(t, model.AvatarSourceDiscord, user.AvatarSource)
+	assert.NotEmpty(t, user.AvatarURL)
+	assert.Contains(t, user.AvatarURL, "/api/user/avatar/")
+	var stored model.User
+	require.NoError(t, db.Where("id = ?", localUser.Id).First(&stored).Error)
+	assert.Equal(t, user.AvatarURL, stored.AvatarURL)
+	assert.Equal(t, model.AvatarSourceDiscord, stored.AvatarSource)
+}
+
+func TestDiscordAvatarOAuth_UploadedNotOverwrittenByAutoSync(t *testing.T) {
+	db := setupAvatarTestDB(t)
+	withDiscordProfileOAuthSettings(t)
+	withDiscordProfileAvatarServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(discordProfilePNG(t))
+	})
+	localUser := &model.User{
+		Username:          "local-avatar-uploaded",
+		Password:          "password_hash",
+		Role:              common.RoleCommonUser,
+		Status:            common.UserStatusEnabled,
+		Group:             "default",
+		DiscordId:         "123456789012345678",
+		DiscordAvatarHash: "avatar_login",
+		AvatarURL:         "/api/user/avatar/1/uploaded.png",
+		AvatarSource:      model.AvatarSourceUploaded,
+	}
+	require.NoError(t, db.Create(localUser).Error)
+
+	user, err := findOrCreateOAuthUser(
+		newOAuthHelperContext(),
+		&oauth.DiscordProvider{},
+		discordProfileOAuthUser("123456789012345678", "remote-login", "Remote Login", "4321", "avatar_login"),
+		&oauth.OAuthToken{AccessToken: "access-token"},
+		oauthTestSession{},
+	)
+	require.NoError(t, err)
+	syncDiscordAvatarBestEffort(newOAuthHelperContext(), &oauth.DiscordProvider{}, user)
+
+	var stored model.User
+	require.NoError(t, db.Where("id = ?", localUser.Id).First(&stored).Error)
+	assert.Equal(t, "/api/user/avatar/1/uploaded.png", stored.AvatarURL)
+	assert.Equal(t, model.AvatarSourceUploaded, stored.AvatarSource)
+}
+
+func TestDiscordAvatarOAuth_GateFailureDoesNotImport(t *testing.T) {
+	db := setupAvatarTestDB(t)
+	withDiscordProfileOAuthSettings(t)
+	withDiscordProfileAvatarServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(discordProfilePNG(t))
+	})
+	provider := discordProfileControllerProvider{
+		token:          &oauth.OAuthToken{AccessToken: "access-token"},
+		oauthUser:      discordProfileOAuthUser("123456789012345678", "remote-deny", "Remote Deny", "1234", "avatar_deny"),
+		preMutationErr: &oauth.AccessDeniedError{Message: "gate denied"},
+	}
+	localUser := &model.User{Username: "local-deny", Password: "password_hash", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default"}
+	require.NoError(t, db.Create(localUser).Error)
+
+	r := gin.New()
+	r.Use(sessions.Sessions("session", cookie.NewStore([]byte("discord-profile-test-secret"))))
+	r.GET("/api/oauth/discord", func(c *gin.Context) {
+		session := sessions.Default(c)
+		session.Set("id", localUser.Id)
+		session.Set("username", localUser.Username)
+		require.NoError(t, session.Save())
+		handleOAuthBind(c, provider)
+	})
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/oauth/discord?code=ok", nil)
+	r.ServeHTTP(recorder, req)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "gate denied")
+
+	var stored model.User
+	require.NoError(t, db.Where("id = ?", localUser.Id).First(&stored).Error)
+	assert.Empty(t, stored.DiscordId)
+	assert.Empty(t, stored.AvatarURL)
+	assert.Empty(t, stored.AvatarSource)
 }
 
 func TestDiscordProfile_LoginRefreshesMetadataWithoutOverwritingLocalNames(t *testing.T) {

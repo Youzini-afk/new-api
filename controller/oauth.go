@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -190,7 +191,22 @@ func HandleOAuth(c *gin.Context) {
 	}
 
 	// 9. Setup login
+	syncDiscordAvatarBestEffort(c, provider, user)
 	setupLogin(user, c)
+}
+
+func syncDiscordAvatarBestEffort(c *gin.Context, provider oauth.Provider, user *model.User) {
+	if c == nil || provider == nil || user == nil || provider.GetName() != "Discord" {
+		return
+	}
+	result, err := service.SyncDiscordAvatar(c.Request.Context(), user, false)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("[OAuth-Discord] avatar auto sync skipped for user %d: reason=%s err=%v", user.Id, result.Reason, err))
+		return
+	}
+	if result.Skipped && result.Reason != service.DiscordAvatarReasonUploadedProtected && result.Reason != service.DiscordAvatarReasonUnchanged {
+		common.SysLog(fmt.Sprintf("[OAuth-Discord] avatar auto sync skipped for user %d: reason=%s", user.Id, result.Reason))
+	}
 }
 
 // handleOAuthBind handles binding OAuth account to existing user
@@ -283,6 +299,7 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 			common.ApiError(c, err)
 			return
 		}
+		syncDiscordAvatarBestEffort(c, provider, &user)
 	}
 
 	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{

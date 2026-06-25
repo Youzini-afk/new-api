@@ -1,14 +1,8 @@
 package controller
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"image"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"net/http"
 	"strconv"
@@ -16,44 +10,20 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	// avatarMaxBytes is the hard cap on the decoded avatar file itself.
-	// Frontends are expected to compress before upload; the backend rejects
-	// anything larger so a malicious or buggy client cannot bloat the DB.
-	avatarMaxBytes = 512 * 1024 // 512 KiB
-
-	// avatarMaxBodyBytes bounds the whole multipart request body (form fields
-	// + file). Applied as a route-level middleware; mirrored here for the
-	// fallback handler-level guard.
-	avatarMaxBodyBytes = 5 * 1024 * 1024 // 5 MiB
-
-	// avatarMaxDim caps width / height in pixels.
-	avatarMaxDim = 2048
-
-	// avatarMaxPixels caps total pixels (width * height) to bound decode cost.
-	avatarMaxPixels = 4 * 1024 * 1024 // 4 megapixels
-
-	// avatarFormField is the multipart form field name clients must use.
-	avatarFormField = "avatar"
-
-	avatarSourceUploaded = "uploaded"
-)
-
-// formatMeta maps an image.DecodeConfig format string to its content-type and
-// URL extension. Only entries here are accepted — SVG, GIF, HTML, data URLs
-// and remote URLs are rejected by virtue of not being a registered/accepted
-// decode format.
-var formatMeta = map[string]struct {
-	ContentType string
-	Ext         string
-}{
-	"png":  {"image/png", "png"},
-	"jpeg": {"image/jpeg", "jpg"},
+type syncDiscordAvatarRequest struct {
+	Force bool `json:"force"`
 }
+
+const (
+	avatarMaxBytes     = service.AvatarMaxBytes
+	avatarMaxBodyBytes = service.AvatarMaxBodyBytes
+	avatarFormField    = service.AvatarFormField
+)
 
 // uploadSelfAvatarResponse is the contract returned by POST /api/user/self/avatar.
 type uploadSelfAvatarResponse struct {
@@ -121,52 +91,12 @@ func UploadSelfAvatar(c *gin.Context) {
 		return
 	}
 
-	// Reject obvious non-image payloads by sniffing magic bytes before decode.
-	// Defends against HTML / SVG / data: URLs that happen to parse cleanly.
-	if msg := rejectNonImageMagic(data); msg != "" {
-		common.ApiErrorMsg(c, msg)
-		return
-	}
-
-	// DecodeConfig first — cheap and gives us dimensions + format.
-	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	avatar, err := service.ValidateAvatarImage(userID, data)
 	if err != nil {
-		common.ApiErrorMsg(c, "avatar is not a valid PNG or JPEG image")
+		common.ApiErrorMsg(c, err.Error())
 		return
 	}
-	meta, ok := formatMeta[format]
-	if !ok {
-		// Rejects SVG / GIF / WEBP / HEIC even if a decoder is registered
-		// elsewhere in the binary (e.g. via the service package).
-		common.ApiErrorMsg(c, "avatar format not supported: only PNG and JPEG are allowed")
-		return
-	}
-
-	if config.Width <= 0 || config.Height <= 0 {
-		common.ApiErrorMsg(c, "avatar has invalid dimensions")
-		return
-	}
-	if config.Width > avatarMaxDim || config.Height > avatarMaxDim {
-		common.ApiErrorMsg(c, fmt.Sprintf("avatar dimensions too large: %dx%d (max %d per side)", config.Width, config.Height, avatarMaxDim))
-		return
-	}
-	if int64(config.Width)*int64(config.Height) > avatarMaxPixels {
-		common.ApiErrorMsg(c, fmt.Sprintf("avatar pixel count too large: %d (max %d)", config.Width*config.Height, avatarMaxPixels))
-		return
-	}
-
-	// Full decode to guarantee the file is not truncated/corrupt —
-	// DecodeConfig only reads headers.
-	if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
-		common.ApiErrorMsg(c, "avatar image data is corrupt or truncated")
-		return
-	}
-
-	sum := sha256.Sum256(data)
-	sha := hex.EncodeToString(sum[:])
-
-	avatarURL := fmt.Sprintf("/api/user/avatar/%d/%s.%s", userID, sha, meta.Ext)
-	if err := model.StoreUserAvatar(userID, meta.ContentType, sha, data, avatarURL, avatarSourceUploaded); err != nil {
+	if _, err := model.StoreUserAvatarWithSourceGuard(userID, avatar.ContentType, avatar.SHA256, avatar.Data, avatar.AvatarURL, model.AvatarSourceUploaded, true); err != nil {
 		common.SysLog(fmt.Sprintf("failed to store avatar for user %d: %v", userID, err))
 		common.ApiErrorMsg(c, "failed to store avatar")
 		return
@@ -176,31 +106,10 @@ func UploadSelfAvatar(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": uploadSelfAvatarResponse{
-			AvatarURL:    avatarURL,
-			AvatarSource: avatarSourceUploaded,
+			AvatarURL:    avatar.AvatarURL,
+			AvatarSource: model.AvatarSourceUploaded,
 		},
 	})
-}
-
-// rejectNonImageMagic inspects the leading bytes for signatures of payloads we
-// never want to accept regardless of what image.DecodeConfig says. Returns a
-// non-empty human-readable reason when the payload must be rejected.
-func rejectNonImageMagic(data []byte) string {
-	trimmed := bytes.TrimLeft(data, " \t\r\n")
-	switch {
-	case len(trimmed) == 0:
-		return "avatar file is empty"
-	case bytes.HasPrefix(trimmed, []byte("<svg")), bytes.HasPrefix(trimmed, []byte("<?xml")):
-		return "avatar must not be SVG or XML"
-	case bytes.HasPrefix(trimmed, []byte("<!")),
-		bytes.HasPrefix(trimmed, []byte("<html")),
-		bytes.HasPrefix(trimmed, []byte("<HTML")),
-		bytes.HasPrefix(trimmed, []byte("<!DOCTYPE")):
-		return "avatar must not be HTML"
-	case bytes.HasPrefix(trimmed, []byte("data:")):
-		return "avatar must not be a data URL"
-	}
-	return ""
 }
 
 // GetUserAvatar handles GET /api/user/avatar/:id/:hash.
@@ -266,6 +175,48 @@ func DeleteSelfAvatar(c *gin.Context) {
 			AvatarSource: "",
 		},
 	})
+}
+
+// SyncSelfDiscordAvatar handles POST /api/user/self/avatar/discord. It lets a
+// user explicitly import their Discord avatar. force=true is user-initiated and
+// may overwrite an uploaded avatar; force=false respects the same protection as
+// automatic OAuth sync.
+func SyncSelfDiscordAvatar(c *gin.Context) {
+	userID := c.GetInt("id")
+	if userID == 0 {
+		common.ApiErrorMsg(c, "user not authenticated")
+		return
+	}
+	var req syncDiscordAvatarRequest
+	if c.Request != nil && c.Request.Body != nil && c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			common.ApiErrorMsg(c, "invalid request body")
+			return
+		}
+	}
+	user, err := model.GetUserById(userID, true)
+	if err != nil {
+		common.ApiErrorMsg(c, "user not found")
+		return
+	}
+	result, err := service.SyncDiscordAvatar(c.Request.Context(), user, req.Force)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrDiscordAvatarMissingBinding):
+			common.ApiErrorMsg(c, "Discord account is not bound")
+		case errors.Is(err, service.ErrDiscordAvatarMissingAvatar):
+			common.ApiErrorMsg(c, "Discord avatar is not available")
+		case errors.Is(err, service.ErrDiscordAvatarDownloadFailed):
+			common.ApiErrorMsg(c, "failed to download Discord avatar")
+		case errors.Is(err, service.ErrDiscordAvatarInvalidImage):
+			common.ApiErrorMsg(c, "Discord avatar is not a valid image")
+		default:
+			common.SysLog(fmt.Sprintf("failed to sync Discord avatar for user %d: %v", userID, err))
+			common.ApiErrorMsg(c, "failed to sync Discord avatar")
+		}
+		return
+	}
+	common.ApiSuccess(c, result)
 }
 
 // parseIntParam parses a route param into a positive int without panicking on

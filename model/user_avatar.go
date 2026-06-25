@@ -2,9 +2,15 @@ package model
 
 import (
 	"errors"
+	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+)
+
+const (
+	AvatarSourceUploaded = "uploaded"
+	AvatarSourceDiscord  = "discord"
 )
 
 // UserAvatar stores the raw avatar bytes for a user. It is intentionally kept
@@ -32,7 +38,11 @@ func (UserAvatar) TableName() string {
 }
 
 // ErrAvatarNotFound is returned by GetAvatar when no row exists for the user.
-var ErrAvatarNotFound = errors.New("avatar not found")
+var (
+	ErrAvatarNotFound          = errors.New("avatar not found")
+	ErrAvatarSourceProtected   = errors.New("avatar source protected")
+	ErrAvatarConditionalNoUser = errors.New("user not found")
+)
 
 // UpsertUserAvatar stores (or replaces) the avatar blob for a user inside a
 // single transaction. The unique index on user_id makes the OnConflict clause
@@ -73,15 +83,59 @@ func upsertUserAvatarWithDB(db *gorm.DB, userID int, contentType, sha256 string,
 // at the immutable public URL. Keeping both writes in a transaction prevents a
 // dangling blob or a users.avatar_url pointing at bytes that were not stored.
 func StoreUserAvatar(userID int, contentType, sha256 string, data []byte, avatarURL, avatarSource string) error {
+	_, err := StoreUserAvatarWithSourceGuard(userID, contentType, sha256, data, avatarURL, avatarSource, true)
+	return err
+}
+
+// StoreUserAvatarWithSourceGuard atomically stores the blob and updates the
+// users row while enforcing the Discord auto-sync source guard in the model
+// layer. When force is false, only empty / discord avatar_source rows may be
+// changed; uploaded or unknown non-empty sources are protected. The users row is
+// conditionally updated before the blob upsert so a protected row cannot leave a
+// new blob behind or invalidate an uploaded avatar's old hash URL.
+func StoreUserAvatarWithSourceGuard(userID int, contentType, sha256 string, data []byte, avatarURL, avatarSource string, force bool) (bool, error) {
 	if userID == 0 {
-		return errors.New("user id is empty")
+		return false, errors.New("user id is empty")
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
+	if strings.TrimSpace(avatarURL) == "" || strings.TrimSpace(avatarSource) == "" {
+		return false, errors.New("avatar url and source are required")
+	}
+	stored := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&User{}).Where("id = ?", userID)
+		if !force {
+			query = query.Where("avatar_source = ? OR avatar_source = ? OR avatar_source IS NULL", "", AvatarSourceDiscord)
+		}
+		result := query.Updates(map[string]interface{}{
+			"avatar_url":    avatarURL,
+			"avatar_source": avatarSource,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			var current User
+			if err := tx.Select("id", "avatar_source").First(&current, "id = ?", userID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrAvatarConditionalNoUser
+				}
+				return err
+			}
+			if !force && !avatarSourceAllowsDiscordAutoSync(current.AvatarSource) {
+				return ErrAvatarSourceProtected
+			}
+		}
 		if err := upsertUserAvatarWithDB(tx, userID, contentType, sha256, data); err != nil {
 			return err
 		}
-		return setUserAvatarFieldsWithDB(tx, userID, avatarURL, avatarSource)
+		stored = true
+		return nil
 	})
+	return stored, err
+}
+
+func avatarSourceAllowsDiscordAutoSync(source string) bool {
+	return source == "" || source == AvatarSourceDiscord
 }
 
 // GetUserAvatarByUserAndHash loads a user's avatar only when the stored SHA256
