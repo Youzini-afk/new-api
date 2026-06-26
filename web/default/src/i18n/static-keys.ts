@@ -19,6 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  'View Details',
+  'This user has no request logs yet.',
+  'No request logs found',
+  'Page {{current}} of {{total}}',
+  'Failed to load request logs',
+  'Recent request logs for {{username}}',
+  'Request Logs',
+  'View request logs',
   // Header navigation
   'Home',
   'Console',
@@ -126,7 +134,7 @@ export const STATIC_I18N_KEYS = [
 
   // Log screening UA group rules
   'UA group regex rules (JSON object)',
-  'JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group.',
+  'JSON object keyed by group name. Each value is a rule array, for example: { "vip": [{ "pattern": "curl", "message": "..." }] }. Token group is checked first, then user group.',
 
   // Short-message extra billing mode cards
   'Shadow (Audit Only)',

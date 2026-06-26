@@ -2918,7 +2918,7 @@
     "Overwritten": "已覆盖",
     "PaLM": "PaLM",
     "Page": "页面",
-    "Page {{current}} of {{total}}": "第 {{current}} 页，共 {{total}} 页",
+    "Page {{current}} of {{total}}": "第 {{current}} / {{total}} 页",
     "Pan": "平移",
     "Pancake": "煎饼",
     "Param Override": "参数覆盖",
@@ -5392,6 +5392,13 @@
     "Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.": "规则码由后端固定。每条规则的返回消息都可编辑；点击重置可恢复默认返回消息。",
     "Reset rule {{code}} to default": "将规则 {{code}} 重置为默认值",
     "UA group regex rules (JSON object)": "UA 分组正则规则（JSON 对象）",
-    "JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group.": "以分组名为键的 JSON 对象，每个值是一组规则数组，例如：{ \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }。优先匹配令牌分组，其次匹配用户/路由分组。"
+    "JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group.": "以分组名为键的 JSON 对象，每个值是一组规则数组，例如：{ \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }。优先匹配令牌分组，其次匹配用户/路由分组。",
+    "View request logs": "查看请求日志",
+    "Request Logs": "请求日志",
+    "Recent request logs for {{username}}": "{{username}} 的最近请求日志",
+    "Failed to load request logs": "加载请求日志失败",
+    "No request logs found": "未找到请求日志",
+    "This user has no request logs yet.": "该用户暂无请求日志。",
+    "View Details": "查看详情"
   }
 }

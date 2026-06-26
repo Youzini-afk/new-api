@@ -5392,6 +5392,13 @@
     "Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.": "Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.",
     "Reset rule {{code}} to default": "Reset rule {{code}} to default",
     "UA group regex rules (JSON object)": "UA group regex rules (JSON object)",
-    "JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group.": "JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group."
+    "JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group.": "JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group.",
+    "View request logs": "View request logs",
+    "Request Logs": "Request Logs",
+    "Recent request logs for {{username}}": "Recent request logs for {{username}}",
+    "Failed to load request logs": "Failed to load request logs",
+    "No request logs found": "No request logs found",
+    "This user has no request logs yet.": "This user has no request logs yet.",
+    "View Details": "View Details"
   }
 }

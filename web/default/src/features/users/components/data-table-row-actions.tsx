@@ -1,3 +1,21 @@
+import type { Row } from '@tanstack/react-table'
+import {
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  Power,
+  PowerOff,
+  ArrowUp,
+  ArrowDown,
+  KeyRound,
+  ShieldAlert,
+  Link2,
+  CreditCard,
+  RotateCcw,
+  UserX,
+  ShieldCheck,
+  FileText,
+} from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -17,25 +35,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
-import { type Row } from '@tanstack/react-table'
-import {
-  MoreHorizontal,
-  Pencil,
-  Trash2,
-  Power,
-  PowerOff,
-  ArrowUp,
-  ArrowDown,
-  KeyRound,
-  ShieldAlert,
-  Link2,
-  CreditCard,
-  RotateCcw,
-  UserX,
-  ShieldCheck,
-} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -45,8 +48,8 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
+
 import {
   forceUserDiscordGateReauth,
   manageUser,
@@ -62,8 +65,9 @@ import {
   isUserDeleted,
 } from '../constants'
 import { getUserActionMessage } from '../lib'
-import { type User, type ManageUserAction } from '../types'
+import type { User, ManageUserAction } from '../types'
 import { UserBindingDialog } from './dialogs/user-binding-dialog'
+import { UserRequestLogsDialog } from './dialogs/user-request-logs-dialog'
 import { useUsers } from './users-provider'
 
 interface DataTableRowActionsProps {
@@ -79,6 +83,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [forceDiscordReauthOpen, setForceDiscordReauthOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
+  const [requestLogsOpen, setRequestLogsOpen] = useState(false)
 
   const handleEdit = () => {
     setCurrentRow(user)
@@ -101,7 +106,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           result.message || t('Failed to {{action}} user', { action })
         )
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     }
   }
@@ -115,7 +120,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       } else {
         toast.error(result.message || t('Failed to reset Passkey'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setResetPasskeyOpen(false)
@@ -131,7 +136,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       } else {
         toast.error(result.message || t('Failed to reset 2FA'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setResetTwoFAOpen(false)
@@ -147,7 +152,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       } else {
         toast.error(result.message || t('Failed to recheck Discord gate'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     }
   }
@@ -161,7 +166,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       } else {
         toast.error(result.message || t('Failed to force Discord reauth'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setForceDiscordReauthOpen(false)
@@ -182,7 +187,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       } else {
         toast.error(result.message || t('Failed to update Discord exemption'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     }
   }
@@ -277,6 +282,18 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             {t('Manage Subscriptions')}
             <DropdownMenuShortcut>
               <CreditCard size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault()
+              setRequestLogsOpen(true)
+            }}
+          >
+            {t('View request logs')}
+            <DropdownMenuShortcut>
+              <FileText size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
 
@@ -402,6 +419,16 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         onOpenChange={setSubscriptionsDialogOpen}
         user={{ id: user.id, username: user.username }}
         onSuccess={triggerRefresh}
+      />
+
+      <UserRequestLogsDialog
+        open={requestLogsOpen}
+        onOpenChange={setRequestLogsOpen}
+        user={{
+          id: user.id,
+          username: user.username,
+          display_name: user.display_name,
+        }}
       />
     </div>
   )
