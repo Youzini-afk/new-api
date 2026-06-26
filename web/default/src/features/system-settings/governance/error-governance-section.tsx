@@ -151,6 +151,7 @@ export function ErrorGovernanceSection({
             {effectiveRows.map((row) => {
               const defaultMessage =
                 RELAY_ERROR_DEFAULT_MESSAGES[row.code] ?? ''
+              const translatedDefaultMessage = t(defaultMessage)
               const label = RELAY_ERROR_RULE_LABELS[row.code] ?? row.code
               const hint = RELAY_ERROR_RULE_HINTS[row.code] ?? ''
               return (
@@ -160,10 +161,10 @@ export function ErrorGovernanceSection({
                       <Badge variant='outline' className='w-fit font-mono'>
                         {row.code}
                       </Badge>
-                      <span className='text-sm font-medium'>{label}</span>
+                      <span className='text-sm font-medium'>{t(label)}</span>
                       {hint && (
                         <span className='text-muted-foreground text-xs'>
-                          {hint}
+                          {t(hint)}
                         </span>
                       )}
                     </div>
@@ -171,9 +172,9 @@ export function ErrorGovernanceSection({
                   <TableCell className='text-muted-foreground text-sm'>
                     <span
                       className='line-clamp-2 max-w-[280px]'
-                      title={defaultMessage}
+                      title={translatedDefaultMessage}
                     >
-                      {defaultMessage}
+                      {translatedDefaultMessage}
                     </span>
                   </TableCell>
                   <TableCell className='text-center'>
@@ -193,7 +194,7 @@ export function ErrorGovernanceSection({
                       onChange={(e) =>
                         updateRow(row.code, { message: e.target.value })
                       }
-                      placeholder={defaultMessage}
+                      placeholder={translatedDefaultMessage}
                       aria-label={t('Custom message for {{code}}', {
                         code: row.code,
                       })}
