@@ -348,6 +348,7 @@ func TestFormatUserLogsStripsSensitiveAuditFields(t *testing.T) {
 		{
 			Id:          99,
 			ChannelName: "admin-channel",
+			Ip:          "203.0.113.10",
 			UserAgent:   "curl/8.0",
 			Other: common.MapToJsonStr(map[string]interface{}{
 				"request_params":          map[string]interface{}{"prompt": "secret prompt", "temperature": 0.5},
@@ -360,10 +361,11 @@ func TestFormatUserLogsStripsSensitiveAuditFields(t *testing.T) {
 		},
 	}
 
-	formatUserLogs(logs, 0)
+	formatUserLogs(logs, 0, false)
 
 	assert.Equal(t, 1, logs[0].Id)
 	assert.Empty(t, logs[0].ChannelName)
+	assert.Empty(t, logs[0].Ip)
 	assert.Empty(t, logs[0].UserAgent)
 	otherMap, err := common.StrToMap(logs[0].Other)
 	require.NoError(t, err)
@@ -373,6 +375,15 @@ func TestFormatUserLogsStripsSensitiveAuditFields(t *testing.T) {
 	assert.NotContains(t, otherMap, "admin_info")
 	assert.NotContains(t, otherMap, "stream_status")
 	assert.Equal(t, "keep-me", otherMap["safe_user_visible_field"])
+}
+
+func TestFormatUserLogsKeepsIPWhenUserAllowsIt(t *testing.T) {
+	logs := []*Log{{Id: 99, Ip: "203.0.113.10"}}
+
+	formatUserLogs(logs, 0, true)
+
+	assert.Equal(t, 1, logs[0].Id)
+	assert.Equal(t, "203.0.113.10", logs[0].Ip)
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +432,7 @@ func TestRecordConsumeLogPersistsRequestPathAndUserAgent(t *testing.T) {
 	got := fetchLogById(t, id)
 	assert.Equal(t, "/v1/chat/completions", got.RequestPath, "request_path should fall back to context path without query string")
 	assert.Equal(t, "curl/8.0", got.UserAgent, "user_agent should be trimmed and persisted")
+	assert.NotEmpty(t, got.Ip, "ip should be persisted for admin stats even when user IP display is off")
 	assert.Equal(t, LogTypeConsume, got.Type)
 }
 
