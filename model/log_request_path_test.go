@@ -396,17 +396,19 @@ func TestFormatUserLogsKeepsIPWhenUserAllowsIt(t *testing.T) {
 	assert.Equal(t, "203.0.113.10", logs[0].Ip)
 }
 
-func TestGetAllLogsEnrichesUserAvatar(t *testing.T) {
+func TestGetAllLogsEnrichesUserProfile(t *testing.T) {
 	truncateLogsTable(t)
 	truncateLogUsersTable(t)
 
 	avatarURL := "/api/user/avatar/100/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"
 	require.NoError(t, DB.Create(&User{
-		Id:           100,
-		Username:     "avatar-user",
-		Password:     "password123",
-		AvatarURL:    avatarURL,
-		AvatarSource: AvatarSourceUploaded,
+		Id:                100,
+		Username:          "avatar-user",
+		Password:          "password123",
+		AvatarURL:         avatarURL,
+		AvatarSource:      AvatarSourceUploaded,
+		DiscordUsername:   "remote_user",
+		DiscordGlobalName: "Remote User",
 	}).Error)
 	require.NoError(t, LOG_DB.Create(&Log{
 		UserId:    100,
@@ -421,6 +423,8 @@ func TestGetAllLogsEnrichesUserAvatar(t *testing.T) {
 	require.Len(t, logs, 1)
 	assert.Equal(t, avatarURL, logs[0].AvatarURL)
 	assert.Equal(t, AvatarSourceUploaded, logs[0].AvatarSource)
+	assert.Equal(t, "remote_user", logs[0].DiscordUsername)
+	assert.Equal(t, "Remote User", logs[0].DiscordGlobalName)
 }
 
 // ---------------------------------------------------------------------------

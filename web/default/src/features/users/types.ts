@@ -53,6 +53,8 @@ export const userSchema = z.object({
   linux_do_id: z.string().optional(),
   avatar_url: z.string().optional(),
   avatar_source: z.string().optional(),
+  discord_username: z.string().optional(),
+  discord_global_name: z.string().optional(),
   status: userStatusSchema,
   role: userRoleSchema,
   created_at: z.number().optional(),

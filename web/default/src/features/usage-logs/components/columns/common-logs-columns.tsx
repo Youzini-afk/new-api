@@ -76,6 +76,23 @@ interface DetailSegment {
   danger?: boolean
 }
 
+function getLogUserDisplayNames(log: UsageLog): {
+  primary: string
+  secondary: string
+} {
+  const discordName = log.discord_global_name || log.discord_username || ''
+  if (discordName) {
+    return {
+      primary: discordName,
+      secondary: log.username,
+    }
+  }
+  return {
+    primary: log.username,
+    secondary: '',
+  }
+}
+
 function getDetailSegmentTextClass(segment: DetailSegment): string {
   if (segment.muted) return 'text-muted-foreground/60'
   if (segment.danger) return 'text-red-600 dark:text-red-400'
@@ -494,11 +511,13 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           const safeAvatarUrl = sensitiveVisible
             ? getSafeUserAvatarUrl(log.avatar_url)
             : undefined
+          const names = getLogUserDisplayNames(log)
+          const avatarName = names.primary || log.username
 
           return (
             <button
               type='button'
-              className='flex items-center gap-1.5 text-left'
+              className='flex items-center gap-2 text-left'
               onClick={(e) => {
                 e.stopPropagation()
                 setSelectedUserId(log.user_id)
@@ -507,7 +526,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             >
               <Avatar className='ring-border/60 size-6 ring-1 max-sm:hidden'>
                 {safeAvatarUrl && (
-                  <AvatarImage src={safeAvatarUrl} alt={log.username} />
+                  <AvatarImage src={safeAvatarUrl} alt={avatarName} />
                 )}
                 <AvatarFallback
                   className={cn(
@@ -516,27 +535,49 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                   )}
                   style={
                     sensitiveVisible
-                      ? getUserAvatarStyle(log.username)
+                      ? getUserAvatarStyle(avatarName)
                       : undefined
                   }
                 >
-                  {sensitiveVisible ? getUserAvatarFallback(log.username) : '•'}
+                  {sensitiveVisible ? getUserAvatarFallback(avatarName) : '•'}
                 </AvatarFallback>
               </Avatar>
-              <TooltipProvider delay={300}>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className='text-muted-foreground max-w-[100px] truncate text-sm hover:underline' />
-                    }
-                  >
-                    {sensitiveVisible ? log.username : '••••'}
-                  </TooltipTrigger>
-                  {sensitiveVisible && log.username.length > 12 && (
-                    <TooltipContent side='top'>{log.username}</TooltipContent>
-                  )}
-                </Tooltip>
-              </TooltipProvider>
+              <div className='flex min-w-0 flex-col gap-0.5'>
+                <TooltipProvider delay={300}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className='max-w-[120px] truncate text-sm font-medium hover:underline' />
+                      }
+                    >
+                      {sensitiveVisible ? names.primary : '••••'}
+                    </TooltipTrigger>
+                    {sensitiveVisible && names.primary.length > 12 && (
+                      <TooltipContent side='top'>
+                        {names.primary}
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
+                {sensitiveVisible && names.secondary && (
+                  <TooltipProvider delay={300}>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <span className='text-muted-foreground max-w-[120px] truncate text-xs' />
+                        }
+                      >
+                        {names.secondary}
+                      </TooltipTrigger>
+                      {names.secondary.length > 16 && (
+                        <TooltipContent side='top'>
+                          {names.secondary}
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+              </div>
             </button>
           )
         },

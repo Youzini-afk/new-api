@@ -48,6 +48,8 @@ export const usageLogSchema = z.object({
   user_agent: z.string().default(''),
   avatar_url: z.string().default(''),
   avatar_source: z.string().default(''),
+  discord_username: z.string().default(''),
+  discord_global_name: z.string().default(''),
 })
 
 export type UsageLog = z.infer<typeof usageLogSchema>

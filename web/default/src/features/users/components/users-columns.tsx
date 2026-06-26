@@ -74,6 +74,29 @@ function getDiscordGateStatus(user: User): {
   return { labelKey: 'Not checked', variant: 'warning' }
 }
 
+function getUserDisplayNames(user: User): {
+  primary: string
+  secondary: string
+} {
+  const discordName =
+    user.discord_global_name ||
+    user.discord_username ||
+    (user.discord_id ? user.display_name : '')
+  if (discordName) {
+    return {
+      primary: discordName,
+      secondary: discordName !== user.username ? user.username : '',
+    }
+  }
+  return {
+    primary: user.username,
+    secondary:
+      user.display_name && user.display_name !== user.username
+        ? user.display_name
+        : '',
+  }
+}
+
 export function useUsersColumns(): ColumnDef<User>[] {
   const { t } = useTranslation()
   return [
@@ -116,9 +139,9 @@ export function useUsersColumns(): ColumnDef<User>[] {
       header: t('Username'),
       cell: ({ row }) => {
         const username = row.getValue('username') as string
-        const displayName = row.original.display_name
         const remark = row.original.remark
-        const avatarName = displayName || username
+        const names = getUserDisplayNames(row.original)
+        const avatarName = names.primary || username
         const avatarUrl = getSafeUserAvatarUrl(row.original.avatar_url)
 
         return (
@@ -132,7 +155,7 @@ export function useUsersColumns(): ColumnDef<User>[] {
             <div className='flex min-w-0 flex-col gap-1'>
               <div className='flex min-w-0 items-center gap-2'>
                 <LongText className='max-w-[140px] font-medium'>
-                  {username}
+                  {names.primary}
                 </LongText>
                 {remark && (
                   <Tooltip>
@@ -149,9 +172,9 @@ export function useUsersColumns(): ColumnDef<User>[] {
                   </Tooltip>
                 )}
               </div>
-              {displayName && displayName !== username && (
+              {names.secondary && (
                 <LongText className='text-muted-foreground max-w-[180px] text-xs'>
-                  {displayName}
+                  {names.secondary}
                 </LongText>
               )}
             </div>

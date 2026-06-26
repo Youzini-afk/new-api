@@ -58,6 +58,8 @@ type Log struct {
 	UserAgent         string `json:"user_agent,omitempty" gorm:"type:varchar(512);default:''"`
 	AvatarURL         string `json:"avatar_url,omitempty" gorm:"-"`
 	AvatarSource      string `json:"avatar_source,omitempty" gorm:"-"`
+	DiscordUsername   string `json:"discord_username,omitempty" gorm:"-"`
+	DiscordGlobalName string `json:"discord_global_name,omitempty" gorm:"-"`
 }
 
 const (
@@ -200,7 +202,7 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 	}
 }
 
-func enrichLogsWithUserAvatars(logs []*Log) error {
+func enrichLogsWithUserProfiles(logs []*Log) error {
 	userIds := types.NewSet[int]()
 	for _, log := range logs {
 		if log.UserId > 0 {
@@ -212,30 +214,40 @@ func enrichLogsWithUserAvatars(logs []*Log) error {
 	}
 
 	var users []struct {
-		Id           int    `gorm:"column:id"`
-		AvatarURL    string `gorm:"column:avatar_url"`
-		AvatarSource string `gorm:"column:avatar_source"`
+		Id                int    `gorm:"column:id"`
+		AvatarURL         string `gorm:"column:avatar_url"`
+		AvatarSource      string `gorm:"column:avatar_source"`
+		DiscordUsername   string `gorm:"column:discord_username"`
+		DiscordGlobalName string `gorm:"column:discord_global_name"`
 	}
-	if err := DB.Model(&User{}).Select("id, avatar_url, avatar_source").Where("id IN ?", userIds.Items()).Find(&users).Error; err != nil {
+	if err := DB.Model(&User{}).Select("id, avatar_url, avatar_source, discord_username, discord_global_name").Where("id IN ?", userIds.Items()).Find(&users).Error; err != nil {
 		return err
 	}
-	avatarMap := make(map[int]struct {
-		URL    string
-		Source string
+	profileMap := make(map[int]struct {
+		AvatarURL         string
+		AvatarSource      string
+		DiscordUsername   string
+		DiscordGlobalName string
 	}, len(users))
 	for _, user := range users {
-		avatarMap[user.Id] = struct {
-			URL    string
-			Source string
+		profileMap[user.Id] = struct {
+			AvatarURL         string
+			AvatarSource      string
+			DiscordUsername   string
+			DiscordGlobalName string
 		}{
-			URL:    user.AvatarURL,
-			Source: user.AvatarSource,
+			AvatarURL:         user.AvatarURL,
+			AvatarSource:      user.AvatarSource,
+			DiscordUsername:   user.DiscordUsername,
+			DiscordGlobalName: user.DiscordGlobalName,
 		}
 	}
 	for _, log := range logs {
-		avatar := avatarMap[log.UserId]
-		log.AvatarURL = avatar.URL
-		log.AvatarSource = avatar.Source
+		profile := profileMap[log.UserId]
+		log.AvatarURL = profile.AvatarURL
+		log.AvatarSource = profile.AvatarSource
+		log.DiscordUsername = profile.DiscordUsername
+		log.DiscordGlobalName = profile.DiscordGlobalName
 	}
 	return nil
 }
@@ -685,7 +697,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		assignDisplayLogIds(logs, startIdx)
 	}
-	if err = enrichLogsWithUserAvatars(logs); err != nil {
+	if err = enrichLogsWithUserProfiles(logs); err != nil {
 		return logs, total, err
 	}
 
@@ -777,7 +789,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 		common.SysError("failed to search user logs: " + err.Error())
 		return nil, 0, errors.New("查询日志失败")
 	}
-	if err = enrichLogsWithUserAvatars(logs); err != nil {
+	if err = enrichLogsWithUserProfiles(logs); err != nil {
 		common.SysError("failed to enrich user log avatars: " + err.Error())
 		return nil, 0, errors.New("查询日志失败")
 	}
