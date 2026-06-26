@@ -3515,7 +3515,7 @@
     "Reset ratios": "重置比例",
     "Reset the user passkey": "重置了用户的通行密钥",
     "Reset to Default": "重置为默认",
-    "Reset to default": "重置为默认",
+    "Reset to default": "重置为默认值",
     "Reset to default configuration": "已重置为默认配置",
     "Reset usage window": "重置用量窗口",
     "Resets in:": "将于以下时间重置：",
@@ -5388,6 +5388,8 @@
     "Upstream response format is invalid; retry later, or try enabling streaming if it persists.": "上游响应格式异常，请稍后重试；如持续出现，可尝试开启流式响应。",
     "Upstream temporarily unavailable; please retry later.": "上游服务暂时不可用，请稍后重试。",
     "Stream interrupted; please retry later.": "流式响应中断，请稍后重试。",
-    "Internal service error; please retry later.": "服务处理请求时发生错误，请稍后重试。"
+    "Internal service error; please retry later.": "服务处理请求时发生错误，请稍后重试。",
+    "Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.": "规则码由后端固定。每条规则的返回消息都可编辑；点击重置可恢复默认返回消息。",
+    "Reset rule {{code}} to default": "将规则 {{code}} 重置为默认值"
   }
 }

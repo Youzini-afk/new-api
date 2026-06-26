@@ -58,6 +58,9 @@ export const STATIC_I18N_KEYS = [
   'Toggle governance for {{code}}',
   'Custom message for {{code}}',
   'Save error governance',
+  'Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.',
+  'Reset rule {{code}} to default',
+  'Reset to default',
 
   // Relay error governance dynamic rule labels/hints/default messages
   'Insufficient user balance',

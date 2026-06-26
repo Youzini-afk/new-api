@@ -173,41 +173,41 @@ export const DEFAULT_RULE_ENABLED = true
  * overrides onto the default state for each rule code.
  */
 export function buildGovernanceRows(
-  config: RelayErrorGovernanceConfig | null
+  config: RelayErrorGovernanceConfig | null,
+  translate?: (key: string) => string
 ): GovernanceRuleRow[] {
   const rules = config?.rules ?? {}
   return RELAY_ERROR_RULE_CODES.map((code) => {
     const override: RelayErrorRuleOverride | undefined = rules[code]
+    const defaultMessage = RELAY_ERROR_DEFAULT_MESSAGES[code] ?? ''
     return {
       code,
       enabled: override?.enabled ?? DEFAULT_RULE_ENABLED,
-      message: override?.message ?? '',
+      message:
+        override?.message ?? translate?.(defaultMessage) ?? defaultMessage,
     }
   })
 }
 
 /**
- * Serialize the editable rows back into the sparse governance config shape.
- *
- * Only rules that deviate from the default (enabled === true, empty message)
- * are emitted as overrides, matching the backend's "optional per-rule
- * override" contract.
+ * Serialize editable rows into the governance config shape used by nashiyard:
+ * every rule is written with its current enabled state and response message.
+ * This makes the message field a real editable value instead of a placeholder.
  */
 export function serializeGovernanceConfig(
   enabled: boolean,
-  rows: GovernanceRuleRow[]
+  rows: GovernanceRuleRow[],
+  translate?: (key: string) => string
 ): RelayErrorGovernanceConfig {
   const rules: Record<string, RelayErrorRuleOverride> = {}
   for (const row of rows) {
-    const override: RelayErrorRuleOverride = {}
-    if (row.enabled !== DEFAULT_RULE_ENABLED) {
-      override.enabled = row.enabled
-    }
-    if (row.message.trim() !== '') {
-      override.message = row.message.trim()
-    }
-    if (Object.keys(override).length > 0) {
-      rules[row.code] = override
+    const defaultMessageKey = RELAY_ERROR_DEFAULT_MESSAGES[row.code] ?? ''
+    rules[row.code] = {
+      enabled: row.enabled,
+      message:
+        row.message.trim() ||
+        translate?.(defaultMessageKey) ||
+        defaultMessageKey,
     }
   }
   return { enabled, rules }

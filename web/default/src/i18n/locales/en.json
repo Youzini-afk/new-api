@@ -5388,6 +5388,8 @@
     "Upstream response format is invalid; retry later, or try enabling streaming if it persists.": "Upstream response format is invalid; retry later, or try enabling streaming if it persists.",
     "Upstream temporarily unavailable; please retry later.": "Upstream temporarily unavailable; please retry later.",
     "Stream interrupted; please retry later.": "Stream interrupted; please retry later.",
-    "Internal service error; please retry later.": "Internal service error; please retry later."
+    "Internal service error; please retry later.": "Internal service error; please retry later.",
+    "Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.": "Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.",
+    "Reset rule {{code}} to default": "Reset rule {{code}} to default"
   }
 }

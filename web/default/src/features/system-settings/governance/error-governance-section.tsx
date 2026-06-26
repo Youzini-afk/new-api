@@ -1,3 +1,4 @@
+import { RefreshCw } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -20,7 +21,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import {
   Table,
@@ -30,12 +31,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Textarea } from '@/components/ui/textarea'
 
 import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 import {
+  DEFAULT_RULE_ENABLED,
   RELAY_ERROR_DEFAULT_MESSAGES,
   RELAY_ERROR_GOVERNANCE_OPTION_KEY,
   RELAY_ERROR_RULE_HINTS,
@@ -76,7 +79,7 @@ export function ErrorGovernanceSection({
     () => parseGovernanceConfig(defaultValue),
     [defaultValue]
   )
-  const parsedRows = useMemo(() => buildGovernanceRows(parsed), [parsed])
+  const parsedRows = useMemo(() => buildGovernanceRows(parsed, t), [parsed, t])
 
   // Draft state — null until the admin edits something, so server values stay
   // authoritative until a change is made (matches the api-info section pattern).
@@ -101,13 +104,21 @@ export function ErrorGovernanceSection({
     )
   }
 
+  const resetRule = (code: GovernanceRuleRow['code']) => {
+    const defaultMessageKey = RELAY_ERROR_DEFAULT_MESSAGES[code] ?? ''
+    updateRow(code, {
+      enabled: DEFAULT_RULE_ENABLED,
+      message: t(defaultMessageKey),
+    })
+  }
+
   const handleReset = () => {
     setDraftEnabled(null)
     setDraftRows(null)
   }
 
   const handleSave = async () => {
-    const config = serializeGovernanceConfig(effectiveEnabled, effectiveRows)
+    const config = serializeGovernanceConfig(effectiveEnabled, effectiveRows, t)
     await updateOption.mutateAsync({
       key: RELAY_ERROR_GOVERNANCE_OPTION_KEY,
       value: JSON.stringify(config),
@@ -127,7 +138,7 @@ export function ErrorGovernanceSection({
 
       <div className='text-muted-foreground text-xs'>
         {t(
-          'Rule codes are fixed by the backend and cannot be edited here. Only the enabled flag and custom message can be overridden; leave the message blank to use the default.'
+          'Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.'
         )}
       </div>
 
@@ -189,16 +200,31 @@ export function ErrorGovernanceSection({
                     />
                   </TableCell>
                   <TableCell>
-                    <Input
-                      value={row.message}
-                      onChange={(e) =>
-                        updateRow(row.code, { message: e.target.value })
-                      }
-                      placeholder={translatedDefaultMessage}
-                      aria-label={t('Custom message for {{code}}', {
-                        code: row.code,
-                      })}
-                    />
+                    <div className='flex items-start gap-2'>
+                      <Textarea
+                        value={row.message}
+                        onChange={(e) =>
+                          updateRow(row.code, { message: e.target.value })
+                        }
+                        placeholder={translatedDefaultMessage}
+                        rows={2}
+                        aria-label={t('Custom message for {{code}}', {
+                          code: row.code,
+                        })}
+                      />
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        onClick={() => resetRule(row.code)}
+                        aria-label={t('Reset rule {{code}} to default', {
+                          code: row.code,
+                        })}
+                        title={t('Reset to default')}
+                      >
+                        <RefreshCw className='h-4 w-4' />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               )
