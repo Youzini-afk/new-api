@@ -7,6 +7,8 @@ const (
 	LogScreeningWindow1h  = "1h"
 	LogScreeningWindow24h = "24h"
 
+	MinLogScreeningExpireDays = 7
+
 	LogScreeningSecondaryModeOr  = "or"
 	LogScreeningSecondaryModeAll = "all"
 )
@@ -45,7 +47,7 @@ type LogScreeningSetting struct {
 
 var defaultLogScreeningSetting = LogScreeningSetting{
 	Enabled:    true,
-	ExpireDays: 7,
+	ExpireDays: MinLogScreeningExpireDays,
 	Rules: []LogScreeningRule{
 		{
 			Name:             "高频调用(1h)",
@@ -87,8 +89,8 @@ func init() {
 // GetLogScreeningSetting returns the current setting with safe defaults applied
 // (non-nil slices, default window/secondary mode when empty).
 func GetLogScreeningSetting() *LogScreeningSetting {
-	if defaultLogScreeningSetting.ExpireDays <= 0 {
-		defaultLogScreeningSetting.ExpireDays = 7
+	if defaultLogScreeningSetting.ExpireDays < MinLogScreeningExpireDays {
+		defaultLogScreeningSetting.ExpireDays = MinLogScreeningExpireDays
 	}
 	if defaultLogScreeningSetting.Rules == nil {
 		defaultLogScreeningSetting.Rules = []LogScreeningRule{}

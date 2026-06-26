@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -231,4 +232,86 @@ func TestEnqueueSystemTaskReportsCreatedAndExistingActive(t *testing.T) {
 	require.True(t, created)
 	require.NotNil(t, second)
 	assert.NotEqual(t, first.TaskID, second.TaskID)
+}
+
+func TestStartLogCleanupTaskCreatesManualUsagePayload(t *testing.T) {
+	truncate(t)
+
+	task, err := StartLogCleanupTask(12345)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+
+	payload := LogCleanupPayload{}
+	require.NoError(t, task.DecodePayload(&payload))
+	assert.Equal(t, LogCleanupModeManualUsage, payload.Mode)
+	assert.Equal(t, int64(12345), payload.TargetTimestamp)
+	assert.True(t, payload.UsageLogRetentionEnabled)
+	assert.False(t, payload.ErrorLogRetentionEnabled)
+	assert.False(t, payload.ScreeningRecordCleanupEnabled)
+}
+
+func TestLogCleanupHandlerScheduledEnabledAndPayload(t *testing.T) {
+	original := *system_setting.GetLogRetentionSetting()
+	t.Cleanup(func() {
+		*system_setting.GetLogRetentionSetting() = original
+	})
+
+	setting := system_setting.GetLogRetentionSetting()
+	setting.UsageLogRetentionDays = 0
+	setting.ErrorLogRetentionDays = 0
+	setting.CleanupIntervalHours = 24
+	handler := logRetentionCleanupHandler{}
+	assert.False(t, handler.Enabled())
+
+	setting.UsageLogRetentionDays = 3
+	setting.ErrorLogRetentionDays = 5
+	setting.CleanupIntervalHours = -2
+	assert.True(t, handler.Enabled())
+	assert.Equal(t, 24*time.Hour, handler.Interval())
+
+	now := common.GetTimestamp()
+	payload, ok := handler.NewPayload().(LogCleanupPayload)
+	require.True(t, ok)
+	assert.Equal(t, LogCleanupModeScheduledRetention, payload.Mode)
+	assert.True(t, payload.UsageLogRetentionEnabled)
+	assert.True(t, payload.ErrorLogRetentionEnabled)
+	assert.True(t, payload.ScreeningRecordCleanupEnabled)
+	assert.InDelta(t, now-int64(3*86400), payload.UsageCutoffTimestamp, 2)
+	assert.InDelta(t, now-int64(5*86400), payload.ErrorCutoffTimestamp, 2)
+	assert.InDelta(t, now, payload.ScreeningCutoffTimestamp, 2)
+}
+
+func TestRunLogCleanupTaskLegacyPayloadIsUsageOnly(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	cutoff := int64(2000)
+
+	require.NoError(t, model.LOG_DB.WithContext(ctx).Create(&model.Log{CreatedAt: 1000, Type: model.LogTypeConsume}).Error)
+	require.NoError(t, model.DB.WithContext(ctx).Create(&model.ErrorLog{CreatedAt: 1000, NormalizedSignature: "sig"}).Error)
+	require.NoError(t, model.DB.WithContext(ctx).Create(&model.LogScreeningRecord{UserId: 1, RuleName: "rule", Window: "1h", RequestPath: "all", ExpiresAt: 1000}).Error)
+
+	task, err := model.CreateSystemTask(model.SystemTaskTypeLogCleanup, LogCleanupPayload{TargetTimestamp: cutoff, BatchSize: 1}, LogCleanupState{})
+	require.NoError(t, err)
+	claimed, claimedOK, err := model.ClaimSystemTask(task.ID, task.Type, "runner-legacy", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, claimedOK)
+
+	runLogCleanupTask(ctx, claimed, "runner-legacy")
+
+	reloaded, err := model.GetSystemTaskByTaskID(task.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, reloaded)
+	assert.Equal(t, model.SystemTaskStatusSucceeded, reloaded.Status)
+
+	var usageCount int64
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Count(&usageCount).Error)
+	assert.Equal(t, int64(0), usageCount)
+
+	var errorCount int64
+	require.NoError(t, model.DB.Model(&model.ErrorLog{}).Count(&errorCount).Error)
+	assert.Equal(t, int64(1), errorCount)
+
+	var screeningCount int64
+	require.NoError(t, model.DB.Model(&model.LogScreeningRecord{}).Count(&screeningCount).Error)
+	assert.Equal(t, int64(1), screeningCount)
 }

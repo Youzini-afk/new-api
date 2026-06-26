@@ -5413,6 +5413,24 @@
     "Error Status": "Error Status",
     "Client Status": "Client Status",
     "Upstream Status": "Upstream Status",
-    "Original Error Type": "Original Error Type"
+    "Original Error Type": "Original Error Type",
+    "Automatic retention": "Automatic retention",
+    "Automatically delete old log records on a schedule. Set retention days to 0 to disable cleanup for that category.": "Automatically delete old log records on a schedule. Set retention days to 0 to disable cleanup for that category.",
+    "Usage log retention (days)": "Usage log retention (days)",
+    "Error insight log retention (days)": "Error insight log retention (days)",
+    "Error Insight Logs": "Error Insight Logs",
+    "Screening record retention (days)": "Screening record retention (days)",
+    "Cleanup interval (hours)": "Cleanup interval (hours)",
+    "0 = disabled for that category.": "0 = disabled for that category.",
+    "Deletion is permanent; removed records cannot be recovered.": "Deletion is permanent; removed records cannot be recovered.",
+    "Automatic cleanup runs every {{hours}} hours and removes records older than the configured retention.": "Automatic cleanup runs every {{hours}} hours and removes records older than the configured retention.",
+    "Screening records use the existing log screening retention with a minimum of 7 days.": "Screening records use the existing log screening retention with a minimum of 7 days.",
+    "Note: usage log scheduled cleanup may be skipped or managed by the database TTL (e.g. ClickHouse) when applicable.": "Note: usage log scheduled cleanup may be skipped or managed by the database TTL (e.g. ClickHouse) when applicable.",
+    "Manual cleanup only removes usage/call logs created before the selected timestamp.": "Manual cleanup only removes usage/call logs created before the selected timestamp.",
+    "Skipped (managed by ClickHouse TTL)": "Skipped (managed by ClickHouse TTL)",
+    "Category progress": "Category progress",
+    "{{processed}} of {{total}} processed": "{{processed}} of {{total}} processed",
+    "Deleted: {{count}}": "Deleted: {{count}}",
+    "Cutoff": "Cutoff"
   }
 }

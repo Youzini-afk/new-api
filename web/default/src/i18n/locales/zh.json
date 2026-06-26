@@ -5413,6 +5413,24 @@
     "Error Status": "错误状态",
     "Client Status": "客户端状态",
     "Upstream Status": "上游状态",
-    "Original Error Type": "原始错误类型"
+    "Original Error Type": "原始错误类型",
+    "Automatic retention": "自动保留",
+    "Automatically delete old log records on a schedule. Set retention days to 0 to disable cleanup for that category.": "按计划自动删除旧的日志记录。将保留天数设为 0 可禁用该类别的清理。",
+    "Usage log retention (days)": "使用日志保留天数",
+    "Error insight log retention (days)": "错误洞察日志保留天数",
+    "Error Insight Logs": "错误洞察日志",
+    "Screening record retention (days)": "筛查记录保留天数",
+    "Cleanup interval (hours)": "清理间隔（小时）",
+    "0 = disabled for that category.": "0 = 该类别禁用。",
+    "Deletion is permanent; removed records cannot be recovered.": "删除是永久性的；已删除的记录无法恢复。",
+    "Automatic cleanup runs every {{hours}} hours and removes records older than the configured retention.": "自动清理每 {{hours}} 小时运行一次，删除超过配置保留期的记录。",
+    "Screening records use the existing log screening retention with a minimum of 7 days.": "筛查记录使用现有的日志筛查保留设置，最短为 7 天。",
+    "Note: usage log scheduled cleanup may be skipped or managed by the database TTL (e.g. ClickHouse) when applicable.": "注意：如适用，使用日志的计划清理可能被跳过或由数据库 TTL（如 ClickHouse）管理。",
+    "Manual cleanup only removes usage/call logs created before the selected timestamp.": "手动清理仅会删除所选时间戳之前的使用/调用日志。",
+    "Skipped (managed by ClickHouse TTL)": "已跳过（由 ClickHouse TTL 管理）",
+    "Category progress": "分类进度",
+    "{{processed}} of {{total}} processed": "已处理 {{processed}} / {{total}}",
+    "Deleted: {{count}}": "已删除：{{count}}",
+    "Cutoff": "截止时间"
   }
 }

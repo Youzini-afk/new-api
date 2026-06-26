@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 )
@@ -73,8 +74,7 @@ func registeredSystemTaskHandlers() []SystemTaskHandler {
 	return handlers
 }
 
-// logCleanupHandler wraps the existing on-demand log cleanup task as a
-// registered (non-scheduled) handler. It is created via StartLogCleanupTask.
+// logCleanupHandler wraps the existing on-demand usage-log cleanup task.
 type logCleanupHandler struct{}
 
 func (logCleanupHandler) Type() string { return model.SystemTaskTypeLogCleanup }
@@ -83,25 +83,113 @@ func (logCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runner
 	runLogCleanupTask(ctx, task, runnerID)
 }
 
+// logRetentionCleanupHandler runs scheduled retention separately from manual
+// usage-log cleanup so a manual request never returns an active scheduled task.
+type logRetentionCleanupHandler struct{}
+
+func (logRetentionCleanupHandler) Type() string { return model.SystemTaskTypeLogRetentionCleanup }
+
+func (logRetentionCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	runLogCleanupTask(ctx, task, runnerID)
+}
+
+func (logRetentionCleanupHandler) Enabled() bool {
+	if activeManualTask, err := model.GetActiveSystemTask(model.SystemTaskTypeLogCleanup); err != nil || activeManualTask != nil {
+		return false
+	}
+	setting := system_setting.GetLogRetentionSetting()
+	return setting.UsageLogRetentionDays > 0 || setting.ErrorLogRetentionDays > 0
+}
+
+func (logRetentionCleanupHandler) Interval() time.Duration {
+	setting := system_setting.GetLogRetentionSetting()
+	return time.Duration(setting.CleanupIntervalHours) * time.Hour
+}
+
+func (logRetentionCleanupHandler) NewPayload() any {
+	setting := system_setting.GetLogRetentionSetting()
+	now := common.GetTimestamp()
+	payload := LogCleanupPayload{
+		Mode:                          LogCleanupModeScheduledRetention,
+		BatchSize:                     logCleanupBatchSize,
+		UsageLogRetentionEnabled:      setting.UsageLogRetentionDays > 0,
+		ErrorLogRetentionEnabled:      setting.ErrorLogRetentionDays > 0,
+		ScreeningRecordCleanupEnabled: setting.UsageLogRetentionDays > 0 || setting.ErrorLogRetentionDays > 0,
+		ScreeningCutoffTimestamp:      now,
+	}
+	if payload.UsageLogRetentionEnabled {
+		payload.TargetTimestamp = now - int64(setting.UsageLogRetentionDays)*86400
+		payload.UsageCutoffTimestamp = payload.TargetTimestamp
+	}
+	if payload.ErrorLogRetentionEnabled {
+		payload.ErrorCutoffTimestamp = now - int64(setting.ErrorLogRetentionDays)*86400
+	}
+	return payload
+}
+
 func init() {
 	RegisterSystemTaskHandler(logCleanupHandler{})
+	RegisterSystemTaskHandler(logRetentionCleanupHandler{})
 }
 
 type LogCleanupPayload struct {
-	TargetTimestamp int64 `json:"target_timestamp"`
-	BatchSize       int   `json:"batch_size"`
+	Mode                          string `json:"mode"`
+	TargetTimestamp               int64  `json:"target_timestamp"`
+	BatchSize                     int    `json:"batch_size"`
+	UsageLogRetentionEnabled      bool   `json:"usage_log_retention_enabled"`
+	UsageCutoffTimestamp          int64  `json:"usage_cutoff_timestamp"`
+	ErrorLogRetentionEnabled      bool   `json:"error_log_retention_enabled"`
+	ErrorCutoffTimestamp          int64  `json:"error_cutoff_timestamp"`
+	ScreeningRecordCleanupEnabled bool   `json:"screening_record_cleanup_enabled"`
+	ScreeningCutoffTimestamp      int64  `json:"screening_cutoff_timestamp"`
 }
 
 type LogCleanupState struct {
-	Total     int64 `json:"total"`
-	Processed int64 `json:"processed"`
-	Progress  int   `json:"progress"`
-	Remaining int64 `json:"remaining"`
+	Total      int64                              `json:"total"`
+	Processed  int64                              `json:"processed"`
+	Progress   int                                `json:"progress"`
+	Remaining  int64                              `json:"remaining"`
+	Categories map[string]LogCleanupCategoryState `json:"categories,omitempty"`
 }
 
 type LogCleanupResult struct {
-	DeletedCount int64 `json:"deleted_count"`
+	DeletedCount int64                               `json:"deleted_count"`
+	Categories   map[string]LogCleanupCategoryResult `json:"categories,omitempty"`
 }
+
+type LogCleanupCategoryState struct {
+	Enabled         bool   `json:"enabled"`
+	CutoffTimestamp int64  `json:"cutoff_timestamp,omitempty"`
+	Total           int64  `json:"total"`
+	Processed       int64  `json:"processed"`
+	Remaining       int64  `json:"remaining"`
+	Progress        int    `json:"progress"`
+	DeletedCount    int64  `json:"deleted_count"`
+	Status          string `json:"status"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+type LogCleanupCategoryResult struct {
+	Enabled         bool   `json:"enabled"`
+	CutoffTimestamp int64  `json:"cutoff_timestamp,omitempty"`
+	DeletedCount    int64  `json:"deleted_count"`
+	Status          string `json:"status"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+const (
+	LogCleanupModeManualUsage        = "manual_usage"
+	LogCleanupModeScheduledRetention = "scheduled_retention"
+
+	logCleanupCategoryUsageLogs        = "usage_logs"
+	logCleanupCategoryErrorLogs        = "error_logs"
+	logCleanupCategoryScreeningRecords = "screening_records"
+
+	logCleanupCategoryStatusPending   = "pending"
+	logCleanupCategoryStatusRunning   = "running"
+	logCleanupCategoryStatusSucceeded = "succeeded"
+	logCleanupCategoryStatusSkipped   = "skipped"
+)
 
 var (
 	systemTaskRunnerOnce sync.Once
@@ -169,6 +257,11 @@ func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
 	if targetTimestamp <= 0 {
 		return nil, errors.New("target timestamp is required")
 	}
+	if activeRetentionTask, err := model.GetActiveSystemTask(model.SystemTaskTypeLogRetentionCleanup); err != nil {
+		return nil, err
+	} else if activeRetentionTask != nil {
+		return nil, errors.New("scheduled log retention cleanup is already running")
+	}
 
 	activeTask, err := model.GetActiveSystemTask(model.SystemTaskTypeLogCleanup)
 	if err != nil {
@@ -179,8 +272,11 @@ func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
 	}
 
 	payload := LogCleanupPayload{
-		TargetTimestamp: targetTimestamp,
-		BatchSize:       logCleanupBatchSize,
+		Mode:                     LogCleanupModeManualUsage,
+		TargetTimestamp:          targetTimestamp,
+		BatchSize:                logCleanupBatchSize,
+		UsageLogRetentionEnabled: true,
+		UsageCutoffTimestamp:     targetTimestamp,
 	}
 	state := LogCleanupState{}
 	task, err := model.CreateSystemTask(model.SystemTaskTypeLogCleanup, payload, state)
@@ -341,10 +437,7 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 		failSystemTask(task, runnerID, err)
 		return
 	}
-	if payload.TargetTimestamp <= 0 {
-		failSystemTask(task, runnerID, errors.New("target timestamp is required"))
-		return
-	}
+	normalizeLogCleanupPayload(&payload)
 	if payload.BatchSize <= 0 {
 		payload.BatchSize = logCleanupBatchSize
 	}
@@ -355,77 +448,272 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 		return
 	}
 
-	for {
-		remaining, err := model.CountOldLog(ctx, payload.TargetTimestamp)
-		if err != nil {
-			failSystemTask(task, runnerID, err)
-			return
+	if err := runLogCleanupPayload(ctx, task, runnerID, payload, &state); err != nil {
+		failSystemTask(task, runnerID, err)
+		return
+	}
+
+	syncLogCleanupAggregateState(&state)
+	if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
+		logSystemTaskLockError(ctx, task, err)
+		return
+	}
+
+	result := logCleanupResultFromState(state)
+	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
+		logSystemTaskLockError(ctx, task, err)
+	}
+}
+
+func normalizeLogCleanupPayload(payload *LogCleanupPayload) {
+	if payload.Mode == "" {
+		payload.Mode = LogCleanupModeManualUsage
+	}
+	if payload.BatchSize <= 0 {
+		payload.BatchSize = logCleanupBatchSize
+	}
+	if payload.UsageCutoffTimestamp <= 0 {
+		payload.UsageCutoffTimestamp = payload.TargetTimestamp
+	}
+	if payload.Mode == LogCleanupModeManualUsage {
+		payload.UsageLogRetentionEnabled = true
+		payload.ErrorLogRetentionEnabled = false
+		payload.ScreeningRecordCleanupEnabled = false
+	}
+}
+
+func runLogCleanupPayload(ctx context.Context, task *model.SystemTask, runnerID string, payload LogCleanupPayload, state *LogCleanupState) error {
+	switch payload.Mode {
+	case LogCleanupModeManualUsage:
+		if payload.TargetTimestamp <= 0 {
+			return errors.New("target timestamp is required")
 		}
-		syncLogCleanupStateFromRemaining(&state, remaining)
+		return runLogCleanupCategory(ctx, task, runnerID, state, logCleanupCategoryUsageLogs, payload.TargetTimestamp, payload.BatchSize, model.CountOldLog, model.DeleteOldLogBatch)
+	case LogCleanupModeScheduledRetention:
+		if payload.UsageLogRetentionEnabled {
+			cutoff := payload.UsageCutoffTimestamp
+			if cutoff <= 0 {
+				cutoff = payload.TargetTimestamp
+			}
+			if cutoff <= 0 {
+				return errors.New("usage log cutoff timestamp is required")
+			}
+			if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+				if err := markLogCleanupCategorySkipped(task, runnerID, state, logCleanupCategoryUsageLogs, cutoff, "managed_by_clickhouse_ttl"); err != nil {
+					return err
+				}
+			} else if err := runLogCleanupCategory(ctx, task, runnerID, state, logCleanupCategoryUsageLogs, cutoff, payload.BatchSize, model.CountOldLog, model.DeleteOldLogBatch); err != nil {
+				return err
+			}
+		}
+		if payload.ErrorLogRetentionEnabled {
+			if payload.ErrorCutoffTimestamp <= 0 {
+				return errors.New("error log cutoff timestamp is required")
+			}
+			if err := runLogCleanupCategory(ctx, task, runnerID, state, logCleanupCategoryErrorLogs, payload.ErrorCutoffTimestamp, payload.BatchSize, model.CountOldErrorLogs, model.DeleteOldErrorLogsBatch); err != nil {
+				return err
+			}
+		}
+		if payload.ScreeningRecordCleanupEnabled {
+			cutoff := payload.ScreeningCutoffTimestamp
+			if cutoff <= 0 {
+				cutoff = common.GetTimestamp()
+			}
+			if err := runLogCleanupCategory(ctx, task, runnerID, state, logCleanupCategoryScreeningRecords, cutoff, payload.BatchSize, countExpiredLogScreeningRecords, model.DeleteExpiredLogScreeningRecords); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported log cleanup mode: %s", payload.Mode)
+	}
+}
+
+func runLogCleanupCategory(
+	ctx context.Context,
+	task *model.SystemTask,
+	runnerID string,
+	state *LogCleanupState,
+	category string,
+	cutoff int64,
+	batchSize int,
+	countFunc func(context.Context, int64) (int64, error),
+	deleteFunc func(context.Context, int64, int) (int64, error),
+) error {
+	ensureLogCleanupCategoryState(state, category, cutoff)
+
+	for {
+		remaining, err := countFunc(ctx, cutoff)
+		if err != nil {
+			return err
+		}
+		categoryState := state.Categories[category]
+		syncLogCleanupCategoryStateFromRemaining(&categoryState, remaining)
+		categoryState.Status = logCleanupCategoryStatusRunning
+		state.Categories[category] = categoryState
+		syncLogCleanupAggregateState(state)
 		if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
 			logSystemTaskLockError(ctx, task, err)
-			return
+			return err
 		}
-		if state.Remaining == 0 {
+		if categoryState.Remaining == 0 {
 			break
 		}
 
-		// Track whether this pass deleted anything so a fresh recount that still
-		// reports remaining rows resumes immediately instead of waiting for the
-		// lock to expire. If a whole pass deletes nothing while rows remain, the
-		// rows cannot be removed and we fail instead of busy-looping.
 		progressed := false
-		for state.Remaining > 0 {
-			rowsAffected, err := model.DeleteOldLogBatch(ctx, payload.TargetTimestamp, payload.BatchSize)
+		for categoryState.Remaining > 0 {
+			rowsAffected, err := deleteFunc(ctx, cutoff, batchSize)
 			if err != nil {
-				failSystemTask(task, runnerID, err)
-				return
+				return err
 			}
 			if rowsAffected == 0 {
 				break
 			}
 			progressed = true
 
-			state.Processed += rowsAffected
-			if state.Total < state.Processed {
-				state.Total = state.Processed
+			categoryState.Processed += rowsAffected
+			categoryState.DeletedCount += rowsAffected
+			if categoryState.Total < categoryState.Processed {
+				categoryState.Total = categoryState.Processed
 			}
-			if state.Remaining > rowsAffected {
-				state.Remaining -= rowsAffected
+			if categoryState.Remaining > rowsAffected {
+				categoryState.Remaining -= rowsAffected
 			} else {
-				state.Remaining = 0
+				categoryState.Remaining = 0
 			}
-			state.Progress = logCleanupProgress(state.Processed, state.Total)
+			categoryState.Progress = logCleanupProgress(categoryState.Processed, categoryState.Total)
+			state.Categories[category] = categoryState
+			syncLogCleanupAggregateState(state)
 
 			if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
 				logSystemTaskLockError(ctx, task, err)
-				return
+				return err
 			}
 		}
 
 		if !progressed {
-			failSystemTask(task, runnerID, errors.New("no log rows were deleted"))
-			return
+			return fmt.Errorf("no %s rows were deleted", category)
 		}
 	}
 
-	state.Remaining = 0
-	state.Progress = 100
-	if state.Total < state.Processed {
-		state.Total = state.Processed
+	categoryState := state.Categories[category]
+	categoryState.Remaining = 0
+	categoryState.Progress = 100
+	categoryState.Status = logCleanupCategoryStatusSucceeded
+	if categoryState.Total < categoryState.Processed {
+		categoryState.Total = categoryState.Processed
 	}
-	if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
-		logSystemTaskLockError(ctx, task, err)
+	state.Categories[category] = categoryState
+	syncLogCleanupAggregateState(state)
+	return nil
+}
+
+func ensureLogCleanupCategoryState(state *LogCleanupState, category string, cutoff int64) {
+	if state.Categories == nil {
+		state.Categories = map[string]LogCleanupCategoryState{}
+	}
+	categoryState := state.Categories[category]
+	categoryState.Enabled = true
+	categoryState.CutoffTimestamp = cutoff
+	if categoryState.Status == "" {
+		categoryState.Status = logCleanupCategoryStatusPending
+	}
+	state.Categories[category] = categoryState
+}
+
+func markLogCleanupCategorySkipped(task *model.SystemTask, runnerID string, state *LogCleanupState, category string, cutoff int64, reason string) error {
+	ensureLogCleanupCategoryState(state, category, cutoff)
+	categoryState := state.Categories[category]
+	categoryState.Status = logCleanupCategoryStatusSkipped
+	categoryState.Reason = reason
+	categoryState.Progress = 100
+	state.Categories[category] = categoryState
+	syncLogCleanupAggregateState(state)
+	return model.UpdateSystemTaskState(task.TaskID, runnerID, state)
+}
+
+func syncLogCleanupCategoryStateFromRemaining(state *LogCleanupCategoryState, remaining int64) {
+	if state.Total <= 0 {
+		state.Total = remaining
+		state.Processed = 0
+	} else {
+		processedFromRemaining := state.Total - remaining
+		if processedFromRemaining > state.Processed {
+			state.Processed = processedFromRemaining
+		}
+	}
+	if state.Processed < 0 {
+		state.Processed = 0
+	}
+	state.Remaining = remaining
+	state.Progress = logCleanupProgress(state.Processed, state.Total)
+}
+
+func syncLogCleanupAggregateState(state *LogCleanupState) {
+	if len(state.Categories) == 0 {
+		if state.Total < state.Processed {
+			state.Total = state.Processed
+		}
+		state.Progress = logCleanupProgress(state.Processed, state.Total)
 		return
 	}
 
-	result := LogCleanupResult{DeletedCount: state.Processed}
-	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
-		logSystemTaskLockError(ctx, task, err)
+	var total int64
+	var processed int64
+	var remaining int64
+	for _, categoryState := range state.Categories {
+		total += categoryState.Total
+		processed += categoryState.Processed
+		remaining += categoryState.Remaining
 	}
+	state.Total = total
+	state.Processed = processed
+	state.Remaining = remaining
+	state.Progress = logCleanupProgress(processed, total)
+}
+
+func logCleanupResultFromState(state LogCleanupState) LogCleanupResult {
+	result := LogCleanupResult{
+		DeletedCount: state.Processed,
+	}
+	if len(state.Categories) == 0 {
+		return result
+	}
+	result.Categories = make(map[string]LogCleanupCategoryResult, len(state.Categories))
+	for category, categoryState := range state.Categories {
+		result.Categories[category] = LogCleanupCategoryResult{
+			Enabled:         categoryState.Enabled,
+			CutoffTimestamp: categoryState.CutoffTimestamp,
+			DeletedCount:    categoryState.DeletedCount,
+			Status:          categoryState.Status,
+			Reason:          categoryState.Reason,
+		}
+	}
+	return result
+}
+
+func countExpiredLogScreeningRecords(ctx context.Context, now int64) (int64, error) {
+	if now <= 0 {
+		now = common.GetTimestamp()
+	}
+	var total int64
+	if err := model.DB.WithContext(ctx).
+		Model(&model.LogScreeningRecord{}).
+		Where("expires_at > 0 AND expires_at < ?", now).
+		Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 func syncLogCleanupStateFromRemaining(state *LogCleanupState, remaining int64) {
+	if len(state.Categories) > 0 {
+		categoryState := state.Categories[logCleanupCategoryUsageLogs]
+		syncLogCleanupCategoryStateFromRemaining(&categoryState, remaining)
+		state.Categories[logCleanupCategoryUsageLogs] = categoryState
+		syncLogCleanupAggregateState(state)
+		return
+	}
 	if state.Total <= 0 {
 		state.Total = remaining
 		state.Processed = 0

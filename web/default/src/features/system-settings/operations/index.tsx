@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useStatus } from '@/hooks/use-status'
+
 import { SettingsPage } from '../components/settings-page'
 import type { OperationsSettings } from '../types'
 import {
@@ -43,6 +44,10 @@ const defaultOperationsSettings: OperationsSettings = {
   WorkerValidKey: '',
   WorkerAllowHttpImageRequestEnabled: false,
   LogConsumeEnabled: false,
+  'log_retention.usage_log_retention_days': 0,
+  'log_retention.error_log_retention_days': 0,
+  'log_retention.cleanup_interval_hours': 24,
+  'log_screening.expire_days': 7,
   'performance_setting.disk_cache_enabled': false,
   'performance_setting.disk_cache_threshold_mb': 10,
   'performance_setting.disk_cache_max_size_mb': 1024,

@@ -785,6 +785,8 @@ export const STATIC_I18N_KEYS = [
   'Screening Records',
   'Prompt Blocks',
   'UA Blocks',
+  'Error Insight Logs',
+  'Skipped (managed by ClickHouse TTL)',
   'Any',
   'Critical',
   'High',

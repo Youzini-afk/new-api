@@ -220,17 +220,21 @@ func TestDeleteExpiredLogScreeningRecords_Batched(t *testing.T) {
 	// Insert 3 expired (expires_at < now) and 2 unexpired records.
 	for i, exp := range []int64{now - 100, now - 10, now - 1, now + 100, 0} {
 		require.NoError(t, DB.WithContext(ctx).Create(&LogScreeningRecord{
-			UserId:     100 + i,
-			RuleName:   "expire_rule",
-			Window:     "1h",
-			ExpiresAt:  exp, // 0 means "never expires"
+			UserId:      100 + i,
+			RuleName:    "expire_rule",
+			Window:      "1h",
+			ExpiresAt:   exp, // 0 means "never expires"
 			RequestPath: "all",
 		}).Error)
 	}
 
 	deleted, err := DeleteExpiredLogScreeningRecords(ctx, now, 2)
 	require.NoError(t, err)
-	assert.Equal(t, int64(3), deleted, "only the 3 expired rows should be deleted (expires_at>0 && <now)")
+	assert.Equal(t, int64(2), deleted, "only one bounded batch should be deleted")
+
+	deleted, err = DeleteExpiredLogScreeningRecords(ctx, now, 2)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), deleted, "second batch should delete the final expired row")
 
 	var remaining int64
 	require.NoError(t, DB.WithContext(ctx).Model(&LogScreeningRecord{}).Where("rule_name = ?", "expire_rule").Count(&remaining).Error)
@@ -275,7 +279,7 @@ func TestCreatePromptBlockLog_AndUABlockLog_Normalization(t *testing.T) {
 		RulePattern:    "blocked-ua",
 		HTTPStatusCode: 50, // < 100 -> clamped to 400
 		RequestPath:    "/v1/messages",
-		IsEmptyUA:     true,
+		IsEmptyUA:      true,
 	}))
 	var ual UABlockLog
 	require.NoError(t, DB.WithContext(ctx).First(&ual, "user_id = ?", 2).Error)
@@ -323,10 +327,10 @@ func TestSuspiciousIPMark_UpsertAndList(t *testing.T) {
 
 	// List aggregation groups marks per user, ordered by last_triggered_at desc.
 	require.NoError(t, DB.WithContext(ctx).Create(&SuspiciousIPMark{
-		UserId:   11,
-		Username: "bob",
-		Ip:       "2.2.2.2",
-		Source:   "log_screening",
+		UserId:          11,
+		Username:        "bob",
+		Ip:              "2.2.2.2",
+		Source:          "log_screening",
 		LastTriggeredAt: 9000000,
 	}).Error)
 	result, err := ListSuspiciousIPMarksByUserIDs(ctx, []int{10, 11})

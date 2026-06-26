@@ -97,7 +97,17 @@ const OPERATIONS_SECTIONS = [
     titleKey: 'Log Maintenance',
     build: (settings: OperationsSettings) => (
       <LogSettingsSection
-        defaultEnabled={Boolean(settings.LogConsumeEnabled)}
+        defaultValues={{
+          LogConsumeEnabled: settings.LogConsumeEnabled,
+          'log_retention.usage_log_retention_days':
+            settings['log_retention.usage_log_retention_days'] ?? 0,
+          'log_retention.error_log_retention_days':
+            settings['log_retention.error_log_retention_days'] ?? 0,
+          'log_retention.cleanup_interval_hours':
+            settings['log_retention.cleanup_interval_hours'] ?? 24,
+          'log_screening.expire_days':
+            settings['log_screening.expire_days'] ?? 7,
+        }}
       />
     ),
   },

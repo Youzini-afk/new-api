@@ -373,3 +373,39 @@ func DeleteErrorLogsBySignature(signature string) (int64, error) {
 	result := DB.Where("normalized_signature = ?", signature).Delete(&ErrorLog{})
 	return result.RowsAffected, result.Error
 }
+
+func CountOldErrorLogs(ctx context.Context, cutoff int64) (int64, error) {
+	var total int64
+	if err := DB.WithContext(ctx).Model(&ErrorLog{}).Where("created_at < ?", cutoff).Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func DeleteOldErrorLogsBatch(ctx context.Context, cutoff int64, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	var ids []int
+	if err := DB.WithContext(ctx).
+		Model(&ErrorLog{}).
+		Where("created_at < ?", cutoff).
+		Order("id asc").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	result := DB.WithContext(ctx).Where("id IN ?", ids).Delete(&ErrorLog{})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}

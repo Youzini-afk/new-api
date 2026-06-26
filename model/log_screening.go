@@ -210,7 +210,9 @@ func UpsertLogScreeningRecord(ctx context.Context, record *LogScreeningRecord) (
 	return created, err
 }
 
-// DeleteExpiredLogScreeningRecords removes expired screening records in batches.
+// DeleteExpiredLogScreeningRecords removes one bounded batch of expired screening
+// records. Callers that want full cleanup should loop until it returns less than
+// the requested limit.
 func DeleteExpiredLogScreeningRecords(ctx context.Context, now int64, limit int) (int64, error) {
 	if now <= 0 {
 		now = common.GetTimestamp()
@@ -221,19 +223,22 @@ func DeleteExpiredLogScreeningRecords(ctx context.Context, now int64, limit int)
 	if limit > 10000 {
 		limit = 10000
 	}
-	var total int64
-	for {
-		result := DB.WithContext(ctx).
-			Where("expires_at > 0 AND expires_at < ?", now).
-			Limit(limit).
-			Delete(&LogScreeningRecord{})
-		if result.Error != nil {
-			return total, result.Error
-		}
-		total += result.RowsAffected
-		if result.RowsAffected < int64(limit) {
-			break
-		}
+	var ids []int
+	if err := DB.WithContext(ctx).
+		Model(&LogScreeningRecord{}).
+		Where("expires_at > 0 AND expires_at < ?", now).
+		Order("id asc").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
 	}
-	return total, nil
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	result := DB.WithContext(ctx).Where("id IN ?", ids).Delete(&LogScreeningRecord{})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }

@@ -44,31 +44,31 @@ const (
 
 // LogScreeningRunSummary describes the result of a RunLogScreening invocation.
 type LogScreeningRunSummary struct {
-	Kind            string `json:"kind"`
-	Status          string `json:"status"`
-	Enabled         bool   `json:"enabled"`
-	RulesTotal      int    `json:"rules_total"`
-	RulesChecked    int    `json:"rules_checked"`
-	RecordsCreated  int64  `json:"records_created"`
-	RecordsUpdated  int64  `json:"records_updated"`
-	Expired         int64  `json:"expired"`
-	StartedAt       int64  `json:"started_at"`
-	FinishedAt      int64  `json:"finished_at"`
-	ElapsedMs       int64  `json:"elapsed_ms"`
-	WindowStart     int64  `json:"window_start"`
-	WindowEnd       int64  `json:"window_end"`
-	Manual          bool   `json:"manual"`
-	OperatorUserId  int    `json:"operator_user_id"`
-	OperatorName    string `json:"operator_name"`
+	Kind           string `json:"kind"`
+	Status         string `json:"status"`
+	Enabled        bool   `json:"enabled"`
+	RulesTotal     int    `json:"rules_total"`
+	RulesChecked   int    `json:"rules_checked"`
+	RecordsCreated int64  `json:"records_created"`
+	RecordsUpdated int64  `json:"records_updated"`
+	Expired        int64  `json:"expired"`
+	StartedAt      int64  `json:"started_at"`
+	FinishedAt     int64  `json:"finished_at"`
+	ElapsedMs      int64  `json:"elapsed_ms"`
+	WindowStart    int64  `json:"window_start"`
+	WindowEnd      int64  `json:"window_end"`
+	Manual         bool   `json:"manual"`
+	OperatorUserId int    `json:"operator_user_id"`
+	OperatorName   string `json:"operator_name"`
 	// DoS caps: when the candidate/detail volume exceeds the caps, the run is
 	// truncated and Capped=true. CandidatesSeen/DetailsSeen report the number of
 	// rows fetched from LOG_DB (bounded by the caps), NOT the raw count of
 	// matching logs/users. Use Capped=true to detect truncation.
-	Capped          bool  `json:"capped"`
-	CandidateLimit  int   `json:"candidate_limit"`
-	DetailLimit     int   `json:"detail_limit"`
-	CandidatesSeen  int   `json:"candidates_seen"`
-	DetailsSeen     int   `json:"details_seen"`
+	Capped         bool `json:"capped"`
+	CandidateLimit int  `json:"candidate_limit"`
+	DetailLimit    int  `json:"detail_limit"`
+	CandidatesSeen int  `json:"candidates_seen"`
+	DetailsSeen    int  `json:"details_seen"`
 }
 
 // RunLogScreening executes a real log-screening pass: it aggregates per-user
@@ -334,7 +334,7 @@ func RunLogScreening(ctx context.Context, operatorUserId int, operatorName strin
 	}
 
 	if setting.ExpireDays > 0 {
-		expired, err := model.DeleteExpiredLogScreeningRecords(ctx, windowEnd, 1000)
+		expired, err := DeleteExpiredLogScreeningRecords(ctx, windowEnd, 1000)
 		if err != nil {
 			summary.Status = "error"
 			summary.FinishedAt = time.Now().Unix()
@@ -675,8 +675,26 @@ func logScreeningFillUserIdentity(ctx context.Context, userId int) (username str
 	return user.Username, user.DisplayName, user.Remark, nil
 }
 
-// DeleteExpiredLogScreeningRecords removes expired screening records in
-// bounded batches. Delegates to the model-layer implementation.
+// DeleteExpiredLogScreeningRecords removes all expired screening records in
+// bounded batches. The model-layer primitive deletes exactly one batch so the
+// system-task runner can report progress consistently; this service helper keeps
+// the admin cleanup endpoint's historical "clean all expired" behavior.
 func DeleteExpiredLogScreeningRecords(ctx context.Context, now int64, limit int) (int64, error) {
-	return model.DeleteExpiredLogScreeningRecords(ctx, now, limit)
+	if limit <= 0 {
+		limit = 1000
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+	var total int64
+	for {
+		deleted, err := model.DeleteExpiredLogScreeningRecords(ctx, now, limit)
+		if err != nil {
+			return total, err
+		}
+		total += deleted
+		if deleted == 0 || deleted < int64(limit) {
+			return total, nil
+		}
+	}
 }

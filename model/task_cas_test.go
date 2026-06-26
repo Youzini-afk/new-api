@@ -51,6 +51,7 @@ func TestMain(m *testing.M) {
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&ErrorLog{},
 		&Option{},
 		&Checkin{},
 		// Phase 7A — lottery MVP (default disabled).
@@ -92,6 +93,11 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM system_instances")
 		DB.Exec("DELETE FROM system_task_locks")
 		DB.Exec("DELETE FROM system_tasks")
+		DB.Exec("DELETE FROM error_logs")
+		DB.Exec("DELETE FROM log_screening_records")
+		DB.Exec("DELETE FROM prompt_block_logs")
+		DB.Exec("DELETE FROM ua_block_logs")
+		DB.Exec("DELETE FROM suspicious_ip_marks")
 		// Phase 7A — lottery/checkin fixtures.
 		// Phase 7B — roulette fixtures.
 		DB.Exec("DELETE FROM game_lottery_tickets")

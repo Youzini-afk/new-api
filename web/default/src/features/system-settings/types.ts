@@ -79,8 +79,35 @@ export type SystemTask<
 }
 
 export type LogCleanupTaskPayload = {
+  mode?: 'manual_usage' | 'scheduled_retention' | string
   target_timestamp: number
-  batch_size: number
+  batch_size?: number
+  usage_log_retention_enabled?: boolean
+  usage_cutoff_timestamp?: number
+  error_log_retention_enabled?: boolean
+  error_cutoff_timestamp?: number
+  screening_record_cleanup_enabled?: boolean
+  screening_cutoff_timestamp?: number
+}
+
+export type LogCleanupCategoryState = {
+  enabled?: boolean
+  cutoff_timestamp?: number
+  total?: number
+  processed?: number
+  remaining?: number
+  progress?: number
+  deleted_count?: number
+  status?: string
+  reason?: string
+}
+
+export type LogCleanupCategoryResult = {
+  enabled?: boolean
+  cutoff_timestamp?: number
+  deleted_count?: number
+  status?: string
+  reason?: string
 }
 
 export type LogCleanupTaskState = {
@@ -88,10 +115,12 @@ export type LogCleanupTaskState = {
   processed: number
   progress: number
   remaining: number
+  categories?: Record<string, LogCleanupCategoryState>
 }
 
 export type LogCleanupTaskResult = {
   deleted_count: number
+  categories?: Record<string, LogCleanupCategoryResult>
 }
 
 export type LogCleanupTask = SystemTask<
@@ -373,6 +402,10 @@ export type OperationsSettings = {
   WorkerValidKey: string
   WorkerAllowHttpImageRequestEnabled: boolean
   LogConsumeEnabled: boolean
+  'log_retention.usage_log_retention_days': number
+  'log_retention.error_log_retention_days': number
+  'log_retention.cleanup_interval_hours': number
+  'log_screening.expire_days': number
   'performance_setting.disk_cache_enabled': boolean
   'performance_setting.disk_cache_threshold_mb': number
   'performance_setting.disk_cache_max_size_mb': number

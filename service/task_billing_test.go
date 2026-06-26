@@ -52,6 +52,7 @@ func TestMain(m *testing.M) {
 		&model.UserSubscription{},
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
+		&model.ErrorLog{},
 		// Phase 5 — log screening / interception records.
 		&model.LogScreeningRecord{},
 		&model.PromptBlockLog{},
@@ -81,6 +82,11 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM user_subscriptions")
 		model.DB.Exec("DELETE FROM system_task_locks")
 		model.DB.Exec("DELETE FROM system_tasks")
+		model.DB.Exec("DELETE FROM error_logs")
+		model.DB.Exec("DELETE FROM log_screening_records")
+		model.DB.Exec("DELETE FROM prompt_block_logs")
+		model.DB.Exec("DELETE FROM ua_block_logs")
+		model.DB.Exec("DELETE FROM suspicious_ip_marks")
 	})
 }
 
