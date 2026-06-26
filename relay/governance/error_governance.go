@@ -268,7 +268,7 @@ func SanitizeRelayErrorForClient(c *gin.Context, err *types.NewAPIError) SafeErr
 
 	rules := effectiveRules()
 	cls := classifyWithRules(in, rules)
-	effectiveCode := cls.Code
+	effectiveCode := firstEnabledAdviceCode(cls.Code, rules)
 
 	oai := types.OpenAIError{
 		Message: withLocalRequestID(c, effectiveMessage(effectiveCode, rules)),
@@ -280,6 +280,25 @@ func SanitizeRelayErrorForClient(c *gin.Context, err *types.NewAPIError) SafeErr
 		StatusCode:  normalizedStatusFor(effectiveCode, in.StatusCode, cls.StatusCode),
 		OpenAIError: oai,
 	}
+}
+
+// firstEnabledAdviceCode mirrors nashiyard's disabled-rule fallback: if the
+// classified rule code is disabled, fall back to internal_error, then to the
+// first enabled rule in rule order. This ensures that even if an admin
+// disables a specific rule, a safe message is always returned.
+func firstEnabledAdviceCode(adviceCode string, rules map[string]effectiveRelayRule) string {
+	if adviceCode != "" && rules[adviceCode].Enabled {
+		return adviceCode
+	}
+	if rules[RelayRuleInternalError].Enabled {
+		return RelayRuleInternalError
+	}
+	for _, code := range relayRuleOrder {
+		if rules[code].Enabled {
+			return code
+		}
+	}
+	return RelayRuleInternalError
 }
 
 // --- Classification engine ---
@@ -312,7 +331,11 @@ func NormalizeRelayErrorForAnalytics(in RelayErrorInput, ruleCode string, source
 }
 
 func classifyWithRules(in RelayErrorInput, rules map[string]effectiveRelayRule) Classification {
-	return classifyWithContext(in, "", "")
+	match := classifyMatchWithContext(in, "", "")
+	if rule, ok := rules[match.Code]; ok && !rule.Enabled {
+		match = relayErrorMatch{Code: RelayRuleInternalError, RuleMatched: false, MatchSource: RelayMatchSourceDisabledRule, UnmatchedReason: RelayUnmatchedReasonDisabledRuleFallback}
+	}
+	return byMatch(match)
 }
 
 func classifyWithContext(in RelayErrorInput, source string, stage string) Classification {

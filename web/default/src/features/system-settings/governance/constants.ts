@@ -60,37 +60,106 @@ export const RELAY_ERROR_RULE_CODES = [
  * Kept in sync with the backend defaults so admins can see what users would
  * receive by default before deciding to override.
  */
-export const RELAY_ERROR_DEFAULT_MESSAGES: Record<
-  RelayErrorRuleCode,
-  string
-> = {
-  insufficient_user_quota:
-    'Your quota is insufficient to complete this request.',
-  invalid_max_tokens: 'The max_tokens parameter is invalid.',
+export const RELAY_ERROR_DEFAULT_MESSAGES: Record<RelayErrorRuleCode, string> =
+  {
+    insufficient_user_quota: 'Insufficient account balance.',
+    invalid_max_tokens: 'Invalid max_tokens; adjust and retry.',
+    max_tokens_requires_stream:
+      'Enable stream=true when max_tokens exceeds 4096.',
+    invalid_budget_tokens:
+      'Invalid reasoning.budget_tokens; adjust within allowed range.',
+    invalid_stream_options: 'Invalid stream_options; check and retry.',
+    invalid_message_role:
+      'Invalid message role; check messages.role and use only system, user, assistant, or tool.',
+    invalid_image_url:
+      'Image URL unreachable or unsupported; replace and retry.',
+    context_length_exceeded:
+      'Request exceeds model context or token limit; shorten input or lower max_tokens.',
+    content_filtered:
+      'Your content or generated output was blocked by upstream safety policy; adjust and retry.',
+    model_not_found: 'Requested model not found.',
+    no_available_channel:
+      'No available channel for this model; please retry later.',
+    model_not_permitted:
+      'This token is not authorized for the requested model.',
+    risk_control_restricted:
+      'Account activity restricted; retry later or contact admin.',
+    behavior_banned:
+      'Account restricted due to abnormal behavior; contact admin.',
+    upstream_rate_limited: 'Upstream load is high; please retry later.',
+    upstream_timeout: 'Upstream timed out; please retry later.',
+    upstream_bad_response:
+      'Upstream response format is invalid; retry later, or try enabling streaming if it persists.',
+    upstream_unavailable:
+      'Upstream temporarily unavailable; please retry later.',
+    stream_interrupted: 'Stream interrupted; please retry later.',
+    internal_error: 'Internal service error; please retry later.',
+  }
+
+/**
+ * Human-readable label for each rule code, shown in the admin UI alongside the
+ * rule code badge. Ported from nashiyard's governance configuration.
+ */
+export const RELAY_ERROR_RULE_LABELS: Record<RelayErrorRuleCode, string> = {
+  insufficient_user_quota: 'Insufficient user balance',
+  invalid_max_tokens: 'Invalid max_tokens',
+  max_tokens_requires_stream: 'max_tokens requires stream',
+  invalid_budget_tokens: 'Invalid reasoning.budget_tokens',
+  invalid_stream_options: 'Invalid stream_options',
+  invalid_message_role: 'Invalid message role',
+  invalid_image_url: 'Invalid image URL',
+  context_length_exceeded: 'Context or token limit exceeded',
+  content_filtered: 'Content blocked by safety filter',
+  model_not_found: 'Model not found',
+  no_available_channel: 'No available channel',
+  model_not_permitted: 'Model not permitted for token',
+  risk_control_restricted: 'Risk-control restricted',
+  behavior_banned: 'Behavior ban',
+  upstream_rate_limited: 'Upstream rate-limited',
+  upstream_timeout: 'Upstream timeout',
+  upstream_bad_response: 'Upstream bad response',
+  upstream_unavailable: 'Upstream unavailable',
+  stream_interrupted: 'Stream interrupted',
+  internal_error: 'Internal error',
+}
+
+/**
+ * Hint describing when each rule matches, shown as help text in the admin UI.
+ * Ported from nashiyard's governance configuration.
+ */
+export const RELAY_ERROR_RULE_HINTS: Record<RelayErrorRuleCode, string> = {
+  insufficient_user_quota: 'Local user quota insufficient',
+  invalid_max_tokens:
+    'max_tokens invalid, too large/small, or out of allowed range',
   max_tokens_requires_stream:
-    'max_tokens can only be set when streaming is enabled.',
-  invalid_budget_tokens: 'The budget tokens parameter is invalid.',
-  invalid_stream_options: 'The stream options provided are invalid.',
-  invalid_message_role: 'The message role is not supported.',
-  invalid_image_url: 'The image URL is invalid or unreachable.',
+    'Upstream requires stream=true when max_tokens > 4096',
+  invalid_budget_tokens:
+    'reasoning.budget_tokens / budget_tokens too large, too small, or incompatible with max_tokens',
+  invalid_stream_options: 'stream_options mismatch with stream',
+  invalid_message_role: 'messages.role is outside system/user/assistant/tool',
+  invalid_image_url: 'Image URL unreachable or unsupported',
   context_length_exceeded:
-    "This request exceeds the model's maximum context length.",
-  content_filtered: 'Your request was filtered by the content safety policy.',
-  model_not_found: 'The requested model does not exist.',
+    'Context limit, token limit, or input/prompt tokens exceeding max_prompt_tokens',
+  content_filtered:
+    'User input or generated output blocked by safety policy, content review, or upstream filtering',
+  model_not_found:
+    'Model missing, unavailable, or upstream returned not found/unavailable',
   no_available_channel:
-    'No available channel can serve this model right now.',
-  model_not_permitted: 'You do not have permission to use this model.',
-  risk_control_restricted: 'This request was blocked by risk control.',
-  behavior_banned: 'Your account behavior has been restricted.',
+    'No available channel, no channel for capability, or group routing unavailable',
+  model_not_permitted:
+    'Current token, user group, or model whitelist rejects access',
+  risk_control_restricted: 'Risk control restricted',
+  behavior_banned: 'Abnormal behavior ban',
   upstream_rate_limited:
-    'The upstream service is rate-limiting requests.',
-  upstream_timeout: 'The upstream service took too long to respond.',
+    'Explicit upstream rate limit, HTTP 429, or too many requests',
+  upstream_timeout: 'Upstream timeout (408/504/524/i/o timeout)',
   upstream_bad_response:
-    'The upstream service returned an invalid response.',
-  upstream_unavailable: 'The upstream service is temporarily unavailable.',
-  stream_interrupted: 'The response stream was interrupted.',
-  internal_error:
-    'An error occurred while processing the request. Please try again later.',
+    'Upstream returned non-JSON / SSE data prefix / decode failure',
+  upstream_unavailable:
+    'Explicit upstream unavailable state, opaque upstream account/credit/billing errors, or openai_error',
+  stream_interrupted:
+    'Stream interruption, connection closed early, or EOF during upstream response',
+  internal_error: 'Local 5xx not matching other rules',
 }
 
 /** The system option key under which the governance config is stored. */

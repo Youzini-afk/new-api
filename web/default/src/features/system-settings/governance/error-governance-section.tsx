@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -29,6 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+
 import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
@@ -36,13 +38,12 @@ import { useUpdateOption } from '../hooks/use-update-option'
 import {
   RELAY_ERROR_DEFAULT_MESSAGES,
   RELAY_ERROR_GOVERNANCE_OPTION_KEY,
+  RELAY_ERROR_RULE_HINTS,
+  RELAY_ERROR_RULE_LABELS,
   buildGovernanceRows,
   serializeGovernanceConfig,
 } from './constants'
-import type {
-  GovernanceRuleRow,
-  RelayErrorGovernanceConfig,
-} from './types'
+import type { GovernanceRuleRow, RelayErrorGovernanceConfig } from './types'
 
 type ErrorGovernanceSectionProps = {
   /** Raw JSON string of the `relay_error_governance` system option. */
@@ -134,9 +135,7 @@ export function ErrorGovernanceSection({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className='min-w-[160px]'>
-                {t('Rule Code')}
-              </TableHead>
+              <TableHead className='min-w-[160px]'>{t('Rule Code')}</TableHead>
               <TableHead className='min-w-[220px]'>
                 {t('Default Message')}
               </TableHead>
@@ -152,12 +151,22 @@ export function ErrorGovernanceSection({
             {effectiveRows.map((row) => {
               const defaultMessage =
                 RELAY_ERROR_DEFAULT_MESSAGES[row.code] ?? ''
+              const label = RELAY_ERROR_RULE_LABELS[row.code] ?? row.code
+              const hint = RELAY_ERROR_RULE_HINTS[row.code] ?? ''
               return (
                 <TableRow key={row.code}>
                   <TableCell>
-                    <Badge variant='outline' className='font-mono'>
-                      {row.code}
-                    </Badge>
+                    <div className='flex flex-col gap-1'>
+                      <Badge variant='outline' className='w-fit font-mono'>
+                        {row.code}
+                      </Badge>
+                      <span className='text-sm font-medium'>{label}</span>
+                      {hint && (
+                        <span className='text-muted-foreground text-xs'>
+                          {hint}
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className='text-muted-foreground text-sm'>
                     <span
