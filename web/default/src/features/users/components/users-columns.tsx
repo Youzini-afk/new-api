@@ -16,10 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
-import { formatQuota, formatTimestamp } from '@/lib/format'
-import { cn } from '@/lib/utils'
+
+import { BadgeCell } from '@/components/data-table'
+import { GroupBadge } from '@/components/group-badge'
+import { LongText } from '@/components/long-text'
+import { StatusBadge, type StatusVariant } from '@/components/status-badge'
+import { TableId } from '@/components/table-id'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
 import {
@@ -27,18 +32,21 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { BadgeCell } from '@/components/data-table'
-import { GroupBadge } from '@/components/group-badge'
-import { LongText } from '@/components/long-text'
-import { StatusBadge, type StatusVariant } from '@/components/status-badge'
-import { TableId } from '@/components/table-id'
+import {
+  getSafeUserAvatarUrl,
+  getUserAvatarFallback,
+  getUserAvatarStyle,
+} from '@/lib/avatar'
+import { formatQuota, formatTimestamp } from '@/lib/format'
+import { cn } from '@/lib/utils'
+
 import {
   USER_STATUS,
   USER_STATUSES,
   USER_ROLES,
   isUserDeleted,
 } from '../constants'
-import { type User } from '../types'
+import type { User } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 function getQuotaProgressColor(percentage: number): string {
@@ -110,31 +118,43 @@ export function useUsersColumns(): ColumnDef<User>[] {
         const username = row.getValue('username') as string
         const displayName = row.original.display_name
         const remark = row.original.remark
+        const avatarName = displayName || username
+        const avatarUrl = getSafeUserAvatarUrl(row.original.avatar_url)
 
         return (
-          <div className='flex min-w-[160px] flex-col gap-1'>
-            <div className='flex items-center gap-2'>
-              <LongText className='max-w-[140px] font-medium'>
-                {username}
-              </LongText>
-              {remark && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<StatusBadge variant='success' copyable={false} />}
-                  >
-                    <LongText className='max-w-[80px]'>{remark}</LongText>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className='text-xs'>{remark}</p>
-                  </TooltipContent>
-                </Tooltip>
+          <div className='flex min-w-[190px] items-center gap-3'>
+            <Avatar size='sm' className='size-8'>
+              {avatarUrl && <AvatarImage src={avatarUrl} alt={avatarName} />}
+              <AvatarFallback style={getUserAvatarStyle(avatarName)}>
+                {getUserAvatarFallback(avatarName)}
+              </AvatarFallback>
+            </Avatar>
+            <div className='flex min-w-0 flex-col gap-1'>
+              <div className='flex min-w-0 items-center gap-2'>
+                <LongText className='max-w-[140px] font-medium'>
+                  {username}
+                </LongText>
+                {remark && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <StatusBadge variant='success' copyable={false} />
+                      }
+                    >
+                      <LongText className='max-w-[80px]'>{remark}</LongText>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className='text-xs'>{remark}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+              {displayName && displayName !== username && (
+                <LongText className='text-muted-foreground max-w-[180px] text-xs'>
+                  {displayName}
+                </LongText>
               )}
             </div>
-            {displayName && displayName !== username && (
-              <LongText className='text-muted-foreground max-w-[180px] text-xs'>
-                {displayName}
-              </LongText>
-            )}
           </div>
         )
       },
@@ -216,7 +236,8 @@ export function useUsersColumns(): ColumnDef<User>[] {
                     : t('Never')}
                 </div>
                 <div>
-                  {t('Result:')} {user.discord_last_check_result || t('Not checked')}
+                  {t('Result:')}{' '}
+                  {user.discord_last_check_result || t('Not checked')}
                 </div>
                 <div>
                   {t('Reason:')} {user.discord_last_check_reason || t('None')}
