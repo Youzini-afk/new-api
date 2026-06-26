@@ -58,6 +58,16 @@ func truncateLogsTable(t *testing.T) {
 	})
 }
 
+func truncateLogUsersTable(t *testing.T) {
+	t.Helper()
+	require.NoError(t, DB.Exec("DELETE FROM users").Error)
+	t.Cleanup(func() {
+		if err := DB.Exec("DELETE FROM users").Error; err != nil {
+			t.Logf("failed to cleanup users table: %v", err)
+		}
+	})
+}
+
 // ---------------------------------------------------------------------------
 // truncateRunesToByteBudget — rune-safe 截断单元测试
 // ---------------------------------------------------------------------------
@@ -384,6 +394,33 @@ func TestFormatUserLogsKeepsIPWhenUserAllowsIt(t *testing.T) {
 
 	assert.Equal(t, 1, logs[0].Id)
 	assert.Equal(t, "203.0.113.10", logs[0].Ip)
+}
+
+func TestGetAllLogsEnrichesUserAvatar(t *testing.T) {
+	truncateLogsTable(t)
+	truncateLogUsersTable(t)
+
+	avatarURL := "/api/user/avatar/100/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"
+	require.NoError(t, DB.Create(&User{
+		Id:           100,
+		Username:     "avatar-user",
+		Password:     "password123",
+		AvatarURL:    avatarURL,
+		AvatarSource: AvatarSourceUploaded,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:    100,
+		CreatedAt: 123,
+		Type:      LogTypeConsume,
+		Username:  "avatar-user",
+	}).Error)
+
+	logs, total, err := GetAllLogs(LogTypeConsume, 0, 0, "", "", "", 0, 10, 0, "", "", "")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, logs, 1)
+	assert.Equal(t, avatarURL, logs[0].AvatarURL)
+	assert.Equal(t, AvatarSourceUploaded, logs[0].AvatarSource)
 }
 
 // ---------------------------------------------------------------------------

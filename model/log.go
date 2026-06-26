@@ -56,6 +56,8 @@ type Log struct {
 	Other             string `json:"other"`
 	RequestPath       string `json:"request_path,omitempty" gorm:"type:varchar(512);default:''"`
 	UserAgent         string `json:"user_agent,omitempty" gorm:"type:varchar(512);default:''"`
+	AvatarURL         string `json:"avatar_url,omitempty" gorm:"-"`
+	AvatarSource      string `json:"avatar_source,omitempty" gorm:"-"`
 }
 
 const (
@@ -196,6 +198,46 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 	for i := range logs {
 		logs[i].Id = startIdx + i + 1
 	}
+}
+
+func enrichLogsWithUserAvatars(logs []*Log) error {
+	userIds := types.NewSet[int]()
+	for _, log := range logs {
+		if log.UserId > 0 {
+			userIds.Add(log.UserId)
+		}
+	}
+	if userIds.Len() == 0 {
+		return nil
+	}
+
+	var users []struct {
+		Id           int    `gorm:"column:id"`
+		AvatarURL    string `gorm:"column:avatar_url"`
+		AvatarSource string `gorm:"column:avatar_source"`
+	}
+	if err := DB.Model(&User{}).Select("id, avatar_url, avatar_source").Where("id IN ?", userIds.Items()).Find(&users).Error; err != nil {
+		return err
+	}
+	avatarMap := make(map[int]struct {
+		URL    string
+		Source string
+	}, len(users))
+	for _, user := range users {
+		avatarMap[user.Id] = struct {
+			URL    string
+			Source string
+		}{
+			URL:    user.AvatarURL,
+			Source: user.AvatarSource,
+		}
+	}
+	for _, log := range logs {
+		avatar := avatarMap[log.UserId]
+		log.AvatarURL = avatar.URL
+		log.AvatarSource = avatar.Source
+	}
+	return nil
 }
 
 func formatUserLogs(logs []*Log, startIdx int, showIp bool) {
@@ -643,6 +685,9 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		assignDisplayLogIds(logs, startIdx)
 	}
+	if err = enrichLogsWithUserAvatars(logs); err != nil {
+		return logs, total, err
+	}
 
 	channelIds := types.NewSet[int]()
 	for _, log := range logs {
@@ -730,6 +775,10 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	err = tx.Order(order).Limit(num).Offset(startIdx).Find(&logs).Error
 	if err != nil {
 		common.SysError("failed to search user logs: " + err.Error())
+		return nil, 0, errors.New("查询日志失败")
+	}
+	if err = enrichLogsWithUserAvatars(logs); err != nil {
+		common.SysError("failed to enrich user log avatars: " + err.Error())
 		return nil, 0, errors.New("查询日志失败")
 	}
 

@@ -17,18 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { CircleAlert, GitBranch, Sparkles, KeyRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import {
-  formatUseTime,
-  formatLogQuota,
-  formatTimestampToDate,
-} from '@/lib/format'
-import { cn } from '@/lib/utils'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+
+import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   Popover,
   PopoverContent,
@@ -40,7 +34,19 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
+import {
+  getSafeUserAvatarUrl,
+  getUserAvatarFallback,
+  getUserAvatarStyle,
+} from '@/lib/avatar'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
+import {
+  formatUseTime,
+  formatLogQuota,
+  formatTimestampToDate,
+} from '@/lib/format'
+import { cn } from '@/lib/utils'
+
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
@@ -68,6 +74,12 @@ interface DetailSegment {
   text: string
   muted?: boolean
   danger?: boolean
+}
+
+function getDetailSegmentTextClass(segment: DetailSegment): string {
+  if (segment.muted) return 'text-muted-foreground/60'
+  if (segment.danger) return 'text-red-600 dark:text-red-400'
+  return 'text-foreground'
 }
 
 function formatRatioCompact(ratio: number | undefined): string {
@@ -204,10 +216,11 @@ function buildDetailSegments(
       })
     }
   } else {
-    const isPerCall = isPerCallBilling(other.model_price)
-    if (isPerCall) {
+    const modelPrice = other.model_price
+    const isPerCall = isPerCallBilling(modelPrice)
+    if (isPerCall && modelPrice != null) {
       segments.push({
-        text: `${t('Per-call')} · ${formatBillingCurrencyFromUSD(other.model_price!, priceOpts)}`,
+        text: `${t('Per-call')} · ${formatBillingCurrencyFromUSD(modelPrice, priceOpts)}`,
       })
     } else if (other.model_ratio != null) {
       const inputPriceUSD = other.model_ratio * 2.0
@@ -328,8 +341,9 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             ? rawUseChannel.map(String).filter(Boolean)
             : []
           const hasRetryChain = useChannel.length > 1
-          const channelChain =
-            hasRetryChain ? useChannel.join(' → ') : undefined
+          const channelChain = hasRetryChain
+            ? useChannel.join(' → ')
+            : undefined
           const channelDisplay = log.channel_name
             ? `${log.channel_name} #${log.channel}`
             : `#${log.channel}`
@@ -477,6 +491,10 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
           if (!log.username) return null
 
+          const safeAvatarUrl = sensitiveVisible
+            ? getSafeUserAvatarUrl(log.avatar_url)
+            : undefined
+
           return (
             <button
               type='button'
@@ -488,6 +506,9 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               }}
             >
               <Avatar className='ring-border/60 size-6 ring-1 max-sm:hidden'>
+                {safeAvatarUrl && (
+                  <AvatarImage src={safeAvatarUrl} alt={log.username} />
+                )}
                 <AvatarFallback
                   className={cn(
                     'text-[11px] font-semibold',
@@ -682,7 +703,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     <Tooltip>
                       <TooltipTrigger
                         render={<CircleAlert className='size-3 text-red-500' />}
-                      ></TooltipTrigger>
+                      />
                       <TooltipContent>
                         <div className='space-y-0.5 text-xs'>
                           <p>
@@ -817,6 +838,31 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const segments = buildDetailSegments(log, other, t)
         const primary = segments[0]
         const hasMore = segments.length > 1
+        let preview = <span className='text-muted-foreground/40'>—</span>
+
+        if (primary) {
+          preview = (
+            <span
+              className={cn(
+                'truncate leading-snug group-hover:underline',
+                getDetailSegmentTextClass(primary)
+              )}
+            >
+              {primary.text}
+              {hasMore && (
+                <span className='text-muted-foreground/40 ml-0.5'>
+                  +{segments.length - 1}
+                </span>
+              )}
+            </span>
+          )
+        } else if (log.content) {
+          preview = (
+            <span className='text-muted-foreground truncate group-hover:underline'>
+              {log.content}
+            </span>
+          )
+        }
 
         return (
           <>
@@ -826,31 +872,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               onClick={() => setDialogOpen(true)}
               title={t('Click to view full details')}
             >
-              {primary ? (
-                <span
-                  className={cn(
-                    'truncate leading-snug group-hover:underline',
-                    primary.muted
-                      ? 'text-muted-foreground/60'
-                      : primary.danger
-                        ? 'text-red-600 dark:text-red-400'
-                        : 'text-foreground'
-                  )}
-                >
-                  {primary.text}
-                  {hasMore && (
-                    <span className='text-muted-foreground/40 ml-0.5'>
-                      +{segments.length - 1}
-                    </span>
-                  )}
-                </span>
-              ) : log.content ? (
-                <span className='text-muted-foreground truncate group-hover:underline'>
-                  {log.content}
-                </span>
-              ) : (
-                <span className='text-muted-foreground/40'>—</span>
-              )}
+              {preview}
             </button>
             <DetailsDialog
               log={log}
