@@ -5399,6 +5399,11 @@
     "Failed to load request logs": "加载请求日志失败",
     "No request logs found": "未找到请求日志",
     "This user has no request logs yet.": "该用户暂无请求日志。",
-    "View Details": "查看详情"
+    "View Details": "查看详情",
+    "Input / Request Params": "输入 / 请求参数",
+    "Model Output": "模型输出",
+    "Request Inspection": "请求审查",
+    "View the full request parameters sent to the model": "查看发送给模型的完整请求参数",
+    "View the full model output text for this request": "查看此请求的完整模型输出文本"
   }
 }

@@ -253,12 +253,12 @@ func TestIsObservedLogScreeningUser_NoBanSync(t *testing.T) {
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.LogScreeningRecord{
 		UserId:        43,
-		RiskLevel:      logScreeningRiskLevelHigh,
-		ObservedUntil:  now - 100,
-		ExpiresAt:      now - 100,
-		RuleName:       "rule_y",
-		Window:         "1h",
-		RequestPath:    "all",
+		RiskLevel:     logScreeningRiskLevelHigh,
+		ObservedUntil: now - 100,
+		ExpiresAt:     now - 100,
+		RuleName:      "rule_y",
+		Window:        "1h",
+		RequestPath:   "all",
 	}).Error)
 	assert.False(t, isObservedLogScreeningUser(43), "expired record → not observed")
 
@@ -266,12 +266,12 @@ func TestIsObservedLogScreeningUser_NoBanSync(t *testing.T) {
 	require.NoError(t, model.DB.Exec("DELETE FROM log_screening_records").Error)
 	require.NoError(t, model.DB.Create(&model.LogScreeningRecord{
 		UserId:        44,
-		RiskLevel:      "low",
-		ObservedUntil:  0,
-		ExpiresAt:      0,
-		RuleName:       "rule_z",
-		Window:         "1h",
-		RequestPath:    "all",
+		RiskLevel:     "low",
+		ObservedUntil: 0,
+		ExpiresAt:     0,
+		RuleName:      "rule_z",
+		Window:        "1h",
+		RequestPath:   "all",
 	}).Error)
 	assert.False(t, isObservedLogScreeningUser(44), "non-high-risk record → not observed")
 
@@ -301,12 +301,12 @@ func TestBuildRequestParamsForLog_ObservedUserAddsSemanticFields(t *testing.T) {
 	// Insert an active high-risk record for the test user.
 	require.NoError(t, model.DB.Create(&model.LogScreeningRecord{
 		UserId:        7,
-		RiskLevel:      logScreeningRiskLevelHigh,
-		ObservedUntil:  0,
-		ExpiresAt:      0,
-		RuleName:       "rule_obs",
-		Window:         "1h",
-		RequestPath:    "all",
+		RiskLevel:     logScreeningRiskLevelHigh,
+		ObservedUntil: 0,
+		ExpiresAt:     0,
+		RuleName:      "rule_obs",
+		Window:        "1h",
+		RequestPath:   "all",
 	}).Error)
 
 	bodyJSON := `{"model":"gpt-4","prompt":"please help me with secrets"}`
@@ -397,6 +397,23 @@ func TestGenerateTextOtherInfo_IncludesRequestParams(t *testing.T) {
 	assert.Equal(t, "gpt-4", paramsMap["model"])
 	// Numeric values are JSON-serialized by the default sanitize branch.
 	assert.Equal(t, "0.5", paramsMap["temperature"])
+}
+
+func TestGenerateTextOtherInfo_IncludesMaskedResponseText(t *testing.T) {
+	ctx := newRequestBodyContext(t, http.MethodPost, "/v1/chat/completions", "")
+	relayInfo := newRelayInfoForParamRecordTest(ctx)
+	relayInfo.ResponseText = "visit https://api.example.com/v1/secret?token=abc and " + strings.Repeat("中", responseTextLogMaxBytes)
+
+	other := GenerateTextOtherInfo(ctx, relayInfo, 1.0, 1.0, 1.0, 0, 0.0, 0.0, 1.0)
+	recorded, ok := other["response_text"].(string)
+	require.True(t, ok, "response_text must be written for admin logs")
+	assert.LessOrEqual(t, len(recorded), responseTextLogMaxBytes, "response_text must be byte-bounded")
+	assert.True(t, strings.HasSuffix(recorded, "..."), "truncated response_text must include ellipsis")
+	assert.Contains(t, recorded, "https://***.com/***/***?token=***")
+	assert.NotContains(t, recorded, "api.example.com")
+	assert.NotContains(t, recorded, "token=abc")
+	assert.Equal(t, true, other["response_text_truncated"])
+	assert.True(t, relayInfo.ResponseTextTruncated)
 }
 
 // TestGenerateTextOtherInfo_NoCrashOnNilRequest verifies the integration does

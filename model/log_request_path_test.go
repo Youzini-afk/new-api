@@ -343,6 +343,38 @@ func TestExtractUserAgent_NilContext(t *testing.T) {
 	assert.NotPanics(t, func() { _ = extractUserAgent(nil) })
 }
 
+func TestFormatUserLogsStripsSensitiveAuditFields(t *testing.T) {
+	logs := []*Log{
+		{
+			Id:          99,
+			ChannelName: "admin-channel",
+			UserAgent:   "curl/8.0",
+			Other: common.MapToJsonStr(map[string]interface{}{
+				"request_params":          map[string]interface{}{"prompt": "secret prompt", "temperature": 0.5},
+				"response_text":           "secret model output",
+				"response_text_truncated": true,
+				"admin_info":              map[string]interface{}{"use_channel": []interface{}{1}},
+				"stream_status":           map[string]interface{}{"status": "ok"},
+				"safe_user_visible_field": "keep-me",
+			}),
+		},
+	}
+
+	formatUserLogs(logs, 0)
+
+	assert.Equal(t, 1, logs[0].Id)
+	assert.Empty(t, logs[0].ChannelName)
+	assert.Empty(t, logs[0].UserAgent)
+	otherMap, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	assert.NotContains(t, otherMap, "request_params")
+	assert.NotContains(t, otherMap, "response_text")
+	assert.NotContains(t, otherMap, "response_text_truncated")
+	assert.NotContains(t, otherMap, "admin_info")
+	assert.NotContains(t, otherMap, "stream_status")
+	assert.Equal(t, "keep-me", otherMap["safe_user_visible_field"])
+}
+
 // ---------------------------------------------------------------------------
 // SQLite in-memory：AutoMigrate + RecordConsumeLog / RecordErrorLog 写入新列
 // ---------------------------------------------------------------------------

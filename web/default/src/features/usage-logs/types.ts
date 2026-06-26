@@ -196,6 +196,12 @@ export interface LogOtherData {
   fee_quota?: number
   // Reject / intercept reason (admin)
   reject_reason?: string
+  // Admin-only request inspection fields. Stored on the log's `other`
+  // payload and surfaced only to admins in the details dialog.
+  // Original request parameters (parsed JSON) sent to the upstream model.
+  request_params?: Record<string, unknown>
+  // Full model output text returned by the upstream provider.
+  response_text?: string
   // Task-related fields (for refund logs, type=6)
   is_task?: boolean
   task_id?: string

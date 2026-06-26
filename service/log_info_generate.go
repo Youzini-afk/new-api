@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/base64"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const responseTextLogMaxBytes = 8192
 
 func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
 	if other == nil {
@@ -79,12 +82,67 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
+	appendResponseTextInfo(relayInfo, other)
 	// Phase 5 — record configured request params (admin-visible) under the
 	// shared request_params key. No relay control-flow change; this only adds
 	// a nested field to the log "other" map. No prompt/UA interception here.
 	params := BuildRequestParamsForLog(ctx, relayInfo.Request)
 	other = MergeRequestParamsToOther(other, params)
 	return other
+}
+
+func appendResponseTextInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil || relayInfo.ResponseText == "" {
+		return
+	}
+	responseText, truncated := truncateAndMaskLogText(relayInfo.ResponseText, responseTextLogMaxBytes)
+	if responseText == "" {
+		return
+	}
+	other["response_text"] = responseText
+	if truncated || relayInfo.ResponseTextTruncated {
+		other["response_text_truncated"] = true
+		relayInfo.ResponseTextTruncated = true
+	}
+}
+
+func truncateAndMaskLogText(input string, maxBytes int) (string, bool) {
+	if input == "" {
+		return "", false
+	}
+	masked := common.MaskSensitiveInfo(strings.ToValidUTF8(input, ""))
+	if maxBytes <= 0 || len(masked) <= maxBytes {
+		return masked, false
+	}
+	const suffix = "..."
+	budget := maxBytes - len(suffix)
+	if budget < 0 {
+		budget = 0
+	}
+	return truncateLogTextToByteBudget(masked, budget) + suffix, true
+}
+
+func truncateLogTextToByteBudget(input string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(input) <= maxBytes {
+		return input
+	}
+	var b strings.Builder
+	n := 0
+	for _, r := range input {
+		sz := utf8.RuneLen(r)
+		if sz < 0 {
+			continue
+		}
+		if n+sz > maxBytes {
+			break
+		}
+		b.WriteRune(r)
+		n += sz
+	}
+	return b.String()
 }
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {

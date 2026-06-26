@@ -5399,6 +5399,11 @@
     "Failed to load request logs": "Failed to load request logs",
     "No request logs found": "No request logs found",
     "This user has no request logs yet.": "This user has no request logs yet.",
-    "View Details": "View Details"
+    "View Details": "View Details",
+    "Input / Request Params": "Entrée / Paramètres de requête",
+    "Model Output": "Sortie du modèle",
+    "Request Inspection": "Inspection de la requête",
+    "View the full request parameters sent to the model": "Voir tous les paramètres de requête envoyés au modèle",
+    "View the full model output text for this request": "Voir le texte de sortie complet du modèle pour cette requête"
   }
 }

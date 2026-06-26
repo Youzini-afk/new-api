@@ -5399,6 +5399,11 @@
     "Failed to load request logs": "Failed to load request logs",
     "No request logs found": "No request logs found",
     "This user has no request logs yet.": "This user has no request logs yet.",
-    "View Details": "View Details"
+    "View Details": "View Details",
+    "Input / Request Params": "入力 / リクエストパラメータ",
+    "Model Output": "モデル出力",
+    "Request Inspection": "リクエスト検査",
+    "View the full request parameters sent to the model": "モデルに送信された完全なリクエストパラメータを表示",
+    "View the full model output text for this request": "このリクエストの完全なモデル出力テキストを表示"
   }
 }

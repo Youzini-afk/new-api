@@ -30,17 +30,24 @@ import {
   UserCog,
   Info,
   LogIn,
+  Eye,
+  Braces,
+  FileText,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+
+import { Dialog } from '@/components/dialog'
+import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
-import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Dialog } from '@/components/dialog'
-import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
-import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
+
 import type { UsageLog } from '../../data/schema'
 import {
   parseLogOther,
@@ -324,8 +331,8 @@ function BillingBreakdown(props: {
 
   return (
     <DetailSection label={t('Billing Details')}>
-      {rows.map((row, idx) => (
-        <DetailRow key={idx} label={row.label} value={row.value} mono />
+      {rows.map((row) => (
+        <DetailRow key={row.label} label={row.label} value={row.value} mono />
       ))}
     </DetailSection>
   )
@@ -390,8 +397,8 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
 
   return (
     <DetailSection label={t('Token Breakdown')}>
-      {rows.map((row, idx) => (
-        <DetailRow key={idx} label={row.label} value={row.value} mono />
+      {rows.map((row) => (
+        <DetailRow key={row.label} label={row.label} value={row.value} mono />
       ))}
     </DetailSection>
   )
@@ -402,6 +409,94 @@ interface DetailsDialogProps {
   isAdmin: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
+}
+
+// Formats arbitrary request params into a readable, stable JSON string.
+// Falls back to String() if the value cannot be serialized.
+function formatRequestParams(params: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(params, null, 2)
+  } catch {
+    return String(params)
+  }
+}
+
+function getReasoningEffortVariant(value: string): StatusBadgeProps['variant'] {
+  if (value === 'high') return 'orange'
+  if (value === 'medium') return 'yellow'
+  return 'green'
+}
+
+// Inline "view" trigger row: a labelled row whose value is a button that
+// opens a nested dialog with the full content. Mirrors the existing
+// details-dialog label/value rhythm without expanding large blobs inline.
+function InspectRow(props: {
+  icon: React.ReactNode
+  label: string
+  viewLabel: string
+  dialogTitle: string
+  dialogDescription: string
+  content: string
+  copyKey: string
+}) {
+  const { t } = useTranslation()
+  const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <DetailRow
+        label={
+          <span className='flex items-center gap-1.5'>
+            {props.icon}
+            {props.label}
+          </span>
+        }
+        value={
+          <Button
+            variant='ghost'
+            size='sm'
+            className='h-6 gap-1 px-2 text-xs'
+            onClick={() => setOpen(true)}
+          >
+            <Eye className='size-3' aria-hidden='true' />
+            {props.viewLabel}
+          </Button>
+        }
+      />
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+        title={props.dialogTitle}
+        description={props.dialogDescription}
+        contentClassName='sm:max-w-2xl'
+        contentHeight='min(72dvh, 720px)'
+        bodyClassName='p-0 sm:p-0'
+      >
+        <ScrollArea className='h-full max-h-[calc(72dvh-4rem)] pr-2'>
+          <div className='relative min-w-0 p-1'>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='absolute top-1 right-1 h-7 w-7 p-0'
+              onClick={() => copyToClipboard(props.content)}
+              title={t(props.copyKey)}
+              aria-label={t(props.copyKey)}
+            >
+              {copiedText === props.content ? (
+                <Check className='size-3.5 text-green-600' />
+              ) : (
+                <Copy className='size-3.5' />
+              )}
+            </Button>
+            <pre className='bg-muted/30 m-0 min-w-0 overflow-hidden rounded-md border p-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap sm:wrap-break-word'>
+              {props.content}
+            </pre>
+          </div>
+        </ScrollArea>
+      </Dialog>
+    </>
+  )
 }
 
 export function DetailsDialog(props: DetailsDialogProps) {
@@ -625,6 +720,22 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
 
+          {props.isAdmin && !isLogin && props.log.user_agent && (
+            <DetailRow
+              label={
+                <span className='flex items-center gap-1.5'>
+                  <Monitor
+                    className='text-muted-foreground size-3'
+                    aria-hidden='true'
+                  />
+                  {t('User Agent')}
+                </span>
+              }
+              value={props.log.user_agent}
+              mono
+            />
+          )}
+
           {showTiming && props.log.use_time > 0 && (
             <DetailRow
               label={t('Response Time')}
@@ -713,6 +824,43 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
+        {/* Request inspection (admin only): UA / input params / model output */}
+        {props.isAdmin &&
+          other &&
+          (other.request_params || other.response_text) && (
+            <DetailSection
+              icon={<Eye className='size-3.5' aria-hidden='true' />}
+              label={t('Request Inspection')}
+            >
+              {other.request_params && (
+                <InspectRow
+                  icon={<Braces className='size-3' aria-hidden='true' />}
+                  label={t('Input / Request Params')}
+                  viewLabel={t('View')}
+                  dialogTitle={t('Input / Request Params')}
+                  dialogDescription={t(
+                    'View the full request parameters sent to the model'
+                  )}
+                  content={formatRequestParams(other.request_params)}
+                  copyKey='Copy to clipboard'
+                />
+              )}
+              {other.response_text && (
+                <InspectRow
+                  icon={<FileText className='size-3' aria-hidden='true' />}
+                  label={t('Model Output')}
+                  viewLabel={t('View')}
+                  dialogTitle={t('Model Output')}
+                  dialogDescription={t(
+                    'View the full model output text for this request'
+                  )}
+                  content={other.response_text}
+                  copyKey='Copy to clipboard'
+                />
+              )}
+            </DetailSection>
+          )}
+
         {/* Violation fee info */}
         {isViolation && other && (
           <DetailSection
@@ -759,9 +907,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
             icon={<ShieldCheck className='size-3.5' aria-hidden='true' />}
             label={t('Top-up Audit Info')}
           >
-            {topupAuditFields.map((field, idx) => (
+            {topupAuditFields.map((field) => (
               <DetailRow
-                key={idx}
+                key={field.label}
                 label={field.label}
                 value={field.value}
                 mono
@@ -848,9 +996,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
             {operationText != null && (
               <DetailRow label={t('Operation')} value={operationText} />
             )}
-            {loginAuditFields.map((field, idx) => (
+            {loginAuditFields.map((field) => (
               <DetailRow
-                key={idx}
+                key={field.label}
                 label={field.label}
                 value={field.value}
                 mono
@@ -903,13 +1051,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
             value={
               <StatusBadge
                 label={other.reasoning_effort}
-                variant={
-                  other.reasoning_effort === 'high'
-                    ? 'orange'
-                    : other.reasoning_effort === 'medium'
-                      ? 'yellow'
-                      : 'green'
-                }
+                variant={getReasoningEffortVariant(other.reasoning_effort)}
                 size='sm'
                 copyable={false}
               />
@@ -1094,12 +1236,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
             icon={<Settings2 className='size-3.5' aria-hidden='true' />}
             label={`${t('Param Override')} (${other.po.length})`}
           >
-            {other.po.filter(Boolean).map((line, idx) => {
+            {other.po.filter(Boolean).map((line) => {
               const parsed = parseAuditLine(line)
               if (!parsed) return null
               return (
                 <div
-                  key={idx}
+                  key={`${parsed.action}:${parsed.content}`}
                   className='bg-background/60 flex min-w-0 flex-col gap-1.5 rounded border p-2 sm:flex-row sm:items-start sm:gap-2'
                 >
                   <StatusBadge

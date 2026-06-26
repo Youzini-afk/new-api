@@ -833,6 +833,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
+	if info != nil && claudeInfo != nil {
+		info.ResponseText = claudeInfo.ResponseText.String()
+	}
 	if claudeInfo.Usage.PromptTokens == 0 {
 		//上游出错
 	}
@@ -906,6 +909,18 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if claudeInfo.Usage == nil {
 		claudeInfo.Usage = &dto.Usage{}
 	}
+	var responseTextBuilder strings.Builder
+	for _, content := range claudeResponse.Content {
+		if content.Type == "text" {
+			if text := content.GetText(); text != "" {
+				if responseTextBuilder.Len() > 0 {
+					responseTextBuilder.WriteByte('\n')
+				}
+				responseTextBuilder.WriteString(text)
+			}
+		}
+	}
+	info.ResponseText = responseTextBuilder.String()
 	if claudeResponse.Usage != nil {
 		claudeInfo.Usage.PromptTokens = claudeResponse.Usage.InputTokens
 		claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens

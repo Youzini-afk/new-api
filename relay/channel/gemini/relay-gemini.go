@@ -1394,6 +1394,9 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			usage = &dto.Usage{}
 		}
 	}
+	if info != nil {
+		info.ResponseText = responseText.String()
+	}
 
 	return usage, nil
 }
@@ -1556,6 +1559,18 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		}
 		return &usage, nil
 	}
+	var responseTextBuilder strings.Builder
+	for _, candidate := range geminiResponse.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if part.Text != "" {
+				if responseTextBuilder.Len() > 0 {
+					responseTextBuilder.WriteByte('\n')
+				}
+				responseTextBuilder.WriteString(part.Text)
+			}
+		}
+	}
+	info.ResponseText = responseTextBuilder.String()
 	fullTextResponse := responseGeminiChat2OpenAI(c, &geminiResponse)
 	fullTextResponse.Model = info.UpstreamModelName
 	usage := buildUsageFromGeminiMetadata(geminiResponse.UsageMetadata, info.GetEstimatePromptTokens())

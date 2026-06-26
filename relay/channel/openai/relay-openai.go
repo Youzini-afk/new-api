@@ -180,6 +180,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
+	info.ResponseText = responseTextBuilder.String()
 
 	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
 
@@ -226,6 +227,17 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			break
 		}
 	}
+
+	var responseTextBuilder strings.Builder
+	for _, choice := range simpleResponse.Choices {
+		if content := choice.Message.StringContent(); content != "" {
+			if responseTextBuilder.Len() > 0 {
+				responseTextBuilder.WriteByte('\n')
+			}
+			responseTextBuilder.WriteString(content)
+		}
+	}
+	info.ResponseText = responseTextBuilder.String()
 
 	forceFormat := false
 	if info.ChannelSetting.ForceFormat {

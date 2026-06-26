@@ -201,6 +201,7 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
 		logs[i].ChannelName = ""
+		logs[i].UserAgent = ""
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
@@ -209,6 +210,9 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			// Remove operation-audit details (operator/route info), admin-only.
 			delete(otherMap, "audit_info")
 			delete(otherMap, "stream_status")
+			delete(otherMap, "request_params")
+			delete(otherMap, "response_text")
+			delete(otherMap, "response_text_truncated")
 			// Remove governance/error-insight private fields so users never see
 			// upstream error details, rule classification, or analytics
 			// fingerprints in their logs. These are admin-only diagnostic fields
