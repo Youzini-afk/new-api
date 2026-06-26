@@ -481,7 +481,7 @@ func (p *DiscordProvider) PreUserMutation(ctx context.Context, preCtx PreUserMut
 		return &AccessDeniedError{Message: discordGateUserMessage(gateResult, cfg)}
 	}
 	if discordGateNeedsRefreshToken(preCtx) && strings.TrimSpace(preCtx.Token.RefreshToken) == "" {
-		logger.LogError(ctx, "[OAuth-Discord] gate passed but refresh token was not returned; offline_access scope may be missing")
+		logger.LogError(ctx, "[OAuth-Discord] gate passed but refresh token was not returned by Discord")
 		return &AccessDeniedError{Message: discordGateReauthMessage}
 	}
 

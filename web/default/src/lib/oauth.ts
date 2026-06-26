@@ -40,12 +40,9 @@ export function buildDiscordOAuthUrl(clientId: string, state: string): string {
     `${window.location.origin}/oauth/discord`
   )
   url.searchParams.set('response_type', 'code')
-  // offline_access is required so Discord returns a refresh token for manual
-  // gate rechecks after the initial OAuth login/bind flow.
-  url.searchParams.set(
-    'scope',
-    'identify openid guilds.members.read offline_access'
-  )
+  // Discord's authorization code flow returns a refresh token; requesting the
+  // unsupported offline_access scope makes Discord reject the login.
+  url.searchParams.set('scope', 'identify openid guilds.members.read')
   url.searchParams.set('state', state)
   return url.toString()
 }
