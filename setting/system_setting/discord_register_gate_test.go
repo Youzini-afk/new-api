@@ -92,6 +92,13 @@ func TestValidateDiscordRegisterGate_RejectsBanRuleMinJoinHours(t *testing.T) {
 	assert.Contains(t, err.Error(), "ban_groups[0].rules[0].min_join_hours must be 0")
 }
 
+func TestValidateDiscordRegisterGate_AllowsBanRuleWithGuildOnly(t *testing.T) {
+	err := ValidateDiscordRegisterGate(DiscordRegisterGateConfig{
+		BanGroups: []DiscordGateGroup{{Rules: []DiscordGateRule{{GuildID: "banned-guild"}}}},
+	})
+	require.NoError(t, err)
+}
+
 func TestValidateDiscordRegisterGate_RoleMatchRules(t *testing.T) {
 	cfg, err := ParseAndValidateDiscordRegisterGate(`{
 		"groups": [{"rules": [{"guild_id":"g1", "role_ids":["r1"], "role_match":""}]}]

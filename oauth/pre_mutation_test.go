@@ -351,6 +351,28 @@ func TestEvaluateDiscordGate_BanGroupPassBeatsEarlierUnknown(t *testing.T) {
 	assert.False(t, allowed, "ban must block even for an already-passed login")
 }
 
+func TestEvaluateDiscordGate_BanGroupGuildOnly(t *testing.T) {
+	withDiscordMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch discordTestGuildIDFromPath(r.URL.Path) {
+		case "banned-guild":
+			_, _ = w.Write([]byte(discordTestMemberJSON(time.Now(), "any-role")))
+		case "allowed-guild":
+			_, _ = w.Write([]byte(discordTestMemberJSON(time.Now(), "allow-role")))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	cfg := system_setting.DiscordRegisterGateConfig{
+		Groups:    []system_setting.DiscordGateGroup{{Rules: []system_setting.DiscordGateRule{{GuildID: "allowed-guild", RoleIDs: []string{"allow-role"}}}}},
+		BanGroups: []system_setting.DiscordGateGroup{{Rules: []system_setting.DiscordGateRule{{GuildID: "banned-guild"}}}},
+	}
+	system_setting.NormalizeDiscordRegisterGate(&cfg)
+
+	result := evaluateDiscordGate(context.Background(), "access-token", cfg)
+	assert.Equal(t, discordGateDecisionBan, result.Decision)
+	assert.Equal(t, "ban_group_matched", result.Reason)
+}
+
 func TestEvaluateDiscordGate_GroupRulesAllAndGroupsAny(t *testing.T) {
 	withDiscordMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch discordTestGuildIDFromPath(r.URL.Path) {
