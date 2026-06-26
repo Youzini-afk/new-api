@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -42,6 +43,8 @@ import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { getErrorInsightLogs } from '@/features/error-insight/api'
+import type { ErrorInsightLog } from '@/features/error-insight/types'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
@@ -499,12 +502,116 @@ function InspectRow(props: {
   )
 }
 
+function ErrorAuditSection(props: {
+  insight?: ErrorInsightLog
+  isLoading: boolean
+}) {
+  const { t } = useTranslation()
+  const { insight, isLoading } = props
+
+  if (isLoading) {
+    return (
+      <DetailSection
+        icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
+        label={t('Error Audit')}
+      >
+        <p className='text-muted-foreground text-xs'>{t('Loading...')}</p>
+      </DetailSection>
+    )
+  }
+
+  if (!insight) return null
+
+  const ruleText = insight.rule_code || '-'
+  const matchText = insight.rule_matched ? t('Matched') : t('Unmatched')
+  const matchMeta = [insight.match_source, insight.unmatched_reason]
+    .filter(Boolean)
+    .join(' · ')
+  const statusText = [
+    insight.client_status_code
+      ? `${t('Client Status')}: ${insight.client_status_code}`
+      : '',
+    insight.upstream_status_code
+      ? `${t('Upstream Status')}: ${insight.upstream_status_code}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <DetailSection
+      icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
+      label={t('Error Audit')}
+      variant={insight.rule_matched ? 'default' : 'danger'}
+    >
+      <DetailRow
+        label={t('Safe Error')}
+        value={insight.safe_error_message || '-'}
+      />
+      {insight.original_error_message && (
+        <InspectRow
+          icon={<AlertTriangle className='size-3' aria-hidden='true' />}
+          label={t('Original Upstream Error')}
+          viewLabel={t('View')}
+          dialogTitle={t('Original Upstream Error')}
+          dialogDescription={t(
+            'View the masked original upstream error recorded for admin audit'
+          )}
+          content={insight.original_error_message}
+          copyKey='Copy to clipboard'
+        />
+      )}
+      <DetailRow
+        label={t('Matched Rule')}
+        value={
+          <span className='flex flex-wrap items-center gap-1.5'>
+            <StatusBadge
+              label={ruleText}
+              variant={insight.rule_matched ? 'green' : 'orange'}
+              size='sm'
+              copyable={false}
+            />
+            <span className='text-muted-foreground'>{matchText}</span>
+          </span>
+        }
+      />
+      {matchMeta && <DetailRow label={t('Match Source')} value={matchMeta} />}
+      {statusText && (
+        <DetailRow label={t('Error Status')} value={statusText} mono />
+      )}
+      {(insight.original_error_code || insight.original_error_type) && (
+        <DetailRow
+          label={t('Original Error Type')}
+          value={[insight.original_error_code, insight.original_error_type]
+            .filter(Boolean)
+            .join(' · ')}
+          mono
+        />
+      )}
+    </DetailSection>
+  )
+}
+
 export function DetailsDialog(props: DetailsDialogProps) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
   const details = props.log.content ?? ''
   const other = parseLogOther(props.log.other)
   const typeConfig = getLogTypeConfig(props.log.type)
+  const errorInsightQuery = useQuery({
+    queryKey: ['error-insight', 'usage-log-detail', props.log.request_id],
+    queryFn: () =>
+      getErrorInsightLogs({
+        request_id: props.log.request_id,
+        page: 1,
+        page_size: 1,
+      }),
+    enabled: props.isAdmin && props.open && !!props.log.request_id,
+    staleTime: 30_000,
+  })
+  const errorInsightLog = errorInsightQuery.data?.success
+    ? errorInsightQuery.data.data?.logs?.[0]
+    : undefined
 
   const isViolation = isViolationFeeLog(other)
   const isRefund = props.log.type === 6
@@ -822,6 +929,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
           >
             <p className='text-xs wrap-break-word'>{other.reject_reason}</p>
           </DetailSection>
+        )}
+
+        {/* Error insight audit (admin only): safe client error + masked original upstream error. */}
+        {props.isAdmin && props.log.request_id && (
+          <ErrorAuditSection
+            insight={errorInsightLog}
+            isLoading={errorInsightQuery.isLoading}
+          />
         )}
 
         {/* Request inspection (admin only): UA / input params / model output */}

@@ -5404,6 +5404,15 @@
     "Model Output": "Kết quả mô hình",
     "Request Inspection": "Kiểm tra yêu cầu",
     "View the full request parameters sent to the model": "Xem toàn bộ tham số yêu cầu gửi tới mô hình",
-    "View the full model output text for this request": "Xem toàn bộ văn bản đầu ra của mô hình cho yêu cầu này"
+    "View the full model output text for this request": "Xem toàn bộ văn bản đầu ra của mô hình cho yêu cầu này",
+    "Error Audit": "Error Audit",
+    "Original Upstream Error": "Original Upstream Error",
+    "View the masked original upstream error recorded for admin audit": "View the masked original upstream error recorded for admin audit",
+    "Matched Rule": "Matched Rule",
+    "Match Source": "Match Source",
+    "Error Status": "Error Status",
+    "Client Status": "Client Status",
+    "Upstream Status": "Upstream Status",
+    "Original Error Type": "Original Error Type"
   }
 }

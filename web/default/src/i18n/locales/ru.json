@@ -5404,6 +5404,15 @@
     "Model Output": "Вывод модели",
     "Request Inspection": "Инспекция запроса",
     "View the full request parameters sent to the model": "Показать все параметры запроса, отправленные модели",
-    "View the full model output text for this request": "Показать полный текст вывода модели для этого запроса"
+    "View the full model output text for this request": "Показать полный текст вывода модели для этого запроса",
+    "Error Audit": "Error Audit",
+    "Original Upstream Error": "Original Upstream Error",
+    "View the masked original upstream error recorded for admin audit": "View the masked original upstream error recorded for admin audit",
+    "Matched Rule": "Matched Rule",
+    "Match Source": "Match Source",
+    "Error Status": "Error Status",
+    "Client Status": "Client Status",
+    "Upstream Status": "Upstream Status",
+    "Original Error Type": "Original Error Type"
   }
 }

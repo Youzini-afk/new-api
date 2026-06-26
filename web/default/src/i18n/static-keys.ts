@@ -132,6 +132,19 @@ export const STATIC_I18N_KEYS = [
   'Stream interrupted; please retry later.',
   'Internal service error; please retry later.',
 
+  // Usage log error audit
+  'Error Audit',
+  'Original Upstream Error',
+  'View the masked original upstream error recorded for admin audit',
+  'Matched',
+  'Unmatched',
+  'Matched Rule',
+  'Match Source',
+  'Error Status',
+  'Client Status',
+  'Upstream Status',
+  'Original Error Type',
+
   // Log screening UA group rules
   'UA group regex rules (JSON object)',
   'JSON object keyed by group name. Each value is a rule array, for example: { "vip": [{ "pattern": "curl", "message": "..." }] }. Token group is checked first, then user group.',

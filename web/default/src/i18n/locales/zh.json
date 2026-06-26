@@ -2335,7 +2335,7 @@
     "Match models containing this name": "匹配包含此名称的模型",
     "Match models ending with this name": "匹配以此名称结尾的模型",
     "Match models starting with this name": "匹配以此名称开头的模型",
-    "Matched": "已命中",
+    "Matched": "已匹配",
     "Matched Tier": "命中阶梯",
     "Matched at": "命中时间",
     "Matched at {{time}}": "命中时间 {{time}}",
@@ -5404,6 +5404,15 @@
     "Model Output": "模型输出",
     "Request Inspection": "请求审查",
     "View the full request parameters sent to the model": "查看发送给模型的完整请求参数",
-    "View the full model output text for this request": "查看此请求的完整模型输出文本"
+    "View the full model output text for this request": "查看此请求的完整模型输出文本",
+    "Error Audit": "错误审计",
+    "Original Upstream Error": "原始上游报错",
+    "View the masked original upstream error recorded for admin audit": "查看为管理员审计记录的已脱敏原始上游报错",
+    "Matched Rule": "匹配规则",
+    "Match Source": "匹配来源",
+    "Error Status": "错误状态",
+    "Client Status": "客户端状态",
+    "Upstream Status": "上游状态",
+    "Original Error Type": "原始错误类型"
   }
 }

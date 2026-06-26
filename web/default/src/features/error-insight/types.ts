@@ -49,6 +49,7 @@ export interface ErrorInsightFilterParams {
   upstream_status_code?: number
   is_stream?: boolean
   username?: string
+  request_id?: string
   request_path?: string
 }
 

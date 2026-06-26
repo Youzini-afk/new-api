@@ -164,6 +164,7 @@ type ErrorLogsListParams struct {
 	UpstreamStatusCode  int    `form:"upstream_status_code"`
 	IsStream            *bool  `form:"is_stream"`
 	Username            string `form:"username"`
+	RequestId           string `form:"request_id"`
 	RequestPath         string `form:"request_path"`
 }
 
@@ -224,6 +225,9 @@ func applyErrorLogFilters(tx *gorm.DB, params *ErrorLogsListParams) *gorm.DB {
 	}
 	if params.Username != "" {
 		tx = tx.Where("username = ?", params.Username)
+	}
+	if params.RequestId != "" {
+		tx = tx.Where("request_id = ?", params.RequestId)
 	}
 	if params.RequestPath != "" {
 		tx = tx.Where("request_path = ?", params.RequestPath)

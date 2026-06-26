@@ -5404,6 +5404,15 @@
     "Model Output": "モデル出力",
     "Request Inspection": "リクエスト検査",
     "View the full request parameters sent to the model": "モデルに送信された完全なリクエストパラメータを表示",
-    "View the full model output text for this request": "このリクエストの完全なモデル出力テキストを表示"
+    "View the full model output text for this request": "このリクエストの完全なモデル出力テキストを表示",
+    "Error Audit": "Error Audit",
+    "Original Upstream Error": "Original Upstream Error",
+    "View the masked original upstream error recorded for admin audit": "View the masked original upstream error recorded for admin audit",
+    "Matched Rule": "Matched Rule",
+    "Match Source": "Match Source",
+    "Error Status": "Error Status",
+    "Client Status": "Client Status",
+    "Upstream Status": "Upstream Status",
+    "Original Error Type": "Original Error Type"
   }
 }
