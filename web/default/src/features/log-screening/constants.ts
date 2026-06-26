@@ -148,6 +148,7 @@ export const JSON_OPTION_KEYS: readonly (keyof import('./types').LogScreeningOpt
   [
     'SensitivePromptRegexRules',
     'SensitiveUARegexRules',
+    'SensitiveUAGroupRegexRules',
     'log_screening',
     'relay_param_record',
   ] as const

@@ -5390,6 +5390,8 @@
     "Stream interrupted; please retry later.": "Stream interrupted; please retry later.",
     "Internal service error; please retry later.": "Internal service error; please retry later.",
     "Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.": "Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.",
-    "Reset rule {{code}} to default": "Reset rule {{code}} to default"
+    "Reset rule {{code}} to default": "Reset rule {{code}} to default",
+    "UA group regex rules (JSON object)": "UA group regex rules (JSON object)",
+    "JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group.": "JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group."
   }
 }

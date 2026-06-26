@@ -24,6 +24,7 @@ func snapshotSensitiveGlobals(t *testing.T) {
 	t.Helper()
 	origPromptRules := setting.SensitivePromptRegexRules
 	origUARules := setting.SensitiveUARegexRules
+	origUAGroupRules := setting.SensitiveUAGroupRegexRules
 	origUABlocked := setting.UABlockedRegexes
 	origOnEmptyUA := setting.CheckSensitiveOnEmptyUAEnabled
 	origOnEmptyAutoBan := setting.CheckSensitiveOnEmptyUAAutoBanEnabled
@@ -35,6 +36,7 @@ func snapshotSensitiveGlobals(t *testing.T) {
 	t.Cleanup(func() {
 		setting.SensitivePromptRegexRules = origPromptRules
 		setting.SensitiveUARegexRules = origUARules
+		setting.SensitiveUAGroupRegexRules = origUAGroupRules
 		setting.UABlockedRegexes = origUABlocked
 		setting.CheckSensitiveOnEmptyUAEnabled = origOnEmptyUA
 		setting.CheckSensitiveOnEmptyUAAutoBanEnabled = origOnEmptyAutoBan
@@ -173,6 +175,43 @@ func TestMatchSensitiveUARule_RegexHit(t *testing.T) {
 	assert.Equal(t, "rule", hit.MatchMode)
 }
 
+func TestMatchSensitiveUARule_GroupRules(t *testing.T) {
+	snapshotSensitiveGlobals(t)
+	setting.CheckSensitiveOnEmptyUAEnabled = false
+	setting.SensitiveUARegexRules = []setting.SensitiveRegexRule{
+		{Pattern: "curl/.*", RuleName: "global-curl", Message: "global blocked", HTTPStatusCode: 403, ErrorCode: "global_ua_blocked"},
+	}
+	setting.SensitiveUAGroupRegexRules = map[string][]setting.SensitiveRegexRule{
+		"vip": {
+			{Pattern: "vipbot/.*", RuleName: "vip-bot", Message: "vip blocked", HTTPStatusCode: 451, ErrorCode: "vip_ua_blocked"},
+			{Pattern: "curl/.*", RuleName: "vip-curl", Message: "vip curl blocked", HTTPStatusCode: 452, ErrorCode: "vip_curl_blocked"},
+		},
+	}
+
+	hit, ok := MatchSensitiveUARule("Mozilla vipbot/1.0", "vip")
+	require.True(t, ok)
+	require.NotNil(t, hit)
+	assert.Equal(t, "vipbot/.*", hit.Pattern)
+	assert.Equal(t, "vip-bot", hit.RuleName)
+	assert.Equal(t, "vip blocked", hit.Message)
+	assert.Equal(t, 451, hit.HTTPStatusCode)
+	assert.Equal(t, types.ErrorCode("vip_ua_blocked"), hit.ErrorCode)
+	assert.Equal(t, "group_rule", hit.MatchMode)
+
+	hit, ok = MatchSensitiveUARule("Mozilla vipbot/1.0", "default")
+	assert.False(t, ok)
+	assert.Nil(t, hit)
+
+	// Global rules are evaluated before group rules so a global block remains
+	// global even when a group has a more specific replacement rule.
+	hit, ok = MatchSensitiveUARule("Mozilla curl/8.0", "vip")
+	require.True(t, ok)
+	require.NotNil(t, hit)
+	assert.Equal(t, "global-curl", hit.RuleName)
+	assert.Equal(t, "global blocked", hit.Message)
+	assert.Equal(t, "rule", hit.MatchMode)
+}
+
 // TestMatchSensitiveUARule_RegexEmptyMessageFallsBackToUAMessage verifies a UA
 // regex rule with an empty Message leaves the hit Message empty, and
 // BuildSensitiveBlockedError falls back to SensitiveUABlockedMessage (NOT
@@ -278,9 +317,9 @@ func TestBuildSensitiveBlockedError(t *testing.T) {
 
 	// Hit with all fields set.
 	hit := &SensitiveRuleHit{
-		Message:         "custom blocked",
-		ErrorCode:       types.ErrorCode("custom_code"),
-		HTTPStatusCode:  418,
+		Message:        "custom blocked",
+		ErrorCode:      types.ErrorCode("custom_code"),
+		HTTPStatusCode: 418,
 	}
 	status, code, err = BuildSensitiveBlockedError(hit, "fallback msg")
 	assert.Equal(t, 418, status)
@@ -290,9 +329,9 @@ func TestBuildSensitiveBlockedError(t *testing.T) {
 
 	// Hit with empty fields -> fallbacks.
 	hit2 := &SensitiveRuleHit{
-		Message:         "  ",
-		ErrorCode:       "",
-		HTTPStatusCode:  0,
+		Message:        "  ",
+		ErrorCode:      "",
+		HTTPStatusCode: 0,
 	}
 	status, code, err = BuildSensitiveBlockedError(hit2, "fallback msg")
 	assert.Equal(t, setting.DefaultSensitiveStatusCode, status)
@@ -339,6 +378,7 @@ func TestValidateSensitiveRegexOptions(t *testing.T) {
 	validRules := `[{"pattern":"foo","rule_name":"r1","message":"blocked","http_status_code":403,"error_code":"ua_blocked","auto_ban":true}]`
 	require.NoError(t, ValidateSensitiveRegexOptions("SensitivePromptRegexRules", validRules))
 	require.NoError(t, ValidateSensitiveRegexOptions("SensitiveUARegexRules", validRules))
+	require.NoError(t, ValidateSensitiveRegexOptions("SensitiveUAGroupRegexRules", `{"vip":[{"pattern":"foo","auto_ban":true}]}`))
 
 	// Invalid JSON.
 	err = ValidateSensitiveRegexOptions("SensitivePromptRegexRules", "{not-json")
@@ -353,6 +393,10 @@ func TestValidateSensitiveRegexOptions(t *testing.T) {
 	// Invalid regex in rule.
 	err = ValidateSensitiveRegexOptions("SensitivePromptRegexRules", `[{"pattern":"(unclosed"}]`)
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "正则非法")
+	err = ValidateSensitiveRegexOptions("SensitiveUAGroupRegexRules", `{"vip":[{"pattern":"(unclosed"}]}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "分组")
 	assert.Contains(t, err.Error(), "正则非法")
 
 	// Prompt rule with auto_ban but no rule_name.

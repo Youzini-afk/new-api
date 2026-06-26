@@ -73,6 +73,10 @@ var SensitivePromptRegexRules = []SensitiveRegexRule{}
 // SensitiveUARegexRules holds UA interception regex rules.
 var SensitiveUARegexRules = []SensitiveRegexRule{}
 
+// SensitiveUAGroupRegexRules holds additional UA interception rules scoped by
+// user/token group. Existing SensitiveUARegexRules remain global rules.
+var SensitiveUAGroupRegexRules = map[string][]SensitiveRegexRule{}
+
 // SensitivePromptBlockedMessage is the default message returned when a prompt
 // interception rule hits.
 var SensitivePromptBlockedMessage = "请求包含违规内容，已被系统拦截"
@@ -173,6 +177,52 @@ func SensitiveUARegexRulesFromString(raw string) {
 		return
 	}
 	SensitiveUARegexRules = rules
+}
+
+// ParseSensitiveRegexRuleGroups parses a JSON object whose keys are group names
+// and whose values are SensitiveRegexRule arrays. Blank group names are ignored
+// when loading persisted options; validation rejects them before persistence.
+func ParseSensitiveRegexRuleGroups(raw string) (map[string][]SensitiveRegexRule, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return map[string][]SensitiveRegexRule{}, nil
+	}
+	var groups map[string][]SensitiveRegexRule
+	if err := common.UnmarshalJsonStr(raw, &groups); err != nil {
+		return nil, err
+	}
+	normalized := make(map[string][]SensitiveRegexRule, len(groups))
+	for group, rules := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		for i := range rules {
+			rules[i].Pattern = strings.TrimSpace(rules[i].Pattern)
+			rules[i].RuleName = strings.TrimSpace(rules[i].RuleName)
+			rules[i].Message = strings.TrimSpace(rules[i].Message)
+			rules[i].ErrorCode = strings.TrimSpace(rules[i].ErrorCode)
+		}
+		normalized[group] = rules
+	}
+	return normalized, nil
+}
+
+func SensitiveUAGroupRegexRulesToString() string {
+	b, err := common.Marshal(SensitiveUAGroupRegexRules)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+func SensitiveUAGroupRegexRulesFromString(raw string) {
+	groups, err := ParseSensitiveRegexRuleGroups(raw)
+	if err != nil {
+		SensitiveUAGroupRegexRules = map[string][]SensitiveRegexRule{}
+		return
+	}
+	SensitiveUAGroupRegexRules = groups
 }
 
 func splitRegexLines(s string) []string {

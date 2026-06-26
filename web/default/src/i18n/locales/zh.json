@@ -5390,6 +5390,8 @@
     "Stream interrupted; please retry later.": "流式响应中断，请稍后重试。",
     "Internal service error; please retry later.": "服务处理请求时发生错误，请稍后重试。",
     "Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.": "规则码由后端固定。每条规则的返回消息都可编辑；点击重置可恢复默认返回消息。",
-    "Reset rule {{code}} to default": "将规则 {{code}} 重置为默认值"
+    "Reset rule {{code}} to default": "将规则 {{code}} 重置为默认值",
+    "UA group regex rules (JSON object)": "UA 分组正则规则（JSON 对象）",
+    "JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group.": "以分组名为键的 JSON 对象，每个值是一组规则数组，例如：{ \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }。优先匹配令牌分组，其次匹配用户/路由分组。"
   }
 }

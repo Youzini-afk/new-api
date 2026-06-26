@@ -387,6 +387,7 @@ func UpdateOption(c *gin.Context) {
 		"SensitiveUABlockedRegexes",
 		"SensitivePromptRegexRules",
 		"SensitiveUARegexRules",
+		"SensitiveUAGroupRegexRules",
 		"SensitiveEmptyUABlockedHTTPStatusCode",
 		"SensitiveEmptyUABlockedErrorCode":
 		if err := service.ValidateSensitiveRegexOptions(option.Key, option.Value.(string)); err != nil {

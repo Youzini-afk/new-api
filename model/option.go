@@ -179,6 +179,7 @@ func InitOptionMap() {
 	common.OptionMap["SensitiveUABlockedRegexes"] = setting.UABlockedRegexesToString()
 	common.OptionMap["SensitivePromptRegexRules"] = setting.SensitivePromptRegexRulesToString()
 	common.OptionMap["SensitiveUARegexRules"] = setting.SensitiveUARegexRulesToString()
+	common.OptionMap["SensitiveUAGroupRegexRules"] = setting.SensitiveUAGroupRegexRulesToString()
 	common.OptionMap["SensitivePromptBlockedMessage"] = setting.SensitivePromptBlockedMessage
 	common.OptionMap["SensitiveUABlockedMessage"] = setting.SensitiveUABlockedMessage
 	common.OptionMap["SensitiveEmptyUABlockedMessage"] = setting.SensitiveEmptyUABlockedMessage
@@ -666,6 +667,8 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.SensitivePromptRegexRulesFromString(value)
 	case "SensitiveUARegexRules":
 		setting.SensitiveUARegexRulesFromString(value)
+	case "SensitiveUAGroupRegexRules":
+		setting.SensitiveUAGroupRegexRulesFromString(value)
 	case "SensitivePromptBlockedMessage":
 		setting.SensitivePromptBlockedMessage = strings.TrimSpace(value)
 		if setting.SensitivePromptBlockedMessage == "" {

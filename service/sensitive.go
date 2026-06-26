@@ -111,7 +111,7 @@ func MatchSensitivePromptRule(text string) (*SensitiveRuleHit, bool) {
 //   - otherwise returns the first UA regex rule that matches.
 //
 // Returns (nil, false) if nothing matches.
-func MatchSensitiveUARule(userAgent string) (*SensitiveRuleHit, bool) {
+func MatchSensitiveUARule(userAgent string, groups ...string) (*SensitiveRuleHit, bool) {
 	if setting.CheckSensitiveOnEmptyUAEnabled && strings.TrimSpace(userAgent) == "" {
 		emptyUAMessage := strings.TrimSpace(setting.SensitiveEmptyUABlockedMessage)
 		if emptyUAMessage == "" {
@@ -135,7 +135,19 @@ func MatchSensitiveUARule(userAgent string) (*SensitiveRuleHit, bool) {
 			MatchMode:      "empty_ua",
 		}, true
 	}
-	return matchSensitiveRule(userAgent, setting.SensitiveUARegexRules, "rule")
+	if hit, ok := matchSensitiveRule(userAgent, setting.SensitiveUARegexRules, "rule"); ok {
+		return hit, true
+	}
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if hit, ok := matchSensitiveRule(userAgent, setting.SensitiveUAGroupRegexRules[group], "group_rule"); ok {
+			return hit, true
+		}
+	}
+	return nil, false
 }
 
 // matchSensitiveRule is the shared first-match loop for prompt/UA regex rules.
@@ -172,7 +184,7 @@ func matchSensitiveRule(text string, rules []setting.SensitiveRegexRule, matchMo
 		// for UA rules), so a UA rule never accidentally returns the prompt message.
 		return &SensitiveRuleHit{
 			Pattern:        pattern,
-			RuleName:        strings.TrimSpace(rule.RuleName),
+			RuleName:       strings.TrimSpace(rule.RuleName),
 			Message:        msg,
 			ErrorCode:      types.ErrorCode(code),
 			HTTPStatusCode: status,
@@ -236,8 +248,8 @@ func SensitiveRegexContains(text string, patterns []string) (bool, []string) {
 // appropriate relay error.
 type SensitiveBlockedError struct {
 	HTTPStatusCode int
-	ErrorCode       string
-	Message         string
+	ErrorCode      string
+	Message        string
 }
 
 // BuildSensitiveBlockedError derives the (status, code, message) triple to

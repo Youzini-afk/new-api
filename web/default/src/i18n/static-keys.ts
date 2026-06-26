@@ -124,6 +124,10 @@ export const STATIC_I18N_KEYS = [
   'Stream interrupted; please retry later.',
   'Internal service error; please retry later.',
 
+  // Log screening UA group rules
+  'UA group regex rules (JSON object)',
+  'JSON object keyed by group name. Each value is a rule array, for example: { \"vip\": [{ \"pattern\": \"curl\", \"message\": \"...\" }] }. Token group is checked first, then user group.',
+
   // Short-message extra billing mode cards
   'Shadow (Audit Only)',
   'Enforce (Charge)',

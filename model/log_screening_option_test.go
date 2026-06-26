@@ -29,6 +29,7 @@ func TestOptionMap_ContainsSensitiveUAKeys_NotAutoBanSync(t *testing.T) {
 		"SensitiveUABlockedRegexes",
 		"SensitivePromptRegexRules",
 		"SensitiveUARegexRules",
+		"SensitiveUAGroupRegexRules",
 		"SensitivePromptBlockedMessage",
 		"SensitiveUABlockedMessage",
 		"SensitiveEmptyUABlockedMessage",
@@ -69,6 +70,8 @@ func TestUpdateOptionMap_SensitiveKeysRoundtrip(t *testing.T) {
 	origStatus := setting.SensitiveEmptyUABlockedHTTPStatusCode
 	origCode := setting.SensitiveEmptyUABlockedErrorCode
 	origPromptRules := setting.SensitivePromptRegexRules
+	origUARules := setting.SensitiveUARegexRules
+	origUAGroupRules := setting.SensitiveUAGroupRegexRules
 	origUARegexes := setting.UABlockedRegexes
 	t.Cleanup(func() {
 		setting.CheckSensitiveOnUAEnabled = origOnUA
@@ -80,6 +83,8 @@ func TestUpdateOptionMap_SensitiveKeysRoundtrip(t *testing.T) {
 		setting.SensitiveEmptyUABlockedHTTPStatusCode = origStatus
 		setting.SensitiveEmptyUABlockedErrorCode = origCode
 		setting.SensitivePromptRegexRules = origPromptRules
+		setting.SensitiveUARegexRules = origUARules
+		setting.SensitiveUAGroupRegexRules = origUAGroupRules
 		setting.UABlockedRegexes = origUARegexes
 	})
 
@@ -125,6 +130,12 @@ func TestUpdateOptionMap_SensitiveKeysRoundtrip(t *testing.T) {
 	require.Len(t, setting.SensitivePromptRegexRules, 1)
 	assert.Equal(t, "foo", setting.SensitivePromptRegexRules[0].Pattern)
 	assert.True(t, setting.SensitivePromptRegexRules[0].AutoBan)
+	require.NoError(t, UpdateOption("SensitiveUARegexRules", rulesJSON))
+	require.Len(t, setting.SensitiveUARegexRules, 1)
+	assert.Equal(t, "foo", setting.SensitiveUARegexRules[0].Pattern)
+	require.NoError(t, UpdateOption("SensitiveUAGroupRegexRules", `{"vip":[{"pattern":"vipbot/.*","message":"vip blocked"}]}`))
+	require.Len(t, setting.SensitiveUAGroupRegexRules["vip"], 1)
+	assert.Equal(t, "vipbot/.*", setting.SensitiveUAGroupRegexRules["vip"][0].Pattern)
 
 	// UA regex lines roundtrip.
 	require.NoError(t, UpdateOption("SensitiveUABlockedRegexes", "curl/.*\npython/.*"))

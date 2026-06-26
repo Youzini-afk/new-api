@@ -56,6 +56,7 @@ const DEFAULT_OPTION_VALUES: LogScreeningOptionValues = {
   CheckSensitiveOnUAEnabled: false,
   SensitiveUABlockedRegexes: '',
   SensitiveUARegexRules: '[]',
+  SensitiveUAGroupRegexRules: '{}',
   SensitiveUABlockedMessage: '',
   CheckSensitiveOnEmptyUAEnabled: false,
   CheckSensitiveOnEmptyUAAutoBanEnabled: false,
@@ -288,6 +289,17 @@ export function ScreeningSettingsTab() {
               value={String(values.SensitiveUARegexRules ?? '[]')}
               onChange={(v) => setValue('SensitiveUARegexRules', v)}
               error={jsonErrors.SensitiveUARegexRules}
+              mono
+            />
+            <JsonTextarea
+              label={t('UA group regex rules (JSON object)')}
+              description={t(
+                'JSON object keyed by group name. Each value is a rule array, for example: { "vip": [{ "pattern": "curl", "message": "..." }] }. Token group is checked first, then user group.'
+              )}
+              rows={8}
+              value={String(values.SensitiveUAGroupRegexRules ?? '{}')}
+              onChange={(v) => setValue('SensitiveUAGroupRegexRules', v)}
+              error={jsonErrors.SensitiveUAGroupRegexRules}
               mono
             />
             <InputRow

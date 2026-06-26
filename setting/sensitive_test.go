@@ -27,6 +27,7 @@ func TestSensitiveUASettings_Defaults(t *testing.T) {
 	require.Empty(t, UABlockedRegexes)
 	require.Empty(t, SensitivePromptRegexRules)
 	require.Empty(t, SensitiveUARegexRules)
+	require.Empty(t, SensitiveUAGroupRegexRules)
 
 	assert.False(t, ShouldCheckUASensitive(), "UA check is off by default")
 	CheckSensitiveOnUAEnabled = true
@@ -40,9 +41,11 @@ func TestSensitiveUASettings_Defaults(t *testing.T) {
 func TestSensitiveRegexRules_Roundtrip(t *testing.T) {
 	original := SensitivePromptRegexRules
 	originalUA := SensitiveUARegexRules
+	originalUAGroup := SensitiveUAGroupRegexRules
 	t.Cleanup(func() {
 		SensitivePromptRegexRules = original
 		SensitiveUARegexRules = originalUA
+		SensitiveUAGroupRegexRules = originalUAGroup
 	})
 
 	rules := []SensitiveRegexRule{
@@ -78,6 +81,16 @@ func TestSensitiveRegexRules_Roundtrip(t *testing.T) {
 	SensitiveUARegexRulesFromString(raw)
 	require.Len(t, SensitiveUARegexRules, 2)
 	assert.Equal(t, "bar", SensitiveUARegexRules[1].Pattern)
+
+	SensitiveUAGroupRegexRules = map[string][]SensitiveRegexRule{"vip": rules}
+	groupRaw := SensitiveUAGroupRegexRulesToString()
+	require.NotEmpty(t, groupRaw)
+	SensitiveUAGroupRegexRulesFromString(groupRaw)
+	require.Len(t, SensitiveUAGroupRegexRules["vip"], 2)
+	assert.Equal(t, "foo", SensitiveUAGroupRegexRules["vip"][0].Pattern)
+
+	SensitiveUAGroupRegexRulesFromString("{not-json")
+	assert.Empty(t, SensitiveUAGroupRegexRules)
 }
 
 // TestSensitiveRegexRule_NoAutoBanSyncField asserts the ban_sync per-rule flag

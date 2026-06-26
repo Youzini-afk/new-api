@@ -255,6 +255,7 @@ export interface LogScreeningOptionValues {
   CheckSensitiveOnUAEnabled: boolean
   SensitiveUABlockedRegexes: string
   SensitiveUARegexRules: string
+  SensitiveUAGroupRegexRules: string
   SensitiveUABlockedMessage: string
   CheckSensitiveOnEmptyUAEnabled: boolean
   CheckSensitiveOnEmptyUAAutoBanEnabled: boolean

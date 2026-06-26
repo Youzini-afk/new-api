@@ -206,7 +206,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	if !skipSensitiveIntercept && !isRealtime && setting.ShouldCheckUASensitive() {
-		uaHit, uaOK := service.MatchSensitiveUARule(c.Request.UserAgent())
+		uaGroup := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyTokenGroup))
+		if uaGroup == "" {
+			uaGroup = strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyUsingGroup))
+		}
+		uaHit, uaOK := service.MatchSensitiveUARule(c.Request.UserAgent(), uaGroup)
 		if uaOK && uaHit != nil {
 			logger.LogWarn(c, fmt.Sprintf("user agent blocked by regex rule: %s", uaHit.Pattern))
 			status, code, errMsg := service.BuildUABlockedErrorAndRecord(
