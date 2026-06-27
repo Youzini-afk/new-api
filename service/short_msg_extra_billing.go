@@ -7,6 +7,14 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
+type ShortMsgInterceptResult struct {
+	Rule       *operation_setting.ShortMsgExtraBillingRule
+	TextMode   string
+	Group      string
+	Message    string
+	InputToken int
+}
+
 // PrepareShortMsgExtraBillingPreConsume runs the short-message extra billing
 // enforce-mode preflight and returns the potential extra quota that must be
 // reserved before the upstream call. It must be invoked after
@@ -116,6 +124,36 @@ func PrepareShortMsgExtraBillingPreConsume(relayInfo *relaycommon.RelayInfo, est
 	// atomic DecreaseUserQuotaIfEnough path (no BatchUpdate, immediate).
 	relayInfo.RequireCheckedPreConsume = true
 	return rule.FeeQuota
+}
+
+func MatchShortMsgIntercept(relayInfo *relaycommon.RelayInfo, estimatedPromptTokens int) *ShortMsgInterceptResult {
+	if relayInfo == nil || relayInfo.IsStream {
+		return nil
+	}
+	cfg := operation_setting.GetQuotaSetting().ShortMsgExtraBilling
+	if cfg.Mode != operation_setting.ShortMsgExtraBillingModeIntercept {
+		return nil
+	}
+	textMode := shortMsgExtraBillingTextMode(relayInfo)
+	if textMode == "" || relayInfo.TieredBillingSnapshot != nil {
+		return nil
+	}
+	group := resolveShortMsgBillingGroup(relayInfo)
+	rule := firstValidMatchingShortMsgRule(cfg, group, textMode)
+	if rule == nil || rule.Trigger != operation_setting.ShortMsgExtraBillingTriggerInputTokensBelow || estimatedPromptTokens >= rule.Threshold {
+		return nil
+	}
+	message := strings.TrimSpace(cfg.InterceptMessage)
+	if message == "" {
+		message = "当前请求过短，请补充更多内容后重试。"
+	}
+	return &ShortMsgInterceptResult{
+		Rule:       rule,
+		TextMode:   textMode,
+		Group:      group,
+		Message:    message,
+		InputToken: estimatedPromptTokens,
+	}
 }
 
 // firstValidMatchingShortMsgRule returns the first valid rule whose Group and

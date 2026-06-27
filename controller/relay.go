@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -177,6 +178,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
+	if intercept := service.MatchShortMsgIntercept(relayInfo, tokens); intercept != nil {
+		respondShortMsgIntercept(c, relayInfo, intercept)
+		return
+	}
+
 	// Phase 10B: short-message extra billing enforce preflight. When the
 	// request is eligible and a rule matches with estimated prompt tokens
 	// below the threshold, reserve the rule's FeeQuota as potential extra
@@ -279,6 +285,76 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func respondShortMsgIntercept(c *gin.Context, relayInfo *relaycommon.RelayInfo, intercept *service.ShortMsgInterceptResult) {
+	if c == nil || relayInfo == nil || intercept == nil {
+		return
+	}
+	logger.LogInfo(c, fmt.Sprintf("short message intercepted: group=%s rule=%s input_tokens=%d", intercept.Group, intercept.Rule.ID, intercept.InputToken))
+	if relayInfo.IsStream {
+		respondShortMsgInterceptStream(c, relayInfo, intercept.Message)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"id":      fmt.Sprintf("chatcmpl-shortmsg-%s", relayInfo.RequestId),
+		"object":  "chat.completion",
+		"created": time.Now().Unix(),
+		"model":   relayInfo.OriginModelName,
+		"choices": []gin.H{
+			{
+				"index": 0,
+				"message": gin.H{
+					"role":    "assistant",
+					"content": intercept.Message,
+				},
+				"finish_reason": "stop",
+			},
+		},
+		"usage": gin.H{
+			"prompt_tokens":     intercept.InputToken,
+			"completion_tokens": 0,
+			"total_tokens":      intercept.InputToken,
+		},
+	})
+}
+
+func respondShortMsgInterceptStream(c *gin.Context, relayInfo *relaycommon.RelayInfo, message string) {
+	helper.SetEventStreamHeaders(c)
+	created := time.Now().Unix()
+	id := fmt.Sprintf("chatcmpl-shortmsg-%s", relayInfo.RequestId)
+	writeShortMsgStreamChunk(c, gin.H{
+		"id":      id,
+		"object":  "chat.completion.chunk",
+		"created": created,
+		"model":   relayInfo.OriginModelName,
+		"choices": []gin.H{{"index": 0, "delta": gin.H{"role": "assistant"}, "finish_reason": nil}},
+	})
+	writeShortMsgStreamChunk(c, gin.H{
+		"id":      id,
+		"object":  "chat.completion.chunk",
+		"created": created,
+		"model":   relayInfo.OriginModelName,
+		"choices": []gin.H{{"index": 0, "delta": gin.H{"content": message}, "finish_reason": nil}},
+	})
+	writeShortMsgStreamChunk(c, gin.H{
+		"id":      id,
+		"object":  "chat.completion.chunk",
+		"created": created,
+		"model":   relayInfo.OriginModelName,
+		"choices": []gin.H{{"index": 0, "delta": gin.H{}, "finish_reason": "stop"}},
+	})
+	_, _ = fmt.Fprint(c.Writer, "data: [DONE]\n\n")
+	c.Writer.Flush()
+}
+
+func writeShortMsgStreamChunk(c *gin.Context, payload gin.H) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", data)
+	c.Writer.Flush()
 }
 
 var upgrader = websocket.Upgrader{

@@ -47,7 +47,7 @@ import { useUpdateOption } from '../hooks/use-update-option'
 
 const OPTION_KEY = 'quota_setting.short_msg_extra_billing'
 
-type ShortMsgMode = 'off' | 'shadow' | 'enforce'
+type ShortMsgMode = 'off' | 'shadow' | 'enforce' | 'intercept'
 
 type ShortMsgRule = {
   clientKey?: string
@@ -61,10 +61,15 @@ type ShortMsgRule = {
 
 type ShortMsgConfig = {
   mode: ShortMsgMode
+  intercept_message: string
   rules: ShortMsgRule[]
 }
 
-const DEFAULT_CONFIG: ShortMsgConfig = { mode: 'off', rules: [] }
+const DEFAULT_CONFIG: ShortMsgConfig = {
+  mode: 'off',
+  intercept_message: '当前请求过短，请补充更多内容后重试。',
+  rules: [],
+}
 
 const RULE_FORM_ID = 'short-msg-extra-billing-form'
 
@@ -86,7 +91,8 @@ const ruleSchema = z.object({
 
 const configSchema = z
   .object({
-    mode: z.enum(['off', 'shadow', 'enforce']),
+    mode: z.enum(['off', 'shadow', 'enforce', 'intercept']),
+    intercept_message: z.string(),
     rules: z.array(ruleSchema),
   })
   .superRefine((value, ctx) => {
@@ -146,12 +152,18 @@ function parseConfig(raw: string | undefined): ShortMsgConfig {
     const obj = parsed as Record<string, unknown>
     const mode = obj.mode
     const safeMode: ShortMsgMode =
-      mode === 'shadow' || mode === 'enforce' ? mode : 'off'
+      mode === 'shadow' || mode === 'enforce' || mode === 'intercept'
+        ? mode
+        : 'off'
+    const interceptMessage =
+      typeof obj.intercept_message === 'string'
+        ? obj.intercept_message
+        : DEFAULT_CONFIG.intercept_message
     const rawRules = Array.isArray(obj.rules) ? obj.rules : []
     const rules = rawRules
       .map(normalizeRule)
       .filter((r): r is ShortMsgRule => r !== null)
-    return { mode: safeMode, rules }
+    return { mode: safeMode, intercept_message: interceptMessage, rules }
   } catch {
     return { ...DEFAULT_CONFIG }
   }
@@ -160,6 +172,7 @@ function parseConfig(raw: string | undefined): ShortMsgConfig {
 function serializeConfig(config: ShortMsgConfig): string {
   const normalized: ShortMsgConfig = {
     mode: config.mode,
+    intercept_message: config.intercept_message.trim(),
     rules: config.rules.map((rule) => ({
       id: rule.id.trim(),
       group: rule.group.trim(),
@@ -203,6 +216,11 @@ export function ShortMessageBillingSection({
 
   const updateMode = useCallback((mode: ShortMsgMode) => {
     setConfig((prev) => ({ ...prev, mode }))
+    setValidationError('')
+  }, [])
+
+  const updateInterceptMessage = useCallback((message: string) => {
+    setConfig((prev) => ({ ...prev, intercept_message: message }))
     setValidationError('')
   }, [])
 
@@ -302,6 +320,13 @@ export function ShortMessageBillingSection({
         'Reserves potential extra quota before the upstream call and charges it only if usage still matches.',
       destructive: true,
     },
+    {
+      value: 'intercept',
+      titleKey: 'Intercept (No Upstream)',
+      descriptionKey:
+        'Returns your custom message directly when a short prompt matches, without calling upstream.',
+      destructive: true,
+    },
   ]
 
   const rulesDisabled = config.mode === 'off'
@@ -345,7 +370,7 @@ export function ShortMessageBillingSection({
           <RadioGroup
             value={config.mode}
             onValueChange={(value) => updateMode(value as ShortMsgMode)}
-            className='grid gap-3 sm:grid-cols-3'
+            className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'
           >
             {modeOptions.map((option) => {
               const selected = config.mode === option.value
@@ -416,6 +441,41 @@ export function ShortMessageBillingSection({
               </div>
             </AlertDescription>
           </Alert>
+        ) : null}
+
+        {config.mode === 'intercept' ? (
+          <Alert variant='destructive'>
+            <ShieldAlert />
+            <AlertTitle>{t('Intercept mode skips upstream')}</AlertTitle>
+            <AlertDescription className='space-y-1'>
+              <div>
+                {t(
+                  'Matched short prompts will receive the configured message immediately and will not be sent to upstream providers.'
+                )}
+              </div>
+              <div>
+                {t(
+                  'Use this to block channel-test style probes without spending upstream quota.'
+                )}
+              </div>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {config.mode === 'intercept' ? (
+          <div className='grid gap-1.5'>
+            <Label htmlFor='short-msg-intercept-message'>
+              {t('Custom Reply Message')}
+            </Label>
+            <Textarea
+              id='short-msg-intercept-message'
+              value={config.intercept_message}
+              placeholder={t('Please provide more details before retrying.')}
+              rows={3}
+              disabled={rulesDisabled}
+              onChange={(e) => updateInterceptMessage(e.target.value)}
+            />
+          </div>
         ) : null}
 
         {rulesDisabled ? (
@@ -595,6 +655,12 @@ function ShortMsgRuleRow(props: ShortMsgRuleRowProps) {
           />
         </div>
       </div>
+
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'In Intercept mode, threshold still controls when to return the custom message. Extra fee is ignored because upstream is not called.'
+        )}
+      </p>
 
       <div className='flex items-center justify-between gap-2 pt-1'>
         <Label

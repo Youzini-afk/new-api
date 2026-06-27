@@ -39,8 +39,9 @@ type QuotaSetting struct {
 //
 // Any other value is treated as "off" (fail-closed).
 type ShortMsgExtraBillingConfig struct {
-	Mode  string                     `json:"mode"`
-	Rules []ShortMsgExtraBillingRule `json:"rules"`
+	Mode             string                     `json:"mode"`
+	InterceptMessage string                     `json:"intercept_message,omitempty"`
+	Rules            []ShortMsgExtraBillingRule `json:"rules"`
 }
 
 // ShortMsgExtraBillingRule defines a single short-message extra-billing rule.
@@ -59,9 +60,10 @@ type ShortMsgExtraBillingRule struct {
 }
 
 const (
-	ShortMsgExtraBillingModeOff     = "off"
-	ShortMsgExtraBillingModeShadow  = "shadow"
-	ShortMsgExtraBillingModeEnforce = "enforce"
+	ShortMsgExtraBillingModeOff       = "off"
+	ShortMsgExtraBillingModeShadow    = "shadow"
+	ShortMsgExtraBillingModeEnforce   = "enforce"
+	ShortMsgExtraBillingModeIntercept = "intercept"
 
 	// ShortMsgExtraBillingTriggerInputTokensBelow is the only trigger
 	// supported.
@@ -142,7 +144,7 @@ type ShortMsgExtraBillingShadowResult = ShortMsgExtraBillingResult
 // PostTextConsumeQuota via a non-text path and must not be audited by this
 // feature).
 func (r ShortMsgExtraBillingResult) HasReportableInfo() bool {
-	if r.Mode != ShortMsgExtraBillingModeShadow && r.Mode != ShortMsgExtraBillingModeEnforce {
+	if r.Mode != ShortMsgExtraBillingModeShadow && r.Mode != ShortMsgExtraBillingModeEnforce && r.Mode != ShortMsgExtraBillingModeIntercept {
 		return false
 	}
 	if r.MatchedRule == nil {
@@ -184,7 +186,7 @@ func EvaluateShortMsgExtraBilling(
 ) ShortMsgExtraBillingResult {
 	result := ShortMsgExtraBillingResult{Mode: cfg.Mode, TextMode: textMode}
 
-	if cfg.Mode != ShortMsgExtraBillingModeShadow && cfg.Mode != ShortMsgExtraBillingModeEnforce {
+	if cfg.Mode != ShortMsgExtraBillingModeShadow && cfg.Mode != ShortMsgExtraBillingModeEnforce && cfg.Mode != ShortMsgExtraBillingModeIntercept {
 		// Fail-closed: any unknown mode is treated as off.
 		result.Mode = ShortMsgExtraBillingModeOff
 		result.Reason = "mode_disabled"
@@ -403,10 +405,14 @@ func ParseAndValidateShortMsgExtraBillingConfig(raw string) (ShortMsgExtraBillin
 	}
 
 	switch cfg.Mode {
-	case ShortMsgExtraBillingModeOff, ShortMsgExtraBillingModeShadow, ShortMsgExtraBillingModeEnforce:
+	case ShortMsgExtraBillingModeOff, ShortMsgExtraBillingModeShadow, ShortMsgExtraBillingModeEnforce, ShortMsgExtraBillingModeIntercept:
 		// valid mode
 	default:
-		return ShortMsgExtraBillingConfig{}, "", fmt.Errorf("short_msg_extra_billing: mode 必须是 off/shadow/enforce, 实际为 %q", cfg.Mode)
+		return ShortMsgExtraBillingConfig{}, "", fmt.Errorf("short_msg_extra_billing: mode 必须是 off/shadow/enforce/intercept, 实际为 %q", cfg.Mode)
+	}
+	cfg.InterceptMessage = strings.TrimSpace(cfg.InterceptMessage)
+	if cfg.Mode == ShortMsgExtraBillingModeIntercept && cfg.InterceptMessage == "" {
+		cfg.InterceptMessage = "当前请求过短，请补充更多内容后重试。"
 	}
 
 	// Normalize rules. Validation applies regardless of mode: an invalid rule
