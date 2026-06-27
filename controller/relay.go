@@ -133,18 +133,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	needSensitiveCheck := setting.ShouldCheckPromptSensitive() || setting.ShouldCheckUASensitive()
+	needPromptSensitiveCheck := setting.ShouldCheckPromptSensitive()
+	needSensitiveCheck := needPromptSensitiveCheck || setting.ShouldCheckUASensitive()
 	needCountToken := constant.CountToken
-	// Admin/root bypass: never block or auto-ban admin/root users.
-	skipSensitiveIntercept := false
-	if needSensitiveCheck {
-		userRole, roleErr := model.GetUserRoleById(relayInfo.UserId)
-		if roleErr != nil {
-			logger.LogWarn(c, fmt.Sprintf("failed to get user role for sensitive bypass: %v", roleErr))
-		} else if userRole >= common.RoleAdminUser {
-			skipSensitiveIntercept = true
-		}
-	}
+	skipSensitiveIntercept := shouldSkipSensitiveIntercept(c, relayInfo.UserId, needSensitiveCheck)
 	// OpenAIRealtime upgrades the websocket at function entry; its body is not a
 	// plain JSON payload the prompt/UA interceptors can inspect. Skip the
 	// interceptors for realtime in this phase (consistent with gy).
@@ -162,93 +154,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		meta = fastTokenCountMetaForPricing(request)
 	}
 
-	if needSensitiveCheck && meta != nil {
-		// Phase 5C/5D — prompt regex rules first, then basic sensitive words.
-		if setting.ShouldCheckPromptSensitive() {
-			hit, ok := service.MatchSensitivePromptRule(meta.CombineText)
-			if ok && hit != nil {
-				logger.LogWarn(c, fmt.Sprintf("prompt blocked by regex rule: %s", hit.Pattern))
-				status, code, errMsg := service.BuildPromptBlockedErrorAndRecord(
-					&promptBlockRecordContext{ctx: c},
-					hit,
-					setting.SensitivePromptBlockedMessage,
-					"rule",
-					hit.Pattern,
-				)
-				newAPIError = types.NewErrorWithStatusCode(
-					errMsg,
-					code,
-					status,
-					types.ErrOptionWithSkipRetry(),
-				)
-				return
-			}
-
-			contains, words := service.CheckSensitiveText(meta.CombineText)
-			if contains {
-				logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
-				status, code, errMsg := service.BuildPromptBlockedErrorAndRecord(
-					&promptBlockRecordContext{ctx: c},
-					nil,
-					setting.SensitivePromptBlockedMessage,
-					"basic",
-					strings.Join(words, ","),
-				)
-				newAPIError = types.NewErrorWithStatusCode(
-					errMsg,
-					code,
-					status,
-					types.ErrOptionWithSkipRetry(),
-				)
-				return
-			}
-		}
-	}
-
-	if !skipSensitiveIntercept && !isRealtime && setting.ShouldCheckUASensitive() {
-		uaGroup := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyTokenGroup))
-		if uaGroup == "" {
-			uaGroup = strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyUsingGroup))
-		}
-		uaHit, uaOK := service.MatchSensitiveUARule(c.Request.UserAgent(), uaGroup)
-		if uaOK && uaHit != nil {
-			logger.LogWarn(c, fmt.Sprintf("user agent blocked by regex rule: %s", uaHit.Pattern))
-			status, code, errMsg := service.BuildUABlockedErrorAndRecord(
-				&uaBlockRecordContext{ctx: c},
-				uaHit,
-			)
-			newAPIError = types.NewErrorWithStatusCode(
-				errMsg,
-				code,
-				status,
-				types.ErrOptionWithSkipRetry(),
-			)
-			return
-		}
-
-		contains, hits := service.CheckSensitiveUA(c.Request.UserAgent())
-		if contains {
-			logger.LogWarn(c, fmt.Sprintf("user agent blocked by regex rules: %s", strings.Join(hits, ", ")))
-			// Build a synthetic hit so the record+auto-ban path is uniform. The
-			// line-regex block never auto-bans (AutoBan=false).
-			syntheticHit := &service.SensitiveRuleHit{
-				Pattern:        strings.Join(hits, ","),
-				Message:        setting.SensitiveUABlockedMessage,
-				ErrorCode:      types.ErrorCodeSensitiveWordsDetected,
-				HTTPStatusCode: http.StatusBadRequest,
-				AutoBan:        false,
-				MatchMode:      "blocked_regex",
-			}
-			status, code, errMsg := service.BuildUABlockedErrorAndRecord(
-				&uaBlockRecordContext{ctx: c},
-				syntheticHit,
-			)
-			newAPIError = types.NewErrorWithStatusCode(
-				errMsg,
-				code,
-				status,
-				types.ErrOptionWithSkipRetry(),
-			)
+	if needSensitiveCheck {
+		newAPIError = runSensitiveIntercept(c, meta, needPromptSensitiveCheck)
+		if newAPIError != nil {
 			return
 		}
 	}
@@ -500,6 +408,95 @@ func (u *uaBlockRecordContext) RequestParamsRaw() string {
 	return service.BuildRawRequestParamsForInterceptLog(u.ctx, nil)
 }
 
+func shouldSkipSensitiveIntercept(c *gin.Context, userId int, enabled bool) bool {
+	if !enabled {
+		return true
+	}
+	userRole, roleErr := model.GetUserRoleById(userId)
+	if roleErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("failed to get user role for sensitive bypass: %v", roleErr))
+		return false
+	}
+	return userRole >= common.RoleAdminUser
+}
+
+func runSensitiveIntercept(c *gin.Context, meta *types.TokenCountMeta, checkPrompt bool) *types.NewAPIError {
+	if checkPrompt && meta != nil {
+		hit, ok := service.MatchSensitivePromptRule(meta.CombineText)
+		if ok && hit != nil {
+			logger.LogWarn(c, fmt.Sprintf("prompt blocked by regex rule: %s", hit.Pattern))
+			status, code, errMsg := service.BuildPromptBlockedErrorAndRecord(
+				&promptBlockRecordContext{ctx: c},
+				hit,
+				setting.SensitivePromptBlockedMessage,
+				"rule",
+				hit.Pattern,
+			)
+			return types.NewErrorWithStatusCode(errMsg, code, status, types.ErrOptionWithSkipRetry())
+		}
+
+		contains, words := service.CheckSensitiveText(meta.CombineText)
+		if contains {
+			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
+			status, code, errMsg := service.BuildPromptBlockedErrorAndRecord(
+				&promptBlockRecordContext{ctx: c},
+				nil,
+				setting.SensitivePromptBlockedMessage,
+				"basic",
+				strings.Join(words, ","),
+			)
+			return types.NewErrorWithStatusCode(errMsg, code, status, types.ErrOptionWithSkipRetry())
+		}
+	}
+
+	if !setting.ShouldCheckUASensitive() {
+		return nil
+	}
+	uaGroup := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyTokenGroup))
+	if uaGroup == "" {
+		uaGroup = strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyUsingGroup))
+	}
+	uaHit, uaOK := service.MatchSensitiveUARule(c.Request.UserAgent(), uaGroup)
+	if uaOK && uaHit != nil {
+		logger.LogWarn(c, fmt.Sprintf("user agent blocked by regex rule: %s", uaHit.Pattern))
+		status, code, errMsg := service.BuildUABlockedErrorAndRecord(&uaBlockRecordContext{ctx: c}, uaHit)
+		return types.NewErrorWithStatusCode(errMsg, code, status, types.ErrOptionWithSkipRetry())
+	}
+
+	contains, hits := service.CheckSensitiveUA(c.Request.UserAgent())
+	if contains {
+		logger.LogWarn(c, fmt.Sprintf("user agent blocked by regex rules: %s", strings.Join(hits, ", ")))
+		syntheticHit := &service.SensitiveRuleHit{
+			Pattern:        strings.Join(hits, ","),
+			Message:        setting.SensitiveUABlockedMessage,
+			ErrorCode:      types.ErrorCodeSensitiveWordsDetected,
+			HTTPStatusCode: http.StatusBadRequest,
+			AutoBan:        false,
+			MatchMode:      "blocked_regex",
+		}
+		status, code, errMsg := service.BuildUABlockedErrorAndRecord(&uaBlockRecordContext{ctx: c}, syntheticHit)
+		return types.NewErrorWithStatusCode(errMsg, code, status, types.ErrOptionWithSkipRetry())
+	}
+	return nil
+}
+
+func taskErrorFromNewAPIError(err *types.NewAPIError) *dto.TaskError {
+	if err == nil {
+		return nil
+	}
+	statusCode := err.StatusCode
+	if statusCode == 0 {
+		statusCode = http.StatusBadRequest
+	}
+	return &dto.TaskError{
+		Code:       string(err.GetErrorCode()),
+		Message:    err.Error(),
+		StatusCode: statusCode,
+		LocalError: true,
+		Error:      err,
+	}
+}
+
 func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
 	useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
@@ -737,6 +734,17 @@ func RelayTask(c *gin.Context) {
 			StatusCode: http.StatusInternalServerError,
 		})
 		return
+	}
+	taskSensitiveCheck := setting.ShouldCheckPromptSensitive() || setting.ShouldCheckUASensitive()
+	if !shouldSkipSensitiveIntercept(c, relayInfo.UserId, taskSensitiveCheck) {
+		var meta *types.TokenCountMeta
+		if setting.ShouldCheckPromptSensitive() {
+			meta = &types.TokenCountMeta{CombineText: service.BuildRawRequestParamsForInterceptLog(c, nil)}
+		}
+		if sensitiveErr := runSensitiveIntercept(c, meta, setting.ShouldCheckPromptSensitive()); sensitiveErr != nil {
+			respondTaskError(c, taskErrorFromNewAPIError(sensitiveErr))
+			return
+		}
 	}
 
 	if taskErr := relay.ResolveOriginTask(c, relayInfo); taskErr != nil {

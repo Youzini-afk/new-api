@@ -177,6 +177,7 @@ export interface PromptBlockLogListParams {
   user_id?: number
   username?: string
   ip?: string
+  user_agent?: string
   rule_pattern?: string
   request_path?: string
   error_code?: string

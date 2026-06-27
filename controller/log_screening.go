@@ -17,6 +17,16 @@ type logScreeningRunRequest struct {
 	Kind string `json:"kind"`
 }
 
+func firstNonEmptyQuery(c *gin.Context, keys ...string) string {
+	for _, key := range keys {
+		value := strings.TrimSpace(c.Query(key))
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // RunLogScreening triggers a real log-screening pass: it reads configured
 // rules, aggregates LOG_DB logs, writes screening records, and returns a
 // summary. It does not perform banning and does not call ban_sync.
@@ -93,6 +103,7 @@ func ListUABlockLogs(c *gin.Context) {
 		UserId:        userId,
 		Username:      strings.TrimSpace(c.Query("username")),
 		IP:            strings.TrimSpace(c.Query("ip")),
+		UserAgent:     strings.TrimSpace(firstNonEmptyQuery(c, "user_agent", "ua")),
 		RulePattern:   strings.TrimSpace(c.Query("rule_pattern")),
 		RequestPath:   strings.TrimSpace(c.Query("request_path")),
 		ErrorCode:     strings.TrimSpace(c.Query("error_code")),

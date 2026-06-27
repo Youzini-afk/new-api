@@ -63,6 +63,7 @@ type UABlockLogListFilter struct {
 	UserId        int
 	Username      string
 	IP            string
+	UserAgent     string
 	RulePattern   string
 	RequestPath   string
 	ErrorCode     string
@@ -189,6 +190,9 @@ func ListUABlockLogs(ctx context.Context, filter UABlockLogListFilter, startIdx 
 	}
 	if strings.TrimSpace(filter.IP) != "" {
 		query = query.Where("ip = ?", strings.TrimSpace(filter.IP))
+	}
+	if strings.TrimSpace(filter.UserAgent) != "" {
+		query = query.Where("user_agent LIKE ?", "%"+strings.TrimSpace(filter.UserAgent)+"%")
 	}
 	if strings.TrimSpace(filter.RulePattern) != "" {
 		query = query.Where("rule_pattern LIKE ?", "%"+strings.TrimSpace(filter.RulePattern)+"%")

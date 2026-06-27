@@ -17,8 +17,7 @@ import (
 // but model → service would cycle since service → model).
 //
 // Owned keys:
-//   - "SensitiveWords", "SensitiveUABlockedRegexes": newline-joined regexes;
-//     each line must compile.
+//   - "SensitiveUABlockedRegexes": newline-joined regexes; each line must compile.
 //   - "SensitivePromptRegexRules", "SensitiveUARegexRules": JSON arrays of
 //     SensitiveRegexRule; each rule needs a compilable pattern. For prompt
 //     rules, a rule with AutoBan=true must set a rule_name.
@@ -30,7 +29,7 @@ import (
 // model.UpdateOption and never reach this function.
 func ValidateSensitiveRegexOptions(key string, value string) error {
 	switch key {
-	case "SensitiveWords", "SensitiveUABlockedRegexes":
+	case "SensitiveUABlockedRegexes":
 		if rule, err := ValidateRegexLines(value); err != nil {
 			if rule == "" {
 				rule = firstNonEmptyLine(value)

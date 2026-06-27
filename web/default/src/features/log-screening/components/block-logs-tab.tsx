@@ -93,6 +93,7 @@ interface BlockLogsTabProps {
 interface BlockLogFilter {
   username: string
   ip: string
+  user_agent: string
   rule_pattern: string
   request_path: string
   error_code: string
@@ -104,6 +105,7 @@ interface BlockLogFilter {
 const EMPTY_FILTER: BlockLogFilter = {
   username: '',
   ip: '',
+  user_agent: '',
   rule_pattern: '',
   request_path: '',
   error_code: '',
@@ -132,6 +134,7 @@ export function BlockLogsTab(props: BlockLogsTabProps) {
       page_size: pageSize,
       username: filter.username.trim() || undefined,
       ip: filter.ip.trim() || undefined,
+      user_agent: isUa ? filter.user_agent.trim() || undefined : undefined,
       rule_pattern: filter.rule_pattern.trim() || undefined,
       request_path: filter.request_path.trim() || undefined,
       error_code: filter.error_code.trim() || undefined,
@@ -279,6 +282,13 @@ export function BlockLogsTab(props: BlockLogsTabProps) {
             onChange={(v) => setFilter({ ...filter, ip: v })}
             placeholder={t('IP')}
           />
+          {isUa && (
+            <FilterInput
+              value={filter.user_agent}
+              onChange={(v) => setFilter({ ...filter, user_agent: v })}
+              placeholder={t('User Agent')}
+            />
+          )}
           <FilterInput
             value={filter.rule_pattern}
             onChange={(v) => setFilter({ ...filter, rule_pattern: v })}

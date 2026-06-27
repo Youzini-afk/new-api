@@ -367,8 +367,9 @@ func TestSensitiveRuleHit_NoAutoBanSyncField(t *testing.T) {
 // TestValidateSensitiveRegexOptions covers the validator for all owned keys.
 func TestValidateSensitiveRegexOptions(t *testing.T) {
 	// Newline-joined regexes: valid.
-	require.NoError(t, ValidateSensitiveRegexOptions("SensitiveWords", "foo\nbar"))
 	require.NoError(t, ValidateSensitiveRegexOptions("SensitiveUABlockedRegexes", "curl/.*\npython/.*"))
+	// SensitiveWords are plain AC keywords, not regexes.
+	require.NoError(t, ValidateSensitiveRegexOptions("SensitiveWords", "C++\n[bracket"))
 	// Invalid regex line.
 	err := ValidateSensitiveRegexOptions("SensitiveUABlockedRegexes", "good\n(unclosed\n")
 	require.Error(t, err)
