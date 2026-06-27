@@ -21,7 +21,6 @@ For commercial licensing, please contact support@quantumnous.com
  */
 import { useTranslation } from 'react-i18next'
 import {
-  AlertTriangle,
   CheckCircle2,
   Hash,
   Radio,
@@ -77,13 +76,6 @@ export function SummaryCards(props: SummaryCardsProps) {
   const cards: CardConfig[] = data
     ? [
           {
-            key: 'total',
-            labelKey: 'Failed Errors',
-            icon: AlertTriangle,
-            value: formatCompactNumber(data.total_count),
-            tone: 'peach',
-          },
-          {
             key: 'unmatched',
             labelKey: 'Unmatched Errors',
             icon: XCircle,
@@ -124,7 +116,7 @@ export function SummaryCards(props: SummaryCardsProps) {
   return (
     <div className='grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3'>
       {isLoading
-        ? Array.from({ length: 6 }).map((_, index) => (
+        ? Array.from({ length: 5 }).map((_, index) => (
             <Card
               key={index}
               className='bg-card/90 overflow-hidden border-0 shadow-sm'

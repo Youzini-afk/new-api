@@ -758,7 +758,6 @@ export const STATIC_I18N_KEYS = [
   'Signatures',
   'Logs',
   'Total Errors',
-  'Failed Errors',
   'Rule Matched',
   'Unmatched',
   'Unmatched Errors',
