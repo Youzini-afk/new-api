@@ -23,7 +23,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Loader2, Trash2 } from 'lucide-react'
+import { Eye, Loader2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -50,6 +50,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 
 interface SignaturesTableProps {
   params: ErrorInsightFilterParams
+  onViewSampleLogs?: (signature: string) => void
 }
 
 export function SignaturesTable(props: SignaturesTableProps) {
@@ -111,7 +112,22 @@ export function SignaturesTable(props: SignaturesTableProps) {
   const items = signatures ?? []
 
   return (
-    <div className='bg-card ring-foreground/10 flex h-full min-h-0 flex-col overflow-hidden rounded-xl ring-1'>
+    <div className='bg-card flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border-0 shadow-sm'>
+      <div className='flex flex-wrap items-start justify-between gap-3 px-6 py-5'>
+        <div className='space-y-1'>
+          <h2 className='text-xl font-bold'>
+            {t('Top Unmatched Error Signatures')}
+          </h2>
+          <p className='text-primary/70 text-sm'>
+            {t(
+              'Sorted by occurrences, affected users, and latest seen time. Click to view sample logs.'
+            )}
+          </p>
+        </div>
+        <Badge className='bg-amber-500/20 text-amber-500 hover:bg-amber-500/20'>
+          {t('Default unmatched only')}
+        </Badge>
+      </div>
       <div className='min-h-0 flex-1 overflow-auto'>
         {error ? (
           <ErrorState
@@ -133,27 +149,27 @@ export function SignaturesTable(props: SignaturesTableProps) {
           />
         ) : (
           <Table>
-            <TableHeader className='bg-muted/50 sticky top-0 z-10'>
+            <TableHeader className='bg-muted/60 sticky top-0 z-10'>
               <TableRow>
-                <TableHead className='min-w-[260px]'>
+                <TableHead className='min-w-[300px] px-6 py-4 text-sm font-semibold'>
                   {t('Signature')}
                 </TableHead>
-                <TableHead className='w-[140px]'>{t('Rule Code')}</TableHead>
-                <TableHead className='w-[160px]'>
-                  {t('Unmatched Reason')}
+                <TableHead className='w-[190px] py-4 text-sm font-semibold'>
+                  {t('Current Category')}
                 </TableHead>
-                <TableHead className='w-[110px] text-right'>
+                <TableHead className='w-[260px] py-4 text-sm font-semibold'>
+                  {t('Reason')}
+                </TableHead>
+                <TableHead className='w-[110px] py-4 text-right text-sm font-semibold'>
                   {t('Count')}
                 </TableHead>
-                <TableHead className='w-[120px] text-right'>
-                  {t('Affected Users')}
+                <TableHead className='w-[150px] py-4 text-center text-sm font-semibold'>
+                  {t('Impact')}
                 </TableHead>
-                <TableHead className='w-[130px] text-right'>
-                  {t('Affected Channels')}
+                <TableHead className='w-[190px] py-4 text-sm font-semibold'>
+                  {t('Latest Seen')}
                 </TableHead>
-                <TableHead className='w-[160px]'>{t('First Seen')}</TableHead>
-                <TableHead className='w-[160px]'>{t('Latest At')}</TableHead>
-                <TableHead className='w-[80px] text-right'>
+                <TableHead className='w-[100px] py-4 text-right text-sm font-semibold'>
                   {t('Actions')}
                 </TableHead>
               </TableRow>
@@ -162,16 +178,22 @@ export function SignaturesTable(props: SignaturesTableProps) {
               {items.map((signature) => {
                 const isMatched = Boolean(signature.rule_code)
                 return (
-                  <TableRow key={signature.normalized_signature}>
-                    <TableCell>
+                  <TableRow
+                    key={signature.normalized_signature}
+                    className='border-dashed'
+                  >
+                    <TableCell className='px-6 py-5'>
                       <div className='flex flex-col gap-1'>
-                        <span className='line-clamp-2 text-sm font-medium'>
-                          {signature.normalized_message || '-'}
+                        <span className='max-w-[280px] truncate font-mono text-sm'>
+                          {signature.normalized_signature}
                         </span>
-                        <div className='flex items-center gap-1.5'>
-                          <code className='bg-muted text-muted-foreground max-w-[260px] truncate rounded px-1.5 py-0.5 font-mono text-xs'>
-                            {signature.normalized_signature}
-                          </code>
+                        <div className='flex items-center gap-2'>
+                          <span className='text-primary/70 max-w-[260px] truncate text-sm'>
+                            {signature.error_source || '-'}
+                            {signature.error_stage
+                              ? `/${signature.error_stage}`
+                              : ''}
+                          </span>
                           <CopyButton
                             value={signature.normalized_signature}
                             size='icon'
@@ -181,44 +203,60 @@ export function SignaturesTable(props: SignaturesTableProps) {
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className='py-5'>
                       {isMatched ? (
-                        <Badge variant='secondary'>
+                        <Badge variant='secondary' className='font-semibold'>
                           {signature.rule_code}
                         </Badge>
                       ) : (
-                        <span className='text-muted-foreground text-xs'>
-                          {t('None')}
+                        <span className='font-semibold'>
+                          {signature.normalized_message || '-'}
                         </span>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className='py-5'>
                       {signature.unmatched_reason ? (
-                        <span className='text-muted-foreground text-xs'>
+                        <span className='font-semibold'>
                           {signature.unmatched_reason}
                         </span>
                       ) : (
-                        <span className='text-muted-foreground text-xs'>
+                        <span className='text-muted-foreground'>
                           -
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className='text-right font-medium tabular-nums'>
+                    <TableCell className='py-5 text-right text-lg font-bold tabular-nums'>
                       {formatCompactNumber(signature.count)}
                     </TableCell>
-                    <TableCell className='text-right tabular-nums'>
-                      {formatCompactNumber(signature.affected_users)}
+                    <TableCell className='py-5 text-center'>
+                      <div className='flex flex-col gap-0.5 font-semibold'>
+                        <span>
+                          {t('User')}{' '}
+                          {formatCompactNumber(signature.affected_users)}
+                        </span>
+                        <span className='text-primary/70 text-sm font-medium'>
+                          {t('Channel')}{' '}
+                          {formatCompactNumber(signature.affected_channels)}
+                        </span>
+                      </div>
                     </TableCell>
-                    <TableCell className='text-right tabular-nums'>
-                      {formatCompactNumber(signature.affected_channels)}
-                    </TableCell>
-                    <TableCell className='text-muted-foreground text-xs'>
-                      {formatTimestamp(signature.first_seen_at)}
-                    </TableCell>
-                    <TableCell className='text-muted-foreground text-xs'>
+                    <TableCell className='py-5 text-base font-semibold whitespace-nowrap'>
                       {formatTimestamp(signature.latest_at)}
                     </TableCell>
-                    <TableCell className='text-right'>
+                    <TableCell className='py-5 text-right'>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='text-muted-foreground hover:text-foreground size-8'
+                        aria-label={t('View Details')}
+                        onClick={() => {
+                          props.onViewSampleLogs?.(
+                            signature.normalized_signature
+                          )
+                        }}
+                      >
+                        <Eye className='size-4' />
+                      </Button>
                       <Tooltip>
                         <TooltipTrigger
                           render={

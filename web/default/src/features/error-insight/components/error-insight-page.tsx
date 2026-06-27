@@ -54,11 +54,12 @@ export function ErrorInsightPage() {
   )
   const [filters, setFilters] = useState<FiltersValue>({
     timeRange: 86400,
-    ruleMatched: 'all',
+    ruleMatched: 'unmatched',
     ruleCode: '',
     unmatchedReason: '',
     modelName: '',
   })
+  const [selectedSignature, setSelectedSignature] = useState('')
 
   const buildParams = useCallback(
     (value: FiltersValue): ErrorInsightFilterParams => {
@@ -80,6 +81,13 @@ export function ErrorInsightPage() {
   )
 
   const apiParams = useMemo(() => buildParams(filters), [filters, buildParams])
+  const logsParams = useMemo(
+    () =>
+      selectedSignature
+        ? { ...apiParams, normalized_signature: selectedSignature }
+        : apiParams,
+    [apiParams, selectedSignature]
+  )
 
   const {
     data: summary,
@@ -102,6 +110,11 @@ export function ErrorInsightPage() {
     setActiveTab(tab)
   }, [])
 
+  const handleViewSignatureLogs = useCallback((signature: string) => {
+    setSelectedSignature(signature)
+    setActiveTab('logs')
+  }, [])
+
   return (
     <SectionPageLayout fixedContent>
       <SectionPageLayout.Title>
@@ -111,7 +124,7 @@ export function ErrorInsightPage() {
         </span>
       </SectionPageLayout.Title>
       <SectionPageLayout.Content>
-        <div className='flex h-full min-h-0 flex-col gap-4'>
+        <div className='flex h-full min-h-0 flex-col gap-7'>
           <SummaryCards
             data={summary}
             isLoading={summaryLoading}
@@ -124,9 +137,9 @@ export function ErrorInsightPage() {
           <Tabs
             value={activeTab}
             onValueChange={handleTabChange}
-            className='flex min-h-0 flex-1 flex-col gap-3'
+            className='flex min-h-0 flex-1 flex-col gap-4'
           >
-            <TabsList className='w-full justify-start sm:w-auto'>
+            <TabsList className='bg-card/70 ring-foreground/10 w-full justify-start rounded-xl ring-1 sm:w-auto'>
               {ERROR_INSIGHT_TABS.map((tab) => (
                 <TabsTrigger key={tab.id} value={tab.id}>
                   {t(tab.titleKey)}
@@ -136,9 +149,12 @@ export function ErrorInsightPage() {
 
             <div className='min-h-0 flex-1'>
               {activeTab === 'signatures' ? (
-                <SignaturesTable params={apiParams} />
+                <SignaturesTable
+                  params={apiParams}
+                  onViewSampleLogs={handleViewSignatureLogs}
+                />
               ) : (
-                <LogsTable params={apiParams} />
+                <LogsTable params={logsParams} />
               )}
             </div>
           </Tabs>

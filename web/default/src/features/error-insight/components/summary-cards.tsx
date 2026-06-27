@@ -22,10 +22,9 @@ For commercial licensing, please contact support@quantumnous.com
 import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle,
-  CheckCircle2,
   Hash,
+  PieChart,
   Radio,
-  Tag,
   Users,
   XCircle,
 } from 'lucide-react'
@@ -50,14 +49,14 @@ interface CardConfig {
   value: string
   hintKey?: string
   hintValue?: string
-  tone: 'neutral' | 'good' | 'warn' | 'bad'
+  tone: 'peach' | 'amber' | 'mint' | 'neutral'
 }
 
 const TONE_STYLES: Record<CardConfig['tone'], string> = {
-  neutral: 'text-muted-foreground bg-muted/40',
-  good: 'text-emerald-600 bg-emerald-500/10 dark:text-emerald-400',
-  warn: 'text-amber-600 bg-amber-500/10 dark:text-amber-400',
-  bad: 'text-rose-600 bg-rose-500/10 dark:text-rose-400',
+  peach: 'bg-orange-100 text-orange-500 dark:bg-orange-100 dark:text-orange-500',
+  amber: 'bg-amber-100 text-amber-500 dark:bg-amber-100 dark:text-amber-500',
+  mint: 'bg-cyan-100 text-cyan-500 dark:bg-cyan-100 dark:text-cyan-500',
+  neutral: 'bg-muted/60 text-muted-foreground',
 }
 
 export function SummaryCards(props: SummaryCardsProps) {
@@ -76,94 +75,95 @@ export function SummaryCards(props: SummaryCardsProps) {
   }
 
   const cards: CardConfig[] = data
-    ? [
-        {
-          key: 'total',
-          labelKey: 'Total Errors',
-          icon: AlertTriangle,
-          value: formatCompactNumber(data.total_count),
-          tone: 'neutral',
-        },
-        {
-          key: 'matched',
-          labelKey: 'Rule Matched',
-          icon: CheckCircle2,
-          value: formatCompactNumber(data.rule_matched_count),
-          tone: 'good',
-        },
-        {
-          key: 'unmatched',
-          labelKey: 'Unmatched',
-          icon: XCircle,
-          value: formatCompactNumber(data.unmatched_count),
-          tone: 'bad',
-        },
-        {
-          key: 'signatures',
-          labelKey: 'Distinct Signatures',
-          icon: Hash,
-          value: formatCompactNumber(data.distinct_signatures),
-          tone: 'neutral',
-        },
-        {
-          key: 'users',
-          labelKey: 'Affected Users',
-          icon: Users,
-          value: formatCompactNumber(data.affected_users),
-          tone: 'warn',
-        },
-        {
-          key: 'channels',
-          labelKey: 'Affected Channels',
-          icon: Radio,
-          value: formatCompactNumber(data.affected_channels),
-          tone: 'warn',
-        },
-        {
-          key: 'top-rule',
-          labelKey: 'Top Rule',
-          icon: Tag,
-          value: data.top_rule_code || '-',
-          hintKey: 'Count',
-          hintValue: data.top_rule_code
-            ? formatCompactNumber(data.top_rule_code_count)
-            : '-',
-          tone: 'neutral',
-        },
-      ]
+    ? (() => {
+        const unmatchedRate = data.total_count
+          ? `${((data.unmatched_count / data.total_count) * 100).toFixed(1)}%`
+          : '0.0%'
+
+        return [
+          {
+            key: 'total',
+            labelKey: 'Failed Errors',
+            icon: AlertTriangle,
+            value: formatCompactNumber(data.total_count),
+            tone: 'peach',
+          },
+          {
+            key: 'unmatched',
+            labelKey: 'Unmatched Errors',
+            icon: XCircle,
+            value: formatCompactNumber(data.unmatched_count),
+            tone: 'amber',
+          },
+          {
+            key: 'unmatched-rate',
+            labelKey: 'Unmatched Rate',
+            icon: PieChart,
+            value: unmatchedRate,
+            tone: 'mint',
+          },
+          {
+            key: 'signatures',
+            labelKey: 'Error Signatures',
+            icon: Hash,
+            value: formatCompactNumber(data.distinct_signatures),
+            tone: 'neutral',
+          },
+          {
+            key: 'users',
+            labelKey: 'Affected Users',
+            icon: Users,
+            value: formatCompactNumber(data.affected_users),
+            tone: 'neutral',
+          },
+          {
+            key: 'channels',
+            labelKey: 'Affected Channels',
+            icon: Radio,
+            value: formatCompactNumber(data.affected_channels),
+            tone: 'neutral',
+          },
+        ]
+      })()
     : []
 
   return (
-    <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7'>
+    <div className='grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3'>
       {isLoading
-        ? Array.from({ length: 7 }).map((_, index) => (
-            <Card key={index} className='overflow-hidden'>
-              <CardContent className='flex flex-col gap-2 p-3.5'>
-                <Skeleton className='h-3 w-20' />
-                <Skeleton className='h-6 w-16' />
+        ? Array.from({ length: 6 }).map((_, index) => (
+            <Card
+              key={index}
+              className='bg-card/90 overflow-hidden border-0 shadow-sm'
+            >
+              <CardContent className='flex min-h-[110px] flex-col justify-center gap-3 p-6'>
+                <Skeleton className='h-4 w-24' />
+                <Skeleton className='h-8 w-20' />
               </CardContent>
             </Card>
           ))
         : cards.map((card) => {
             const Icon = card.icon
             return (
-              <Card key={card.key} className='overflow-hidden'>
-                <CardContent className='flex flex-col gap-2 p-3.5'>
-                  <div className='flex items-center gap-2'>
+              <Card
+                key={card.key}
+                className='bg-card/90 overflow-hidden border-0 shadow-sm'
+              >
+                <CardContent className='flex min-h-[110px] items-center gap-5 p-6'>
+                  {['peach', 'amber', 'mint'].includes(card.tone) && (
                     <span
                       className={cn(
-                        'flex size-7 items-center justify-center rounded-lg',
+                        'flex size-14 shrink-0 items-center justify-center rounded-xl',
                         TONE_STYLES[card.tone]
                       )}
                     >
-                      <Icon className='size-4' />
+                      <Icon className='size-6' />
                     </span>
-                    <span className='text-muted-foreground truncate text-xs font-medium'>
+                  )}
+                  <div className='flex min-w-0 flex-col gap-2'>
+                    <span className='text-primary/70 truncate text-sm font-semibold'>
                       {t(card.labelKey)}
                     </span>
-                  </div>
-                  <div className='flex items-baseline gap-2'>
-                    <span className='truncate text-xl font-semibold tabular-nums'>
+                    <span className='truncate text-3xl font-bold tracking-tight tabular-nums'>
                       {card.value}
                     </span>
                     {card.hintKey && (

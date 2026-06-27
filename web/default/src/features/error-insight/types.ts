@@ -50,6 +50,7 @@ export interface ErrorInsightFilterParams {
   is_stream?: boolean
   username?: string
   request_id?: string
+  normalized_signature?: string
   request_path?: string
 }
 
