@@ -1805,6 +1805,7 @@
     "Filter by token name": "Filter by token name",
     "Filter by username": "Filter by username",
     "Filter by username, name or email...": "Filter by username, name or email...",
+    "Filter by ID, username, name, email or Discord...": "Filter by ID, username, name, email or Discord...",
     "Filter models by provider, group, type, endpoint, and tags.": "Filter models by provider, group, type, endpoint, and tags.",
     "Filter models by type, endpoint, vendor, group and tags": "Filter models by type, endpoint, vendor, group and tags",
     "Filter models...": "Filter models...",

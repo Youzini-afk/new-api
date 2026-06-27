@@ -1735,6 +1735,7 @@
     "支持备份": "Pris en charge",
     "支持拉取 Ollama 官方模型库中的所有模型，拉取过程可能需要几分钟时间": "Supports pulling all models from the Ollama official model library, the pulling process may take a few minutes",
     "支持搜索用户的 ID、用户名、显示名称和邮箱地址": "Prise en charge de la recherche par ID utilisateur, nom d'utilisateur, nom d'affichage et adresse e-mail",
+    "支持搜索用户的 ID、用户名、显示名称、邮箱地址、Discord 名和 Discord ID": "Prise en charge de la recherche par ID utilisateur, nom d'utilisateur, nom d'affichage, e-mail, nom Discord et ID Discord",
     "支持的图像模型": "Modèles d'image pris en charge",
     "支持精确匹配；使用 regex: 开头可按正则匹配。": "",
     "支持通配符格式，如：example.com, *.api.example.com": "Prend en charge le format générique, par exemple : example.com, *.api.example.com",

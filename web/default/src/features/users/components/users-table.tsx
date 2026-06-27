@@ -142,9 +142,13 @@ export function UsersTable() {
     globalFilterFn: (row, _columnId, filterValue) => {
       const searchValue = String(filterValue).toLowerCase()
       const fields = [
+        row.original.id,
         row.getValue('username'),
         row.original.display_name,
         row.original.email,
+        row.original.discord_id,
+        row.original.discord_username,
+        row.original.discord_global_name,
       ]
       return fields.some((field) =>
         String(field || '')
@@ -174,7 +178,9 @@ export function UsersTable() {
       skeletonKeyPrefix='users-skeleton'
       applyHeaderSize
       toolbarProps={{
-        searchPlaceholder: t('Filter by username, name or email...'),
+        searchPlaceholder: t(
+          'Filter by ID, username, name, email or Discord...'
+        ),
         filters: [
           {
             columnId: 'status',

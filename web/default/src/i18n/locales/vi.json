@@ -1805,6 +1805,7 @@
     "Filter by token name": "Lọc theo tên token",
     "Filter by username": "Lọc theo tên người dùng",
     "Filter by username, name or email...": "Lọc theo tên người dùng, tên hoặc email...",
+    "Filter by ID, username, name, email or Discord...": "Lọc theo ID, tên người dùng, tên, email hoặc Discord...",
     "Filter models by provider, group, type, endpoint, and tags.": "Lọc mô hình theo nhà cung cấp, nhóm, loại, endpoint và thẻ.",
     "Filter models by type, endpoint, vendor, group and tags": "Lọc mô hình theo loại, endpoint, nhà cung cấp, nhóm và thẻ",
     "Filter models...": "Lọc mô hình...",

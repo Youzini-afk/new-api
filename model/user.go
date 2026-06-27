@@ -248,6 +248,7 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	var users []*User
 	var total int64
 	var err error
+	keyword = strings.TrimSpace(keyword)
 
 	// 开始事务
 	tx := DB.Begin()
@@ -264,8 +265,9 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	query := tx.Unscoped().Model(&User{})
 
 	// 构建搜索条件
-	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
-	likeArgs := []interface{}{"%" + keyword + "%", "%" + keyword + "%", "%" + keyword + "%"}
+	likeKeyword := "%" + keyword + "%"
+	likeCondition := "discord_id = ? OR username LIKE ? OR email LIKE ? OR display_name LIKE ? OR discord_username LIKE ? OR discord_global_name LIKE ?"
+	likeArgs := []interface{}{keyword, likeKeyword, likeKeyword, likeKeyword, likeKeyword, likeKeyword}
 
 	// 尝试将关键字转换为整数ID
 	keywordInt, err := strconv.Atoi(keyword)

@@ -1805,6 +1805,7 @@
     "Filter by token name": "Filtrer par nom de jeton",
     "Filter by username": "Filtrer par nom d'utilisateur",
     "Filter by username, name or email...": "Filtrer par nom d'utilisateur, nom ou e-mail...",
+    "Filter by ID, username, name, email or Discord...": "Filtrer par ID, nom d'utilisateur, nom, e-mail ou Discord...",
     "Filter models by provider, group, type, endpoint, and tags.": "Filtrer les modèles par fournisseur, groupe, type, endpoint et tags.",
     "Filter models by type, endpoint, vendor, group and tags": "Filtrer les modèles par type, point d'accès, fournisseur, groupe et tags",
     "Filter models...": "Filtrer les modèles...",

@@ -1707,6 +1707,7 @@
     "支持备份": "Được hỗ trợ",
     "支持拉取 Ollama 官方模型库中的所有模型，拉取过程可能需要几分钟时间": "Supports pulling all models from the Ollama official model library, the pulling process may take a few minutes",
     "支持搜索用户的 ID、用户名、显示名称和邮箱地址": "Hỗ trợ tìm kiếm ID người dùng, tên người dùng, tên hiển thị và địa chỉ email",
+    "支持搜索用户的 ID、用户名、显示名称、邮箱地址、Discord 名和 Discord ID": "Hỗ trợ tìm kiếm ID người dùng, tên người dùng, tên hiển thị, email, tên Discord và Discord ID",
     "支持的图像模型": "Mô hình hình ảnh được hỗ trợ",
     "支持精确匹配；使用 regex: 开头可按正则匹配。": "",
     "支持通配符格式，如：example.com, *.api.example.com": "Hỗ trợ định dạng ký tự đại diện, ví dụ: example.com, *.api.example.com",
