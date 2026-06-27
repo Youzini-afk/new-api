@@ -5316,7 +5316,7 @@
     "Rule Matched": "规则匹配",
     "Unmatched": "未匹配",
     "Unmatched Errors": "未匹配错误",
-    "Unmatched Rate": "未匹配占比",
+    "Matched Errors": "已匹配错误",
     "Distinct Signatures": "独立签名数",
     "Error Signatures": "错误签名数",
     "Affected Users": "受影响用户",

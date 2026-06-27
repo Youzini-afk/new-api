@@ -762,7 +762,7 @@ export const STATIC_I18N_KEYS = [
   'Rule Matched',
   'Unmatched',
   'Unmatched Errors',
-  'Unmatched Rate',
+  'Matched Errors',
   'Distinct Signatures',
   'Error Signatures',
   'Affected Users',

@@ -5316,7 +5316,7 @@
     "Rule Matched": "Rule Matched",
     "Unmatched": "Unmatched",
     "Unmatched Errors": "Lỗi chưa khớp",
-    "Unmatched Rate": "Tỷ lệ chưa khớp",
+    "Matched Errors": "Lỗi đã khớp",
     "Distinct Signatures": "Distinct Signatures",
     "Error Signatures": "Chữ ký lỗi",
     "Affected Users": "Affected Users",

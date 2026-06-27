@@ -5316,7 +5316,7 @@
     "Rule Matched": "Rule Matched",
     "Unmatched": "Unmatched",
     "Unmatched Errors": "Unmatched Errors",
-    "Unmatched Rate": "Unmatched Rate",
+    "Matched Errors": "Matched Errors",
     "Distinct Signatures": "Distinct Signatures",
     "Error Signatures": "Error Signatures",
     "Affected Users": "Affected Users",

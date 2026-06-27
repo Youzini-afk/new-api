@@ -22,8 +22,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle,
+  CheckCircle2,
   Hash,
-  PieChart,
   Radio,
   Users,
   XCircle,
@@ -75,12 +75,7 @@ export function SummaryCards(props: SummaryCardsProps) {
   }
 
   const cards: CardConfig[] = data
-    ? (() => {
-        const unmatchedRate = data.total_count
-          ? `${((data.unmatched_count / data.total_count) * 100).toFixed(1)}%`
-          : '0.0%'
-
-        return [
+    ? [
           {
             key: 'total',
             labelKey: 'Failed Errors',
@@ -96,10 +91,10 @@ export function SummaryCards(props: SummaryCardsProps) {
             tone: 'amber',
           },
           {
-            key: 'unmatched-rate',
-            labelKey: 'Unmatched Rate',
-            icon: PieChart,
-            value: unmatchedRate,
+            key: 'matched',
+            labelKey: 'Matched Errors',
+            icon: CheckCircle2,
+            value: formatCompactNumber(data.rule_matched_count),
             tone: 'mint',
           },
           {
@@ -124,7 +119,6 @@ export function SummaryCards(props: SummaryCardsProps) {
             tone: 'neutral',
           },
         ]
-      })()
     : []
 
   return (

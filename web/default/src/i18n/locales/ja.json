@@ -5316,7 +5316,7 @@
     "Rule Matched": "Rule Matched",
     "Unmatched": "Unmatched",
     "Unmatched Errors": "未一致エラー",
-    "Unmatched Rate": "未一致率",
+    "Matched Errors": "一致済みエラー",
     "Distinct Signatures": "Distinct Signatures",
     "Error Signatures": "エラーシグネチャ数",
     "Affected Users": "Affected Users",
