@@ -226,6 +226,30 @@ func TestPrepareShortMsgExtraBillingPreConsume_ThresholdNotMetNoReservation(t *t
 	require.Nil(t, relayInfo.ShortMsgExtraBillingPreflight)
 }
 
+func TestPrepareShortMsgExtraBillingPreConsume_InputTokensAboveTrigger(t *testing.T) {
+	withShortMsgExtraBilling(t, operation_setting.ShortMsgExtraBillingConfig{
+		Mode: operation_setting.ShortMsgExtraBillingModeEnforce,
+		Rules: []operation_setting.ShortMsgExtraBillingRule{
+			{
+				ID:                            "r1",
+				Group:                         "default",
+				Trigger:                       operation_setting.ShortMsgExtraBillingTriggerInputTokensAbove,
+				Threshold:                     1000,
+				FeeQuota:                      500,
+				WaiveWhenCompletionTokensZero: false,
+			},
+		},
+	})
+	relayInfo := newShortMsgRelayInfo(t, "gpt-4o-mini", types.RelayFormatOpenAI, relayconstant.RelayModeChatCompletions)
+	relayInfo.TokenGroup = "default"
+
+	potential := PrepareShortMsgExtraBillingPreConsume(relayInfo, 1001)
+
+	require.Equal(t, 500, potential)
+	require.NotNil(t, relayInfo.ShortMsgExtraBillingPreflight)
+	require.Equal(t, operation_setting.ShortMsgExtraBillingTriggerInputTokensAbove, relayInfo.ShortMsgExtraBillingPreflight.Trigger)
+}
+
 func TestPrepareShortMsgExtraBillingPreConsume_FirstMatchWins(t *testing.T) {
 	withShortMsgExtraBilling(t, operation_setting.ShortMsgExtraBillingConfig{
 		Mode: operation_setting.ShortMsgExtraBillingModeEnforce,

@@ -32,6 +32,13 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import {
@@ -53,7 +60,7 @@ type ShortMsgRule = {
   clientKey?: string
   id: string
   group: string
-  trigger: 'input_tokens_below'
+  trigger: 'input_tokens_below' | 'input_tokens_above'
   threshold: number
   fee_quota: number
   waive_when_completion_tokens_zero: boolean
@@ -83,11 +90,28 @@ function createRuleClientKey() {
 const ruleSchema = z.object({
   id: z.string().trim().min(1),
   group: z.string().trim().min(1),
-  trigger: z.literal('input_tokens_below'),
+  trigger: z.enum(['input_tokens_below', 'input_tokens_above']),
   threshold: z.number().int().positive(),
   fee_quota: z.number().int().positive(),
   waive_when_completion_tokens_zero: z.boolean(),
 })
+
+const triggerOptions: Array<{
+  value: ShortMsgRule['trigger']
+  labelKey: string
+  descriptionKey: string
+}> = [
+  {
+    value: 'input_tokens_below',
+    labelKey: 'Input tokens below threshold',
+    descriptionKey: 'Triggers when input/prompt tokens are strictly below the threshold.',
+  },
+  {
+    value: 'input_tokens_above',
+    labelKey: 'Input tokens above threshold',
+    descriptionKey: 'Triggers when input/prompt tokens are strictly above the threshold.',
+  },
+]
 
 const configSchema = z
   .object({
@@ -131,11 +155,15 @@ function normalizeRule(raw: unknown): ShortMsgRule | null {
     typeof src.waive_when_completion_tokens_zero === 'boolean'
       ? src.waive_when_completion_tokens_zero
       : true
+  const trigger =
+    src.trigger === 'input_tokens_above'
+      ? 'input_tokens_above'
+      : 'input_tokens_below'
   return {
     clientKey: createRuleClientKey(),
     id,
     group,
-    trigger: 'input_tokens_below',
+    trigger,
     threshold,
     fee_quota: feeQuota,
     waive_when_completion_tokens_zero: waive,
@@ -176,7 +204,7 @@ function serializeConfig(config: ShortMsgConfig): string {
     rules: config.rules.map((rule) => ({
       id: rule.id.trim(),
       group: rule.group.trim(),
-      trigger: 'input_tokens_below',
+      trigger: rule.trigger,
       threshold: rule.threshold,
       fee_quota: rule.fee_quota,
       waive_when_completion_tokens_zero: rule.waive_when_completion_tokens_zero,
@@ -332,7 +360,7 @@ export function ShortMessageBillingSection({
   const rulesDisabled = config.mode === 'off'
 
   return (
-    <SettingsSection title={t('Short Message Billing')}>
+    <SettingsSection title={t('Limit Message Management')}>
       <FormNavigationGuard when={isDirty} />
       <FormDirtyIndicator isDirty={isDirty} />
 
@@ -340,12 +368,12 @@ export function ShortMessageBillingSection({
         <AlertDescription className='space-y-1 text-sm'>
           <div>
             {t(
-              'Apply an extra quota charge to short prompts that fall below a token threshold, regardless of completion length.'
+              'Manage short-prompt charges or token-limit interceptions by group before requests reach upstream.'
             )}
           </div>
           <div className='text-muted-foreground'>
             {t(
-              'Rule fires only when input/prompt tokens are strictly below the threshold. Fee quota is raw quota units, not currency.'
+              'Rules can trigger when input/prompt tokens are below or above the threshold. Fee quota is raw quota units, not currency.'
             )}
           </div>
         </AlertDescription>
@@ -482,7 +510,7 @@ export function ShortMessageBillingSection({
           <Alert>
             <AlertDescription>
               {t(
-                'Rules are preserved while billing is disabled. Switch to Shadow or Enforce to activate them.'
+                'Rules are preserved while disabled. Switch to Shadow, Enforce, or Intercept to activate them.'
               )}
             </AlertDescription>
           </Alert>
@@ -497,7 +525,7 @@ export function ShortMessageBillingSection({
           <div className='flex items-center justify-between gap-2'>
             <div className='flex flex-col gap-0.5'>
               <Label className='text-sm font-semibold'>
-                {t('Billing Rules')}
+                {t('Limit Rules')}
               </Label>
               <p className='text-muted-foreground text-xs'>
                 {t(
@@ -519,7 +547,7 @@ export function ShortMessageBillingSection({
 
           {config.rules.length === 0 ? (
             <p className='text-muted-foreground py-6 text-center text-sm'>
-              {t('No rules configured. Add a rule to define short-message fees.')}
+              {t('No rules configured. Add a rule to define limit handling.')}
             </p>
           ) : (
             <div className='flex min-w-0 flex-col gap-3'>
@@ -622,7 +650,29 @@ function ShortMsgRuleRow(props: ShortMsgRuleRowProps) {
       <div className='grid gap-3 sm:grid-cols-3'>
         <div className='grid gap-1.5'>
           <Label>{t('Trigger')}</Label>
-          <Input value='input_tokens_below' readOnly disabled={disabled} />
+          <Select
+            value={rule.trigger}
+            disabled={disabled}
+            onValueChange={(value) =>
+              props.onChange({ trigger: value as ShortMsgRule['trigger'] })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              {triggerOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  <div className='flex flex-col gap-0.5'>
+                    <span>{t(option.labelKey)}</span>
+                    <span className='text-muted-foreground text-xs'>
+                      {t(option.descriptionKey)}
+                    </span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className='grid gap-1.5'>
           <Label htmlFor={`rule-${rowKey}-threshold`}>
@@ -658,7 +708,7 @@ function ShortMsgRuleRow(props: ShortMsgRuleRowProps) {
 
       <p className='text-muted-foreground text-xs'>
         {t(
-          'In Intercept mode, threshold still controls when to return the custom message. Extra fee is ignored because upstream is not called.'
+          'In Intercept mode, the selected trigger still controls when to return the custom message. Extra fee is ignored because upstream is not called.'
         )}
       </p>
 

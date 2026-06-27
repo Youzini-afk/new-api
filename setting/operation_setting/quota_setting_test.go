@@ -151,6 +151,24 @@ func TestEvaluateShortMsgExtraBillingShadow_ThresholdAboveDoesNotApply(t *testin
 	require.Equal(t, 0, res.CandidateExtraQuota)
 }
 
+func TestEvaluateShortMsgExtraBilling_InputTokensAboveTrigger(t *testing.T) {
+	cfg := ShortMsgExtraBillingConfig{
+		Mode: ShortMsgExtraBillingModeShadow,
+		Rules: []ShortMsgExtraBillingRule{
+			{ID: "r1", Group: "default", Trigger: ShortMsgExtraBillingTriggerInputTokensAbove, Threshold: 1000, FeeQuota: 500},
+		},
+	}
+
+	below := EvaluateShortMsgExtraBillingShadow(cfg, "default", 1000, 10, 1010, "chat_completions")
+	above := EvaluateShortMsgExtraBillingShadow(cfg, "default", 1001, 10, 1011, "chat_completions")
+
+	require.NotNil(t, below.MatchedRule)
+	require.False(t, below.WouldApply)
+	require.NotNil(t, above.MatchedRule)
+	require.True(t, above.WouldApply)
+	require.Equal(t, 500, above.CandidateExtraQuota)
+}
+
 func TestEvaluateShortMsgExtraBillingShadow_WaiveWhenCompletionTokensZero(t *testing.T) {
 	cfg := ShortMsgExtraBillingConfig{
 		Mode: ShortMsgExtraBillingModeShadow,

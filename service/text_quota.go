@@ -592,7 +592,7 @@ func computeShortMsgEnforceSkipReason(
 	if frozen.Group == "" && summary.ModelName != frozen.Model {
 		return "model_mismatch"
 	}
-	if frozen.Trigger != operation_setting.ShortMsgExtraBillingTriggerInputTokensBelow {
+	if !isShortMsgTriggerSupported(frozen.Trigger) {
 		return "trigger_mismatch"
 	}
 
@@ -628,9 +628,7 @@ func computeShortMsgEnforceSkipReason(
 		return "tiered_expr"
 	}
 
-	// Use the actual post-response prompt tokens against the FROZEN
-	// threshold (the preflight used a conservative estimate).
-	if summary.PromptTokens >= frozen.Threshold {
+	if !isShortMsgTriggerMatched(frozen.Trigger, summary.PromptTokens, frozen.Threshold) {
 		return "threshold_not_met"
 	}
 

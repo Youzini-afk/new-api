@@ -235,7 +235,7 @@ const BILLING_SECTIONS = [
   },
   {
     id: 'short-message-billing',
-    titleKey: 'Short Message Billing',
+    titleKey: 'Limit Message Management',
     build: (settings: BillingSettings) => (
       <ShortMessageBillingSection
         defaultValue={settings['quota_setting.short_msg_extra_billing']}

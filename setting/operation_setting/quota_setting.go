@@ -65,9 +65,8 @@ const (
 	ShortMsgExtraBillingModeEnforce   = "enforce"
 	ShortMsgExtraBillingModeIntercept = "intercept"
 
-	// ShortMsgExtraBillingTriggerInputTokensBelow is the only trigger
-	// supported.
 	ShortMsgExtraBillingTriggerInputTokensBelow = "input_tokens_below"
+	ShortMsgExtraBillingTriggerInputTokensAbove = "input_tokens_above"
 )
 
 // ShortMsgExtraBillingResult is the structured outcome of evaluating
@@ -244,9 +243,8 @@ func EvaluateShortMsgExtraBilling(
 	result.Reason = "matched"
 
 	switch result.MatchedRule.Trigger {
-	case ShortMsgExtraBillingTriggerInputTokensBelow:
-		// Equality does not trigger.
-		triggered := promptTokens < result.MatchedRule.Threshold
+	case ShortMsgExtraBillingTriggerInputTokensBelow, ShortMsgExtraBillingTriggerInputTokensAbove:
+		triggered := isShortMsgTriggerMatched(result.MatchedRule.Trigger, promptTokens, result.MatchedRule.Threshold)
 
 		if triggered && completionTokens == 0 && result.MatchedRule.WaiveWhenCompletionTokensZero {
 			result.Waived = true
@@ -291,13 +289,28 @@ func isShortMsgExtraBillingRuleValid(rule ShortMsgExtraBillingRule) bool {
 	if rule.ID == "" || shortMsgExtraBillingRuleGroup(rule) == "" {
 		return false
 	}
-	if rule.Trigger != ShortMsgExtraBillingTriggerInputTokensBelow {
+	if !isShortMsgExtraBillingTriggerSupported(rule.Trigger) {
 		return false
 	}
 	if rule.Threshold <= 0 || rule.FeeQuota <= 0 {
 		return false
 	}
 	return true
+}
+
+func isShortMsgExtraBillingTriggerSupported(trigger string) bool {
+	return trigger == ShortMsgExtraBillingTriggerInputTokensBelow || trigger == ShortMsgExtraBillingTriggerInputTokensAbove
+}
+
+func isShortMsgTriggerMatched(trigger string, promptTokens int, threshold int) bool {
+	switch trigger {
+	case ShortMsgExtraBillingTriggerInputTokensBelow:
+		return promptTokens < threshold
+	case ShortMsgExtraBillingTriggerInputTokensAbove:
+		return promptTokens > threshold
+	default:
+		return false
+	}
 }
 
 func shortMsgExtraBillingRuleGroup(rule ShortMsgExtraBillingRule) string {
@@ -470,9 +483,9 @@ func validateShortMsgExtraBillingRule(rule ShortMsgExtraBillingRule, idx int) er
 	if rule.Group == "" {
 		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) group 不能为空", idx, rule.ID)
 	}
-	if rule.Trigger != ShortMsgExtraBillingTriggerInputTokensBelow {
-		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) trigger 必须是 %q, 实际为 %q",
-			idx, rule.ID, ShortMsgExtraBillingTriggerInputTokensBelow, rule.Trigger)
+	if !isShortMsgExtraBillingTriggerSupported(rule.Trigger) {
+		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) trigger 必须是 %q 或 %q, 实际为 %q",
+			idx, rule.ID, ShortMsgExtraBillingTriggerInputTokensBelow, ShortMsgExtraBillingTriggerInputTokensAbove, rule.Trigger)
 	}
 	if rule.Threshold <= 0 {
 		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) threshold 必须 > 0, 实际为 %d",

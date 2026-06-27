@@ -93,11 +93,11 @@ func PrepareShortMsgExtraBillingPreConsume(relayInfo *relaycommon.RelayInfo, est
 		relayInfo.ShortMsgExtraBillingPreflight = nil
 		return 0
 	}
-	if rule.Trigger != operation_setting.ShortMsgExtraBillingTriggerInputTokensBelow {
+	if !isShortMsgTriggerSupported(rule.Trigger) {
 		relayInfo.ShortMsgExtraBillingPreflight = nil
 		return 0
 	}
-	if estimatedPromptTokens >= rule.Threshold {
+	if !isShortMsgTriggerMatched(rule.Trigger, estimatedPromptTokens, rule.Threshold) {
 		relayInfo.ShortMsgExtraBillingPreflight = nil
 		return 0
 	}
@@ -140,7 +140,7 @@ func MatchShortMsgIntercept(relayInfo *relaycommon.RelayInfo, estimatedPromptTok
 	}
 	group := resolveShortMsgBillingGroup(relayInfo)
 	rule := firstValidMatchingShortMsgRule(cfg, group, textMode)
-	if rule == nil || rule.Trigger != operation_setting.ShortMsgExtraBillingTriggerInputTokensBelow || estimatedPromptTokens >= rule.Threshold {
+	if rule == nil || !isShortMsgTriggerMatched(rule.Trigger, estimatedPromptTokens, rule.Threshold) {
 		return nil
 	}
 	message := strings.TrimSpace(cfg.InterceptMessage)
@@ -173,7 +173,7 @@ func firstValidMatchingShortMsgRule(cfg operation_setting.ShortMsgExtraBillingCo
 		if rule.ID == "" || ruleGroup == "" {
 			continue
 		}
-		if rule.Trigger != operation_setting.ShortMsgExtraBillingTriggerInputTokensBelow {
+		if !isShortMsgTriggerSupported(rule.Trigger) {
 			continue
 		}
 		if rule.Threshold <= 0 || rule.FeeQuota <= 0 {
@@ -191,6 +191,21 @@ func firstValidMatchingShortMsgRule(cfg operation_setting.ShortMsgExtraBillingCo
 		return &matched
 	}
 	return nil
+}
+
+func isShortMsgTriggerSupported(trigger string) bool {
+	return trigger == operation_setting.ShortMsgExtraBillingTriggerInputTokensBelow || trigger == operation_setting.ShortMsgExtraBillingTriggerInputTokensAbove
+}
+
+func isShortMsgTriggerMatched(trigger string, inputTokens int, threshold int) bool {
+	switch trigger {
+	case operation_setting.ShortMsgExtraBillingTriggerInputTokensBelow:
+		return inputTokens < threshold
+	case operation_setting.ShortMsgExtraBillingTriggerInputTokensAbove:
+		return inputTokens > threshold
+	default:
+		return false
+	}
 }
 
 func resolveShortMsgBillingGroup(relayInfo *relaycommon.RelayInfo) string {
