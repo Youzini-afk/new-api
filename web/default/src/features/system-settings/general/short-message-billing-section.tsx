@@ -47,28 +47,16 @@ import { useUpdateOption } from '../hooks/use-update-option'
 
 const OPTION_KEY = 'quota_setting.short_msg_extra_billing'
 
-const RESPONSE_MODES = [
-  'chat_completions',
-  'completions',
-  'responses',
-  'responses_compact',
-  'claude',
-  'gemini',
-] as const
-
-type ResponseMode = (typeof RESPONSE_MODES)[number]
-
 type ShortMsgMode = 'off' | 'shadow' | 'enforce'
 
 type ShortMsgRule = {
   clientKey?: string
   id: string
-  model: string
+  group: string
   trigger: 'input_tokens_below'
   threshold: number
   fee_quota: number
   waive_when_completion_tokens_zero: boolean
-  response_modes: ResponseMode[]
 }
 
 type ShortMsgConfig = {
@@ -89,14 +77,11 @@ function createRuleClientKey() {
 
 const ruleSchema = z.object({
   id: z.string().trim().min(1),
-  model: z.string().trim().min(1),
+  group: z.string().trim().min(1),
   trigger: z.literal('input_tokens_below'),
   threshold: z.number().int().positive(),
   fee_quota: z.number().int().positive(),
   waive_when_completion_tokens_zero: z.boolean(),
-  response_modes: z
-    .array(z.enum(RESPONSE_MODES))
-    .min(1, 'Select at least one response mode'),
 })
 
 const configSchema = z
@@ -122,7 +107,12 @@ function normalizeRule(raw: unknown): ShortMsgRule | null {
   if (!raw || typeof raw !== 'object') return null
   const src = raw as Record<string, unknown>
   const id = typeof src.id === 'string' ? src.id : ''
-  const model = typeof src.model === 'string' ? src.model : ''
+  const group =
+    typeof src.group === 'string'
+      ? src.group
+      : typeof src.model === 'string'
+        ? src.model
+        : ''
   const threshold =
     typeof src.threshold === 'number' && Number.isFinite(src.threshold)
       ? src.threshold
@@ -135,20 +125,14 @@ function normalizeRule(raw: unknown): ShortMsgRule | null {
     typeof src.waive_when_completion_tokens_zero === 'boolean'
       ? src.waive_when_completion_tokens_zero
       : true
-  const modes = Array.isArray(src.response_modes)
-    ? (src.response_modes.filter((m): m is ResponseMode =>
-        RESPONSE_MODES.includes(m as ResponseMode)
-      ) as ResponseMode[])
-    : [...RESPONSE_MODES]
   return {
     clientKey: createRuleClientKey(),
     id,
-    model,
+    group,
     trigger: 'input_tokens_below',
     threshold,
     fee_quota: feeQuota,
     waive_when_completion_tokens_zero: waive,
-    response_modes: modes.length > 0 ? modes : [...RESPONSE_MODES],
   }
 }
 
@@ -178,12 +162,11 @@ function serializeConfig(config: ShortMsgConfig): string {
     mode: config.mode,
     rules: config.rules.map((rule) => ({
       id: rule.id.trim(),
-      model: rule.model.trim(),
+      group: rule.group.trim(),
       trigger: 'input_tokens_below',
       threshold: rule.threshold,
       fee_quota: rule.fee_quota,
       waive_when_completion_tokens_zero: rule.waive_when_completion_tokens_zero,
-      response_modes: [...rule.response_modes],
     })),
   }
   return JSON.stringify(normalized)
@@ -236,12 +219,11 @@ export function ShortMessageBillingSection({
       const newRule: ShortMsgRule = {
         clientKey: createRuleClientKey(),
         id,
-        model: '',
+        group: 'default',
         trigger: 'input_tokens_below',
         threshold: 8,
         fee_quota: 500,
         waive_when_completion_tokens_zero: true,
-        response_modes: [...RESPONSE_MODES],
       }
       return { ...prev, rules: [...prev.rules, newRule] }
     })
@@ -263,24 +245,6 @@ export function ShortMessageBillingSection({
         rules: prev.rules.map((r) =>
           r.clientKey === clientKey ? { ...r, ...patch } : r
         ),
-      }))
-      setValidationError('')
-    },
-    []
-  )
-
-  const toggleResponseMode = useCallback(
-    (clientKey: string, mode: ResponseMode, checked: boolean) => {
-      setConfig((prev) => ({
-        ...prev,
-        rules: prev.rules.map((r) => {
-          if (r.clientKey !== clientKey) return r
-          const set = new Set(r.response_modes)
-          if (checked) set.add(mode)
-          else if (r.response_modes.length <= 1) return r
-          else set.delete(mode)
-          return { ...r, response_modes: RESPONSE_MODES.filter((m) => set.has(m)) }
-        }),
       }))
       setValidationError('')
     },
@@ -477,7 +441,7 @@ export function ShortMessageBillingSection({
               </Label>
               <p className='text-muted-foreground text-xs'>
                 {t(
-                  'Each rule targets one model. Multiple rules cannot share the same id.'
+                  'Each rule targets one token/user group. Multiple rules cannot share the same id.'
                 )}
               </p>
             </div>
@@ -506,9 +470,6 @@ export function ShortMessageBillingSection({
                   disabled={rulesDisabled}
                   onChange={(patch) => updateRule(rule.clientKey ?? '', patch)}
                   onRemove={() => removeRule(rule.clientKey ?? '')}
-                  onToggleMode={(mode, checked) =>
-                    toggleResponseMode(rule.clientKey ?? '', mode, checked)
-                  }
                 />
               ))}
             </div>
@@ -556,7 +517,6 @@ type ShortMsgRuleRowProps = {
   disabled: boolean
   onChange: (patch: Partial<ShortMsgRule>) => void
   onRemove: () => void
-  onToggleMode: (mode: ResponseMode, checked: boolean) => void
 }
 
 function ShortMsgRuleRow(props: ShortMsgRuleRowProps) {
@@ -588,13 +548,13 @@ function ShortMsgRuleRow(props: ShortMsgRuleRowProps) {
           />
         </div>
         <div className='grid gap-1.5'>
-          <Label htmlFor={`rule-${rowKey}-model`}>{t('Model')} *</Label>
+          <Label htmlFor={`rule-${rowKey}-group`}>{t('Group')} *</Label>
           <Input
-            id={`rule-${rowKey}-model`}
-            value={rule.model}
-            placeholder='gpt-4o-mini'
+            id={`rule-${rowKey}-group`}
+            value={rule.group}
+            placeholder='default'
             disabled={disabled}
-            onChange={(e) => props.onChange({ model: e.target.value })}
+            onChange={(e) => props.onChange({ group: e.target.value })}
           />
         </div>
       </div>
@@ -633,38 +593,6 @@ function ShortMsgRuleRow(props: ShortMsgRuleRowProps) {
             disabled={disabled}
             onChange={(e) => handleFeeQuotaChange(e.target.value)}
           />
-        </div>
-      </div>
-
-      <div className='grid gap-1.5'>
-        <Label>{t('Response Modes')}</Label>
-        <p className='text-muted-foreground text-xs'>
-          {t(
-            'Select at least one text-only response shape. Selecting all modes applies the rule to all supported text requests; non-text requests are never affected.'
-          )}
-        </p>
-        <div className='flex flex-wrap gap-x-4 gap-y-2 pt-1'>
-          {RESPONSE_MODES.map((mode) => {
-            const checked = rule.response_modes.includes(mode)
-            const lastSelected = checked && rule.response_modes.length === 1
-            return (
-              <Label
-                key={mode}
-                htmlFor={`rule-${rowKey}-mode-${mode}`}
-                className='text-muted-foreground cursor-pointer text-xs font-normal'
-              >
-                <Checkbox
-                  id={`rule-${rowKey}-mode-${mode}`}
-                  checked={checked}
-                  disabled={disabled || lastSelected}
-                  onCheckedChange={(value) =>
-                    props.onToggleMode(mode, value === true)
-                  }
-                />
-                <span className='font-mono'>{mode}</span>
-              </Label>
-            )
-          })}
         </div>
       </div>
 

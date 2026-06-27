@@ -20,6 +20,7 @@ type ShortMsgExtraBillingPreflight struct {
 	// RuleID / Model / Trigger / Threshold / FeeQuota / WaiveWhenCompletionTokensZero
 	// 是命中规则的冻结拷贝。
 	RuleID                        string
+	Group                         string
 	Model                         string
 	Trigger                       string
 	Threshold                     int

@@ -387,7 +387,7 @@ func evaluateShortMsgExtraBilling(relayInfo *relaycommon.RelayInfo, summary text
 	textMode := shortMsgExtraBillingTextMode(relayInfo)
 	result := operation_setting.EvaluateShortMsgExtraBilling(
 		cfg,
-		summary.ModelName,
+		resolveShortMsgBillingGroup(relayInfo),
 		summary.PromptTokens,
 		summary.CompletionTokens,
 		summary.TotalTokens,
@@ -426,6 +426,7 @@ func injectShortMsgExtraBilling(other map[string]interface{}, summary textQuotaS
 	entry := map[string]interface{}{
 		"mode":                   res.Mode,
 		"rule_id":                res.MatchedRule.ID,
+		"group":                  res.MatchedRule.Group,
 		"trigger":                res.MatchedRule.Trigger,
 		"threshold":              res.MatchedRule.Threshold,
 		"text_mode":              res.TextMode,
@@ -529,6 +530,7 @@ func applyShortMsgEnforceFromFrozen(
 		TextMode: frozen.TextMode,
 		MatchedRule: &operation_setting.ShortMsgExtraBillingRule{
 			ID:                            frozen.RuleID,
+			Group:                         frozen.Group,
 			Model:                         frozen.Model,
 			Trigger:                       frozen.Trigger,
 			Threshold:                     frozen.Threshold,
@@ -584,7 +586,10 @@ func computeShortMsgEnforceSkipReason(
 	if frozen.Mode != operation_setting.ShortMsgExtraBillingModeEnforce {
 		return "frozen_mode_mismatch"
 	}
-	if summary.ModelName != frozen.Model {
+	if frozen.Group != "" && resolveShortMsgBillingGroup(relayInfo) != frozen.Group {
+		return "group_mismatch"
+	}
+	if frozen.Group == "" && summary.ModelName != frozen.Model {
 		return "model_mismatch"
 	}
 	if frozen.Trigger != operation_setting.ShortMsgExtraBillingTriggerInputTokensBelow {

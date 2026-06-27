@@ -445,10 +445,7 @@ func TestEvaluateShortMsgExtraBillingShadow_EmptyTextModeFailsClosedEvenWithEmpt
 // ParseAndValidateShortMsgExtraBillingConfig — Phase 10C server-side guard
 // ---------------------------------------------------------------------------
 
-// validRuleJSON returns a JSON-encoded rule with whitespace padding around
-// id/model/response_modes so the normalizer's trim/dedupe behavior is
-// observable.
-const validRuleJSON = `{"id":"  r1  ","model":"  gpt-4o-mini  ","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"response_modes":["  claude ","gemini","claude"]}`
+const validRuleJSON = `{"id":"  r1  ","group":"  default  ","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"response_modes":["  claude ","gemini","claude"]}`
 
 func TestParseAndValidateShortMsgExtraBillingConfig_ValidModesAndNormalize(t *testing.T) {
 	t.Run("off with no rules", func(t *testing.T) {
@@ -467,7 +464,7 @@ func TestParseAndValidateShortMsgExtraBillingConfig_ValidModesAndNormalize(t *te
 		require.Equal(t, ShortMsgExtraBillingModeShadow, cfg.Mode)
 		require.Len(t, cfg.Rules, 1)
 		assert.Equal(t, "r1", cfg.Rules[0].ID, "id should be trimmed")
-		assert.Equal(t, "gpt-4o-mini", cfg.Rules[0].Model, "model should be trimmed")
+		assert.Equal(t, "default", cfg.Rules[0].Group, "group should be trimmed")
 		// Response modes are trimmed and de-duplicated, first-seen order kept.
 		assert.Equal(t, []string{"claude", "gemini"}, cfg.Rules[0].ResponseModes)
 		// The persisted value parses back to the same logical config.
@@ -528,7 +525,7 @@ func TestParseAndValidateShortMsgExtraBillingConfig_Rejections(t *testing.T) {
 		{"threshold negative", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":-5,"fee_quota":1}]}`, "threshold 必须 > 0"},
 		{"fee_quota zero", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":0}]}`, "fee_quota 必须 > 0"},
 		{"fee_quota negative", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":-1}]}`, "fee_quota 必须 > 0"},
-		{"empty model", `{"mode":"shadow","rules":[{"id":"r1","model":"","trigger":"input_tokens_below","threshold":1,"fee_quota":1}]}`, "model 不能为空"},
+		{"empty group", `{"mode":"shadow","rules":[{"id":"r1","group":"","trigger":"input_tokens_below","threshold":1,"fee_quota":1}]}`, "group 不能为空"},
 		{"empty id", `{"mode":"shadow","rules":[{"id":"","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1}]}`, "id 不能为空"},
 		{"unknown response mode", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1,"response_modes":["chat_completions","bogus"]}]}`, "response_modes 无效"},
 		{"empty response modes array", `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":1,"response_modes":[]}]}`, "response_modes 无效"},

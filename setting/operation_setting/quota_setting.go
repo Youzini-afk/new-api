@@ -48,31 +48,14 @@ type ShortMsgExtraBillingConfig struct {
 // The only trigger supported is `input_tokens_below`, which fires when
 // summary.PromptTokens < Threshold (equality does NOT trigger).
 type ShortMsgExtraBillingRule struct {
-	// ID is a stable, admin-supplied identifier used in audit logs.
-	ID string `json:"id"`
-	// Model is matched exactly against relayInfo.OriginModelName.
-	Model string `json:"model"`
-	// Trigger selects the rule condition. Only "input_tokens_below" is
-	// supported.
-	Trigger string `json:"trigger"`
-	// Threshold is compared against summary.PromptTokens for the
-	// input_tokens_below trigger. A rule fires when PromptTokens < Threshold.
-	Threshold int `json:"threshold"`
-	// FeeQuota is the extra quota that would be charged, expressed directly
-	// in quota units (no USD conversion). Must be > 0.
-	FeeQuota int `json:"fee_quota"`
-	// WaiveWhenCompletionTokensZero, when true, causes a rule that otherwise
-	// matches to record a "waived" result (would_apply=false) instead of an
-	// applied candidate, when CompletionTokens==0.
-	WaiveWhenCompletionTokensZero bool `json:"waive_when_completion_tokens_zero"`
-	// ResponseModes optionally restricts a rule to specific text relay modes.
-	// Stable internal values used by the service layer:
-	//   "chat_completions", "completions", "responses",
-	//   "responses_compact", "claude", "gemini".
-	// When empty, the rule applies to any *text* mode request. Non-text
-	// request paths (image, embedding, rerank, audio, ...) produce an empty
-	// textMode and never match any rule regardless of this field.
-	ResponseModes []string `json:"response_modes,omitempty"`
+	ID                            string   `json:"id"`
+	Group                         string   `json:"group"`
+	Model                         string   `json:"model,omitempty"`
+	Trigger                       string   `json:"trigger"`
+	Threshold                     int      `json:"threshold"`
+	FeeQuota                      int      `json:"fee_quota"`
+	WaiveWhenCompletionTokensZero bool     `json:"waive_when_completion_tokens_zero"`
+	ResponseModes                 []string `json:"response_modes,omitempty"`
 }
 
 const (
@@ -193,7 +176,7 @@ func (r ShortMsgExtraBillingResult) HasReportableInfo() bool {
 //     embedding / rerank / audio-fallback callers from being audited.
 func EvaluateShortMsgExtraBilling(
 	cfg ShortMsgExtraBillingConfig,
-	modelName string,
+	groupName string,
 	promptTokens int,
 	completionTokens int,
 	totalTokens int,
@@ -218,7 +201,9 @@ func EvaluateShortMsgExtraBilling(
 		return result
 	}
 
-	// Find the first valid rule that matches the request's model and
+	groupName = strings.TrimSpace(groupName)
+
+	// Find the first valid rule that matches the request's group and
 	// (optionally) response mode. Only the first match is used to avoid
 	// stacking multiple surcharges.
 	for i := range cfg.Rules {
@@ -227,7 +212,8 @@ func EvaluateShortMsgExtraBilling(
 			result.SkippedInvalidRules++
 			continue
 		}
-		if rule.Model != modelName {
+		ruleGroup := shortMsgExtraBillingRuleGroup(rule)
+		if ruleGroup != groupName {
 			continue
 		}
 		if len(rule.ResponseModes) > 0 && !containsString(rule.ResponseModes, textMode) {
@@ -235,6 +221,8 @@ func EvaluateShortMsgExtraBilling(
 		}
 		// Matched. Use a stable copy so later config mutations can't alias.
 		matched := rule
+		matched.Group = ruleGroup
+		matched.Model = ""
 		result.MatchedRule = &matched
 		break
 	}
@@ -286,19 +274,19 @@ func EvaluateShortMsgExtraBilling(
 // compiling. The evaluation is mode-agnostic.
 func EvaluateShortMsgExtraBillingShadow(
 	cfg ShortMsgExtraBillingConfig,
-	modelName string,
+	groupName string,
 	promptTokens int,
 	completionTokens int,
 	totalTokens int,
 	textMode string,
 ) ShortMsgExtraBillingResult {
-	return EvaluateShortMsgExtraBilling(cfg, modelName, promptTokens, completionTokens, totalTokens, textMode)
+	return EvaluateShortMsgExtraBilling(cfg, groupName, promptTokens, completionTokens, totalTokens, textMode)
 }
 
 // isShortMsgExtraBillingRuleValid reports whether a rule has all required
 // fields set to a meaningful value. Invalid rules are skipped silently.
 func isShortMsgExtraBillingRuleValid(rule ShortMsgExtraBillingRule) bool {
-	if rule.ID == "" || rule.Model == "" {
+	if rule.ID == "" || shortMsgExtraBillingRuleGroup(rule) == "" {
 		return false
 	}
 	if rule.Trigger != ShortMsgExtraBillingTriggerInputTokensBelow {
@@ -308,6 +296,13 @@ func isShortMsgExtraBillingRuleValid(rule ShortMsgExtraBillingRule) bool {
 		return false
 	}
 	return true
+}
+
+func shortMsgExtraBillingRuleGroup(rule ShortMsgExtraBillingRule) string {
+	if strings.TrimSpace(rule.Group) != "" {
+		return strings.TrimSpace(rule.Group)
+	}
+	return strings.TrimSpace(rule.Model)
 }
 
 func containsString(list []string, target string) bool {
@@ -424,7 +419,12 @@ func ParseAndValidateShortMsgExtraBillingConfig(raw string) (ShortMsgExtraBillin
 		for i := range cfg.Rules {
 			rule := cfg.Rules[i]
 			rule.ID = strings.TrimSpace(rule.ID)
+			rule.Group = strings.TrimSpace(rule.Group)
 			rule.Model = strings.TrimSpace(rule.Model)
+			if rule.Group == "" && rule.Model != "" {
+				rule.Group = rule.Model
+			}
+			rule.Model = ""
 			rule.Trigger = strings.TrimSpace(rule.Trigger)
 			modes, modeErr := normalizeShortMsgExtraBillingResponseModes(rule.ResponseModes)
 			if modeErr != nil {
@@ -461,8 +461,8 @@ func validateShortMsgExtraBillingRule(rule ShortMsgExtraBillingRule, idx int) er
 	if rule.ID == "" {
 		return fmt.Errorf("short_msg_extra_billing: rule[%d] id 不能为空", idx)
 	}
-	if rule.Model == "" {
-		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) model 不能为空", idx, rule.ID)
+	if rule.Group == "" {
+		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) group 不能为空", idx, rule.ID)
 	}
 	if rule.Trigger != ShortMsgExtraBillingTriggerInputTokensBelow {
 		return fmt.Errorf("short_msg_extra_billing: rule[%d] (%q) trigger 必须是 %q, 实际为 %q",

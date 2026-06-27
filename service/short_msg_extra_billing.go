@@ -1,6 +1,8 @@
 package service
 
 import (
+	"strings"
+
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
@@ -28,7 +30,7 @@ import (
 //  3. shortMsgExtraBillingTextMode(relayInfo) != "" (text chat path only)
 //  4. relayInfo.TieredBillingSnapshot == nil (exclude tiered_expr)
 //  5. !relayInfo.PriceData.FreeModel
-//  6. a valid rule matches model + textMode (empty ResponseModes = any text
+//  6. a valid rule matches group + textMode (empty ResponseModes = any text
 //     mode) AND estimatedPromptTokens < rule.Threshold (first match wins)
 //
 // The freeze is conservative: estimated < threshold at preflight time is
@@ -74,11 +76,11 @@ func PrepareShortMsgExtraBillingPreConsume(relayInfo *relaycommon.RelayInfo, est
 		return 0
 	}
 
-	// Boundary 6: first valid matching rule whose model + response modes
+	// Boundary 6: first valid matching rule whose group + response modes
 	// match. Then check the trigger using the *estimated* prompt tokens
 	// (conservative reservation; the post-response decision uses the actual
 	// prompt tokens against the FROZEN threshold).
-	rule := firstValidMatchingShortMsgRule(cfg, relayInfo.OriginModelName, textMode)
+	rule := firstValidMatchingShortMsgRule(cfg, resolveShortMsgBillingGroup(relayInfo), textMode)
 	if rule == nil {
 		relayInfo.ShortMsgExtraBillingPreflight = nil
 		return 0
@@ -98,7 +100,8 @@ func PrepareShortMsgExtraBillingPreConsume(relayInfo *relaycommon.RelayInfo, est
 		Mode:                          operation_setting.ShortMsgExtraBillingModeEnforce,
 		TextMode:                      textMode,
 		RuleID:                        rule.ID,
-		Model:                         rule.Model,
+		Group:                         rule.Group,
+		Model:                         relayInfo.OriginModelName,
 		Trigger:                       rule.Trigger,
 		Threshold:                     rule.Threshold,
 		FeeQuota:                      rule.FeeQuota,
@@ -115,16 +118,21 @@ func PrepareShortMsgExtraBillingPreConsume(relayInfo *relaycommon.RelayInfo, est
 	return rule.FeeQuota
 }
 
-// firstValidMatchingShortMsgRule returns the first valid rule whose Model and
+// firstValidMatchingShortMsgRule returns the first valid rule whose Group and
 // ResponseModes match, or nil when none match. Mirrors the evaluator's
 // rule-matching logic but returns the rule directly (no candidate/waive
 // evaluation — the post-response evaluator handles that).
-func firstValidMatchingShortMsgRule(cfg operation_setting.ShortMsgExtraBillingConfig, modelName, textMode string) *operation_setting.ShortMsgExtraBillingRule {
+func firstValidMatchingShortMsgRule(cfg operation_setting.ShortMsgExtraBillingConfig, groupName, textMode string) *operation_setting.ShortMsgExtraBillingRule {
+	groupName = strings.TrimSpace(groupName)
 	for i := range cfg.Rules {
 		rule := cfg.Rules[i]
-		// Inline rule validation: non-empty ID/Model, supported trigger,
+		// Inline rule validation: non-empty ID/Group, supported trigger,
 		// positive threshold and fee. Invalid rules are silently skipped.
-		if rule.ID == "" || rule.Model == "" {
+		ruleGroup := strings.TrimSpace(rule.Group)
+		if ruleGroup == "" {
+			ruleGroup = strings.TrimSpace(rule.Model)
+		}
+		if rule.ID == "" || ruleGroup == "" {
 			continue
 		}
 		if rule.Trigger != operation_setting.ShortMsgExtraBillingTriggerInputTokensBelow {
@@ -133,16 +141,34 @@ func firstValidMatchingShortMsgRule(cfg operation_setting.ShortMsgExtraBillingCo
 		if rule.Threshold <= 0 || rule.FeeQuota <= 0 {
 			continue
 		}
-		if rule.Model != modelName {
+		if ruleGroup != groupName {
 			continue
 		}
 		if len(rule.ResponseModes) > 0 && !containsShortMsgResponseMode(rule.ResponseModes, textMode) {
 			continue
 		}
 		matched := rule
+		matched.Group = ruleGroup
+		matched.Model = ""
 		return &matched
 	}
 	return nil
+}
+
+func resolveShortMsgBillingGroup(relayInfo *relaycommon.RelayInfo) string {
+	if relayInfo == nil {
+		return ""
+	}
+	if strings.TrimSpace(relayInfo.TokenGroup) != "" {
+		return strings.TrimSpace(relayInfo.TokenGroup)
+	}
+	if strings.TrimSpace(relayInfo.UsingGroup) != "" {
+		return strings.TrimSpace(relayInfo.UsingGroup)
+	}
+	if strings.TrimSpace(relayInfo.UserGroup) != "" {
+		return strings.TrimSpace(relayInfo.UserGroup)
+	}
+	return strings.TrimSpace(relayInfo.OriginModelName)
 }
 
 func containsShortMsgResponseMode(list []string, target string) bool {

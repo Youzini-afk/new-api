@@ -264,7 +264,7 @@ func TestUpdateOption_ShortMsgExtraBillingValidation(t *testing.T) {
 
 	// Valid config with whitespace + duplicate response modes -> accepted,
 	// normalized, and applied to the in-memory QuotaSetting.
-	ctx, recorder = newOptionUpdateContext(t, operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"shadow","rules":[{"id":"  r1  ","model":"  gpt-4o-mini  ","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"response_modes":["  claude ","claude"," gemini "]}]}`)
+	ctx, recorder = newOptionUpdateContext(t, operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"shadow","rules":[{"id":"  r1  ","group":"  default  ","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"response_modes":["  claude ","claude"," gemini "]}]}`)
 	UpdateOption(ctx)
 	resp = decodeLogScreeningResponse(t, recorder)
 	require.True(t, resp.Success, "valid config should persist: %s", resp.Message)
@@ -273,11 +273,11 @@ func TestUpdateOption_ShortMsgExtraBillingValidation(t *testing.T) {
 	require.Equal(t, operation_setting.ShortMsgExtraBillingModeShadow, qs.ShortMsgExtraBilling.Mode)
 	require.Len(t, qs.ShortMsgExtraBilling.Rules, 1)
 	assert.Equal(t, "r1", qs.ShortMsgExtraBilling.Rules[0].ID, "id should be trimmed in-memory")
-	assert.Equal(t, "gpt-4o-mini", qs.ShortMsgExtraBilling.Rules[0].Model, "model should be trimmed in-memory")
+	assert.Equal(t, "default", qs.ShortMsgExtraBilling.Rules[0].Group, "group should be trimmed in-memory")
 	assert.Equal(t, []string{"claude", "gemini"}, qs.ShortMsgExtraBilling.Rules[0].ResponseModes, "response_modes should be trimmed+deduped in-memory")
 
 	// The persisted row holds the normalized JSON string, not the raw input.
 	var opt model.Option
 	require.NoError(t, model.DB.First(&opt, model.Option{Key: operation_setting.ShortMsgExtraBillingOptionKey}).Error)
-	assert.JSONEq(t, `{"mode":"shadow","rules":[{"id":"r1","model":"gpt-4o-mini","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"waive_when_completion_tokens_zero":false,"response_modes":["claude","gemini"]}]}`, opt.Value)
+	assert.JSONEq(t, `{"mode":"shadow","rules":[{"id":"r1","group":"default","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"waive_when_completion_tokens_zero":false,"response_modes":["claude","gemini"]}]}`, opt.Value)
 }
