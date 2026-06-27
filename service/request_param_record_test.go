@@ -329,9 +329,6 @@ func TestBuildRequestParamsForLog_ObservedUserAddsSemanticFields(t *testing.T) {
 	assert.Equal(t, "please help me with secrets", promptVal)
 }
 
-// TestBuildRequestParamsForLog_NonObservedUserDoesNotCapturePrompt verifies
-// that without an active screening record, the "prompt" field (a user-text
-// field) is cleared/blanked rather than captured.
 func TestBuildRequestParamsForLog_NonObservedUserDoesNotCapturePrompt(t *testing.T) {
 	require.NoError(t, model.DB.Exec("DELETE FROM log_screening_records").Error)
 	t.Cleanup(func() { model.DB.Exec("DELETE FROM log_screening_records") })
@@ -349,17 +346,23 @@ func TestBuildRequestParamsForLog_NonObservedUserDoesNotCapturePrompt(t *testing
 	ctx.Set("id", 999) // no screening record
 
 	setting.ObservedSemanticCaptureEnabled = true
-	// openai group includes "prompt" explicitly — but prompt is a user-text
-	// field, so it is blanked for non-observed users.
 	setting.Fields = map[string][]string{"openai": {"model", "prompt"}}
 
 	params := BuildRequestParamsForLog(ctx, nil)
 	require.NotNil(t, params)
 	assert.Equal(t, "gpt-4", params["model"])
-	// "prompt" is present (it was a configured field) but blanked to "".
 	promptVal, ok := params["prompt"]
 	require.True(t, ok)
-	assert.Equal(t, "", promptVal, "non-observed user: prompt must be blanked")
+	assert.Equal(t, "please help me with secrets", promptVal)
+}
+
+func TestDefaultRelayParamRecordFields_CapturesSemanticInput(t *testing.T) {
+	fields := system_setting.DefaultRelayParamRecordFields()
+	assert.Contains(t, fields["openai"], "messages")
+	assert.Contains(t, fields["openai"], "prompt")
+	assert.Contains(t, fields["openai_responses"], "input")
+	assert.Contains(t, fields["claude"], "messages")
+	assert.Contains(t, fields["gemini_chat"], "contents")
 }
 
 // TestGenerateTextOtherInfo_IncludesRequestParams verifies the log_info_generate

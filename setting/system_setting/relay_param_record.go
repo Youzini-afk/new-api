@@ -96,6 +96,9 @@ func DefaultRelayParamRecordFields() map[string][]string {
 	return map[string][]string{
 		"openai": {
 			"model",
+			"messages",
+			"prompt",
+			"input",
 			"stream_options.include_usage",
 			"max_completion_tokens",
 			"verbosity",
@@ -122,6 +125,8 @@ func DefaultRelayParamRecordFields() map[string][]string {
 		},
 		"openai_responses": {
 			"model",
+			"input",
+			"instructions",
 			"max_output_tokens",
 			"parallel_tool_calls",
 			"reasoning.effort",
@@ -136,11 +141,13 @@ func DefaultRelayParamRecordFields() map[string][]string {
 		},
 		"embeddings": {
 			"model",
+			"input",
 			"encoding_format",
 			"dimensions",
 		},
 		"images": {
 			"model",
+			"prompt",
 			"n",
 			"quality",
 			"size",
@@ -153,6 +160,7 @@ func DefaultRelayParamRecordFields() map[string][]string {
 		},
 		"audio": {
 			"model",
+			"input",
 			"voice",
 			"response_format",
 			"stream_format",
@@ -160,6 +168,9 @@ func DefaultRelayParamRecordFields() map[string][]string {
 		},
 		"claude": {
 			"model",
+			"system",
+			"messages",
+			"prompt",
 			"max_tokens",
 			"stop_sequences",
 			"top_p",
@@ -173,6 +184,8 @@ func DefaultRelayParamRecordFields() map[string][]string {
 			"metadata",
 		},
 		"gemini_chat": {
+			"contents",
+			"systemInstruction",
 			"generationConfig",
 			"toolConfig",
 			"safetySettings",
@@ -187,6 +200,8 @@ func DefaultRelayParamRecordFields() map[string][]string {
 		"gemini_batch_embedding": {},
 		"rerank": {
 			"model",
+			"query",
+			"documents",
 			"return_documents",
 			"overlap_tokens",
 			"top_n",

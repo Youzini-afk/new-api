@@ -478,8 +478,11 @@ func sanitizeParamValueForGroup(group string, field string, value interface{}, m
 		return sanitizeObservedUserTextValue(value, maxBytes)
 	}
 	if shouldClearUserTextField(lowerField) {
-		if observedUser && shouldKeepUserTextField(field) {
-			return sanitizeObservedUserTextValue(value, observedSemanticMaxBytes)
+		if shouldKeepUserTextField(field) {
+			if observedUser {
+				return sanitizeObservedUserTextValue(value, observedSemanticMaxBytes)
+			}
+			return sanitizeObservedUserTextValue(value, maxBytes)
 		}
 		return sanitizeUserTextValue(value, systemDeveloperMaxBytes)
 	}
@@ -1252,15 +1255,15 @@ func requestToMap(request dto.Request) map[string]interface{} {
 // (header keys are canonicalized by gin/http before reaching here, but we
 // normalize defensively).
 var rawInterceptHeaderDenylist = map[string]struct{}{
-	"Authorization":    {},
-	"Proxy-Authorization": {},
-	"Cookie":           {},
-	"Set-Cookie":       {},
-	"X-Api-Key":        {},
-	"Api-Key":          {},
+	"Authorization":             {},
+	"Proxy-Authorization":       {},
+	"Cookie":                    {},
+	"Set-Cookie":                {},
+	"X-Api-Key":                 {},
+	"Api-Key":                   {},
 	"Ocp-Apim-Subscription-Key": {},
-	"Anthropic-Api-Key": {},
-	"X-Goog-Api-Key":   {},
+	"Anthropic-Api-Key":         {},
+	"X-Goog-Api-Key":            {},
 }
 
 // isRawInterceptHeaderSensitive reports whether a header key is sensitive and
