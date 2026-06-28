@@ -112,7 +112,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
   const items = signatures ?? []
 
   return (
-    <div className='bg-card flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border-0 shadow-sm'>
+    <div className='bg-card flex flex-col overflow-hidden rounded-2xl border-0 shadow-sm'>
       <div className='flex flex-wrap items-start justify-between gap-3 px-6 py-5'>
         <div className='space-y-1'>
           <h2 className='text-xl font-bold'>
@@ -128,7 +128,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
           {t('Default unmatched only')}
         </Badge>
       </div>
-      <div className='min-h-0 flex-1 overflow-auto'>
+      <div className='overflow-x-auto'>
         {error ? (
           <ErrorState
             title={t('Failed to load')}

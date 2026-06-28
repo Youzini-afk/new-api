@@ -112,8 +112,8 @@ export function LogsTable(props: LogsTableProps) {
   }
 
   return (
-    <div className='bg-card ring-foreground/10 flex h-full min-h-0 flex-col overflow-hidden rounded-xl ring-1'>
-      <div className='min-h-0 flex-1 overflow-auto'>
+    <div className='bg-card ring-foreground/10 flex flex-col overflow-hidden rounded-xl ring-1'>
+      <div className='overflow-x-auto'>
         {error ? (
           <ErrorState
             title={t('Failed to load')}

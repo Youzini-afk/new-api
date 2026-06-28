@@ -116,7 +116,7 @@ export function ErrorInsightPage() {
   }, [])
 
   return (
-    <SectionPageLayout fixedContent>
+    <SectionPageLayout>
       <SectionPageLayout.Title>
         <span className='inline-flex items-center gap-2'>
           <ShieldAlert className='size-5' />
@@ -124,7 +124,7 @@ export function ErrorInsightPage() {
         </span>
       </SectionPageLayout.Title>
       <SectionPageLayout.Content>
-        <div className='flex h-full min-h-0 flex-col gap-7'>
+        <div className='flex flex-col gap-7'>
           <SummaryCards
             data={summary}
             isLoading={summaryLoading}
@@ -137,7 +137,7 @@ export function ErrorInsightPage() {
           <Tabs
             value={activeTab}
             onValueChange={handleTabChange}
-            className='flex min-h-0 flex-1 flex-col gap-4'
+            className='flex flex-col gap-4'
           >
             <TabsList className='bg-card/70 ring-foreground/10 w-full justify-start rounded-xl ring-1 sm:w-auto'>
               {ERROR_INSIGHT_TABS.map((tab) => (
@@ -147,7 +147,7 @@ export function ErrorInsightPage() {
               ))}
             </TabsList>
 
-            <div className='min-h-0 flex-1'>
+            <div>
               {activeTab === 'signatures' ? (
                 <SignaturesTable
                   params={apiParams}
