@@ -234,6 +234,30 @@ func discordGatePatrolBatchSize(eligibleCount int64, intervalMinutes, targetSwee
 	return batch
 }
 
+func discordGatePatrolEffectiveBatchSize(mode string, requestedBatchSize int, eligibleCount int64, settings *system_setting.DiscordSettings) int {
+	maxBatchSize := 1000
+	intervalMinutes := 5
+	targetSweepHours := 24
+	if settings != nil {
+		maxBatchSize = settings.LoginGatePatrolMaxBatchSize
+		intervalMinutes = settings.LoginGatePatrolIntervalMinutes
+		targetSweepHours = settings.LoginGatePatrolTargetSweepHours
+	}
+	if maxBatchSize <= 0 {
+		maxBatchSize = 1000
+	}
+	if requestedBatchSize > 0 {
+		if requestedBatchSize > maxBatchSize {
+			return maxBatchSize
+		}
+		return requestedBatchSize
+	}
+	if mode == discordGatePatrolModeScheduled {
+		return discordGatePatrolBatchSize(eligibleCount, intervalMinutes, targetSweepHours, maxBatchSize)
+	}
+	return maxBatchSize
+}
+
 func runDiscordGatePatrolTask(ctx context.Context, task *model.SystemTask, runnerID string, payload discordGatePatrolPayload) (discordGatePatrolResult, error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -245,17 +269,11 @@ func runDiscordGatePatrolTask(ctx context.Context, task *model.SystemTask, runne
 	if payload.Mode != discordGatePatrolModeManualBatch && payload.Mode != discordGatePatrolModeScheduled {
 		return discordGatePatrolResult{}, fmt.Errorf("unsupported discord gate patrol mode: %s", payload.Mode)
 	}
-	batchSize := payload.BatchSize
-	if batchSize <= 0 {
-		count, err := model.CountDiscordGatePatrolEligibleUsers(runCtx)
-		if err != nil {
-			return discordGatePatrolResult{}, err
-		}
-		batchSize = discordGatePatrolBatchSize(count, settings.LoginGatePatrolIntervalMinutes, settings.LoginGatePatrolTargetSweepHours, settings.LoginGatePatrolMaxBatchSize)
+	count, err := model.CountDiscordGatePatrolEligibleUsers(runCtx)
+	if err != nil {
+		return discordGatePatrolResult{}, err
 	}
-	if batchSize > settings.LoginGatePatrolMaxBatchSize {
-		batchSize = settings.LoginGatePatrolMaxBatchSize
-	}
+	batchSize := discordGatePatrolEffectiveBatchSize(payload.Mode, payload.BatchSize, count, settings)
 	users, err := model.FindDiscordGatePatrolEligibleUsers(runCtx, batchSize)
 	if err != nil {
 		return discordGatePatrolResult{}, err
