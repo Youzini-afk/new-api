@@ -21,7 +21,6 @@ For commercial licensing, please contact support@quantumnous.com
  */
 import { useTranslation } from 'react-i18next'
 import {
-  CheckCircle2,
   Hash,
   Radio,
   Users,
@@ -83,13 +82,6 @@ export function SummaryCards(props: SummaryCardsProps) {
             tone: 'amber',
           },
           {
-            key: 'matched',
-            labelKey: 'Matched Errors',
-            icon: CheckCircle2,
-            value: formatCompactNumber(data.rule_matched_count),
-            tone: 'mint',
-          },
-          {
             key: 'signatures',
             labelKey: 'Error Signatures',
             icon: Hash,
@@ -114,9 +106,9 @@ export function SummaryCards(props: SummaryCardsProps) {
     : []
 
   return (
-    <div className='grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3'>
+    <div className='grid grid-cols-1 gap-5 md:grid-cols-2'>
       {isLoading
-        ? Array.from({ length: 5 }).map((_, index) => (
+        ? Array.from({ length: 4 }).map((_, index) => (
             <Card
               key={index}
               className='bg-card/90 overflow-hidden border-0 shadow-sm'
