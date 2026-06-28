@@ -23,7 +23,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Eye, Loader2, Trash2 } from 'lucide-react'
+import { Eye, Loader2, Settings, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -46,10 +46,17 @@ import { formatCompactNumber } from '@/lib/format'
 import { formatTimestamp } from '@/lib/format'
 import {
   deleteErrorInsightSignature,
+  generateErrorInsightAIRules,
   getErrorInsightLogs,
   getErrorInsightSignatures,
+  saveErrorInsightAIRule,
 } from '../api'
-import type { ErrorInsightFilterParams, ErrorInsightLog } from '../types'
+import type {
+  ErrorInsightAIGenerateResult,
+  ErrorInsightFilterParams,
+  ErrorInsightLog,
+  ErrorInsightAIRuleSuggestion,
+} from '../types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
   Dialog,
@@ -61,6 +68,7 @@ import {
 
 interface SignaturesTableProps {
   params: ErrorInsightFilterParams
+  onOpenAISettings?: () => void
 }
 
 export function SignaturesTable(props: SignaturesTableProps) {
@@ -68,6 +76,8 @@ export function SignaturesTable(props: SignaturesTableProps) {
   const queryClient = useQueryClient()
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [sampleSignature, setSampleSignature] = useState<string | null>(null)
+  const [aiResult, setAIResult] = useState<ErrorInsightAIGenerateResult | null>(null)
+  const [editableRules, setEditableRules] = useState<ErrorInsightAIRuleSuggestion[]>([])
 
   const queryKey = useMemo(
     () => ['error-insight', 'signatures', props.params] as const,
@@ -115,9 +125,52 @@ export function SignaturesTable(props: SignaturesTableProps) {
     },
   })
 
+  const generateMutation = useMutation({
+    mutationFn: (signature: string) => generateErrorInsightAIRules(signature),
+    onSuccess: (result) => {
+      if (!result.success || !result.data) {
+        toast.error(result.message || t('Failed to generate rules'))
+        return
+      }
+      setAIResult(result.data)
+      setEditableRules(result.data.rules)
+      toast.success(t('Candidate rules generated'))
+    },
+    onError: (error) => {
+      toast.error(error.message || t('Failed to generate rules'))
+    },
+  })
+
   const handleConfirmDelete = () => {
     if (!pendingDelete) return
     deleteMutation.mutate(pendingDelete)
+  }
+
+  const saveRuleMutation = useMutation({
+    mutationFn: (rule: ErrorInsightAIRuleSuggestion) => saveErrorInsightAIRule(rule),
+    onSuccess: (result) => {
+      if (!result.success) {
+        toast.error(result.message || t('Failed to save candidate rule'))
+        return
+      }
+      toast.success(t('Candidate rule saved'))
+      void queryClient.invalidateQueries({ queryKey: ['error-insight'] })
+      void queryClient.invalidateQueries({ queryKey: ['system-options'] })
+    },
+    onError: (error) => {
+      toast.error(error.message || t('Failed to save candidate rule'))
+    },
+  })
+
+  const updateEditableRule = (
+    index: number,
+    patch: Partial<ErrorInsightAIRuleSuggestion>
+  ) => {
+    setEditableRules((current) =>
+      current.map((rule, ruleIndex) =>
+        ruleIndex === index ? { ...rule, ...patch } : rule
+      )
+    )
   }
 
   const items = signatures ?? []
@@ -156,9 +209,19 @@ export function SignaturesTable(props: SignaturesTableProps) {
             )}
           </p>
         </div>
-        <Badge className='bg-amber-500/20 text-amber-500 hover:bg-amber-500/20'>
-          {t('Default unmatched only')}
-        </Badge>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={props.onOpenAISettings}
+          >
+            <Settings className='size-4' />
+            {t('AI Settings')}
+          </Button>
+          <Badge className='bg-amber-500/20 text-amber-500 hover:bg-amber-500/20'>
+            {t('Default unmatched only')}
+          </Badge>
+        </div>
       </div>
       <div className='overflow-x-auto'>
         {error ? (
@@ -287,6 +350,23 @@ export function SignaturesTable(props: SignaturesTableProps) {
                       >
                         <Eye className='size-4' />
                       </Button>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='text-muted-foreground hover:text-amber-500 size-8'
+                        aria-label={t('AI Generate Rules')}
+                        disabled={generateMutation.isPending}
+                        onClick={() =>
+                          generateMutation.mutate(signature.normalized_signature)
+                        }
+                      >
+                        {generateMutation.isPending &&
+                        generateMutation.variables === signature.normalized_signature ? (
+                          <Loader2 className='size-4 animate-spin' />
+                        ) : (
+                          <Sparkles className='size-4' />
+                        )}
+                      </Button>
                       <Tooltip>
                         <TooltipTrigger
                           render={
@@ -390,6 +470,131 @@ export function SignaturesTable(props: SignaturesTableProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={aiResult !== null} onOpenChange={(open) => !open && setAIResult(null)}>
+        <DialogContent className='max-h-[88vh] overflow-y-auto p-6 sm:max-w-5xl'>
+          <DialogHeader className='gap-3'>
+            <DialogTitle className='text-2xl font-bold'>
+              {t('AI Candidate Rules')}
+            </DialogTitle>
+            <DialogDescription>
+              {t('Review and edit these candidate rules before adding them to governance rules.')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className='space-y-4'>
+            {editableRules.length ? (
+              editableRules.map((rule, index) => (
+                <div key={`${rule.rule_code}-${index}`} className='bg-muted/40 rounded-2xl p-5'>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <Badge variant='secondary'>{t('Candidate')} #{index + 1}</Badge>
+                    <Badge variant='outline'>{rule.category || '-'}</Badge>
+                    <Badge className='bg-cyan-500/20 text-cyan-500 hover:bg-cyan-500/20'>
+                      {rule.match_type || '-'}
+                    </Badge>
+                    <Badge className='bg-amber-500/20 text-amber-500 hover:bg-amber-500/20'>
+                      {t('Confidence')} {Math.round((rule.confidence || 0) * 100)}%
+                    </Badge>
+                  </div>
+                  <div className='mt-4 grid gap-4 md:grid-cols-2'>
+                    <RuleInput
+                      label={t('Rule Code')}
+                      value={rule.rule_code}
+                      onChange={(value) => updateEditableRule(index, { rule_code: value })}
+                    />
+                    <RuleSelect
+                      label={t('Match Type')}
+                      value={rule.match_type}
+                      onChange={(value) => updateEditableRule(index, { match_type: value })}
+                    />
+                    <RuleTextarea
+                      label={t('Match Pattern')}
+                      value={rule.match_pattern}
+                      onChange={(value) => updateEditableRule(index, { match_pattern: value })}
+                    />
+                    <RuleInput
+                      label={t('Safe Error Code')}
+                      value={rule.safe_error_code}
+                      onChange={(value) => updateEditableRule(index, { safe_error_code: value })}
+                    />
+                    <RuleInput
+                      label={t('Safe Error Type')}
+                      value={rule.safe_error_type}
+                      onChange={(value) => updateEditableRule(index, { safe_error_type: value })}
+                    />
+                    <RuleTextarea
+                      label={t('Safe Error Message')}
+                      value={rule.safe_error_message}
+                      onChange={(value) => updateEditableRule(index, { safe_error_message: value })}
+                    />
+                  </div>
+                  <div className='mt-4'>
+                    <p className='text-muted-foreground text-xs font-semibold'>{t('Reason')}</p>
+                    <p className='mt-1 text-sm whitespace-pre-wrap'>{rule.reason || '-'}</p>
+                  </div>
+                  <div className='mt-5 flex justify-end'>
+                    <Button
+                      disabled={saveRuleMutation.isPending}
+                      onClick={() => saveRuleMutation.mutate(rule)}
+                    >
+                      {saveRuleMutation.isPending && <Loader2 className='size-4 animate-spin' />}
+                      {t('Approve and Save Rule')}
+                    </Button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyState
+                title={t('No candidate rules')}
+                description={t('AI did not return usable candidate rules.')}
+                className='min-h-[200px]'
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+function RuleInput(props: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <div className='space-y-1.5'>
+      <p className='text-muted-foreground text-xs font-semibold'>{props.label}</p>
+      <input
+        value={props.value || ''}
+        className='border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+    </div>
+  )
+}
+
+function RuleTextarea(props: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <div className='space-y-1.5'>
+      <p className='text-muted-foreground text-xs font-semibold'>{props.label}</p>
+      <textarea
+        value={props.value || ''}
+        className='border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-24 w-full rounded-md border px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+    </div>
+  )
+}
+
+function RuleSelect(props: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <div className='space-y-1.5'>
+      <p className='text-muted-foreground text-xs font-semibold'>{props.label}</p>
+      <select
+        value={props.value || 'contains'}
+        className='border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
+        onChange={(event) => props.onChange(event.target.value)}
+      >
+        <option value='contains'>contains</option>
+        <option value='regex'>regex</option>
+      </select>
     </div>
   )
 }

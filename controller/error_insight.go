@@ -1,11 +1,28 @@
 package controller
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -120,6 +137,153 @@ func DeleteErrorInsightSignature(c *gin.Context) {
 	})
 }
 
+func GetErrorInsightAISetting(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    system_setting.GetErrorInsightAISetting(),
+	})
+}
+
+func SaveErrorInsightAISetting(c *gin.Context) {
+	var req system_setting.ErrorInsightAISetting
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid request body"})
+		return
+	}
+	req = system_setting.NormalizeErrorInsightAISetting(req)
+	if req.Enabled && req.ChannelID <= 0 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel is required when AI generation is enabled"})
+		return
+	}
+	if req.Enabled && strings.TrimSpace(req.Model) == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "model is required when AI generation is enabled"})
+		return
+	}
+	if !json.Valid(req.JSONOutputParams) {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "json output params must be valid JSON"})
+		return
+	}
+	values, err := errorInsightAISettingToOptions(req)
+	if err != nil {
+		common.SysError("failed to encode error insight ai setting: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to save setting"})
+		return
+	}
+	if err := model.UpdateOptionsBulk(values); err != nil {
+		common.SysError("failed to save error insight ai setting: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": system_setting.GetErrorInsightAISetting()})
+}
+
+type ErrorInsightAIGenerateRequest struct {
+	Signature string `json:"signature"`
+}
+
+type SaveErrorInsightCustomAIRuleRequest struct {
+	Rule ErrorInsightAIRuleSuggestion `json:"rule"`
+}
+
+func GenerateErrorInsightAIRules(c *gin.Context) {
+	var req ErrorInsightAIGenerateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid request body"})
+		return
+	}
+	req.Signature = strings.TrimSpace(req.Signature)
+	if !model.ValidateNormalizedSignature(req.Signature) {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid signature"})
+		return
+	}
+	cfg := system_setting.GetErrorInsightAISetting()
+	if !cfg.Enabled {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "AI generation is disabled"})
+		return
+	}
+	if cfg.ChannelID <= 0 || strings.TrimSpace(cfg.Model) == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "AI channel and model are required"})
+		return
+	}
+	params := model.ErrorLogsListParams{NormalizedSignature: req.Signature, Page: 1, PageSize: cfg.SampleSize}
+	logs, _, err := model.GetErrorLogList(&params)
+	if err != nil {
+		common.SysError("failed to load error insight samples: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to load sample logs"})
+		return
+	}
+	if len(logs) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "no sample logs found"})
+		return
+	}
+	content, err := generateErrorInsightRulesWithAI(c, cfg, req.Signature, logs)
+	if err != nil {
+		common.SysError("failed to generate error insight ai rules: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	rules, raw, err := parseErrorInsightAISuggestions(content)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error(), "data": gin.H{"raw": content}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"rules": rules, "raw": raw}})
+}
+
+func SaveErrorInsightCustomAIRule(c *gin.Context) {
+	var req SaveErrorInsightCustomAIRuleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid request body"})
+		return
+	}
+	rule, err := normalizeErrorInsightCustomRule(req.Rule)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	cfg := system_setting.GetRelayErrorGovernanceSetting()
+	if cfg == nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to load governance setting"})
+		return
+	}
+	customRules := make([]system_setting.RelayErrorGovernanceCustomRuleConfig, 0, len(cfg.CustomRules)+1)
+	updated := false
+	for _, existing := range cfg.CustomRules {
+		if existing.RuleCode == rule.RuleCode {
+			customRules = append(customRules, rule)
+			updated = true
+			continue
+		}
+		customRules = append(customRules, existing)
+	}
+	if !updated {
+		customRules = append(customRules, rule)
+	}
+	merged := system_setting.RelayErrorGovernanceSetting{
+		Enabled:     cfg.Enabled,
+		Rules:       cfg.Rules,
+		CustomRules: customRules,
+	}
+	value, err := json.Marshal(merged)
+	if err != nil {
+		common.SysError("failed to encode error insight custom rule: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to save rule"})
+		return
+	}
+	if err := model.UpdateOptionsBulk(map[string]string{
+		"relay_error_governance.enabled":      strconv.FormatBool(merged.Enabled),
+		"relay_error_governance.rules":        mustMarshalString(merged.Rules),
+		"relay_error_governance.custom_rules": string(mustMarshalBytes(merged.CustomRules)),
+		"relay_error_governance":              string(value),
+	}); err != nil {
+		common.SysError("failed to save error insight custom rule: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": rule})
+}
+
 // parseErrorInsightPageParam is a small helper for backward-compatible page
 // parsing from query strings. Returns page (default 1) and pageSize (default 20, max 100).
 func parseErrorInsightPageParam(c *gin.Context) (int, int) {
@@ -132,4 +296,369 @@ func parseErrorInsightPageParam(c *gin.Context) (int, int) {
 		pageSize = 20
 	}
 	return page, pageSize
+}
+
+func errorInsightAISettingToOptions(setting system_setting.ErrorInsightAISetting) (map[string]string, error) {
+	jsonParams := json.RawMessage([]byte("{}"))
+	if len(setting.JSONOutputParams) > 0 {
+		jsonParams = setting.JSONOutputParams
+	}
+	if !json.Valid(jsonParams) {
+		return nil, errors.New("invalid json output params")
+	}
+	return map[string]string{
+		"error_insight_ai.enabled":                strconv.FormatBool(setting.Enabled),
+		"error_insight_ai.channel_id":             strconv.Itoa(setting.ChannelID),
+		"error_insight_ai.model":                  setting.Model,
+		"error_insight_ai.sample_size":            strconv.Itoa(setting.SampleSize),
+		"error_insight_ai.batch_limit":            strconv.Itoa(setting.BatchLimit),
+		"error_insight_ai.include_original_error": strconv.FormatBool(setting.IncludeOriginalError),
+		"error_insight_ai.redact_sensitive":       strconv.FormatBool(setting.RedactSensitive),
+		"error_insight_ai.prompt_template":        setting.PromptTemplate,
+		"error_insight_ai.json_output_params":     string(jsonParams),
+	}, nil
+}
+
+func generateErrorInsightRulesWithAI(c *gin.Context, cfg *system_setting.ErrorInsightAISetting, signature string, logs []*model.ErrorLog) (string, error) {
+	channel, err := model.GetChannelById(cfg.ChannelID, true)
+	if err != nil {
+		return "", errors.New("failed to load AI channel")
+	}
+	if channel.Status != common.ChannelStatusEnabled {
+		return "", errors.New("AI channel is not enabled")
+	}
+	prompt, err := buildErrorInsightAIPrompt(cfg, signature, logs)
+	if err != nil {
+		return "", err
+	}
+	request := &dto.GeneralOpenAIRequest{
+		Model: cfg.Model,
+		Messages: []dto.Message{
+			{Role: "user", Content: prompt},
+		},
+	}
+	if err := applyErrorInsightAIJSONParams(request, cfg.JSONOutputParams); err != nil {
+		return "", err
+	}
+	relayCtx, _ := gin.CreateTestContext(c.Writer)
+	relayCtx.Request = c.Request.Clone(context.Background())
+	relayCtx.Request.Method = http.MethodPost
+	relayCtx.Request.URL.Path = "/v1/chat/completions"
+	if newAPIError := middleware.SetupContextForSelectedChannel(relayCtx, channel, cfg.Model); newAPIError != nil {
+		return "", newAPIError
+	}
+	apiType, ok := common.ChannelType2APIType(channel.Type)
+	if !ok {
+		return "", errors.New("unsupported AI channel type")
+	}
+	info, err := relaycommon.GenRelayInfo(relayCtx, types.RelayFormatOpenAI, request, nil)
+	if err != nil {
+		return "", err
+	}
+	info.RelayMode = relayconstant.RelayModeChatCompletions
+	info.IsChannelTest = true
+	info.InitChannelMeta(relayCtx)
+	if err := helper.ModelMappedHelper(relayCtx, info, request); err != nil {
+		return "", err
+	}
+	request.SetModelName(info.UpstreamModelName)
+	adaptor := relay.GetAdaptor(apiType)
+	if adaptor == nil {
+		return "", errors.New("invalid AI channel adaptor")
+	}
+	adaptor.Init(info)
+	convertedRequest, err := adaptor.ConvertOpenAIRequest(relayCtx, info, request)
+	if err != nil {
+		return "", err
+	}
+	jsonData, err := common.Marshal(convertedRequest)
+	if err != nil {
+		return "", err
+	}
+	if len(info.ParamOverride) > 0 {
+		jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+		if err != nil {
+			return "", err
+		}
+	}
+	jsonData, err = mergeErrorInsightAIJSONParams(jsonData, cfg.JSONOutputParams)
+	if err != nil {
+		return "", err
+	}
+	reqBody := bytes.NewBuffer(jsonData)
+	relayCtx.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+	resp, err := adaptor.DoRequest(relayCtx, info, reqBody)
+	if err != nil {
+		return "", err
+	}
+	if resp == nil {
+		return "", errors.New("AI channel returned empty response")
+	}
+	httpResp := resp.(*http.Response)
+	if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
+		err := service.RelayErrorHandler(relayCtx.Request.Context(), httpResp, true)
+		return "", fmt.Errorf("AI channel request failed: %w", err)
+	}
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return "", err
+	}
+	_ = httpResp.Body.Close()
+	return extractErrorInsightAIContent(body)
+}
+
+func applyErrorInsightAIJSONParams(request *dto.GeneralOpenAIRequest, params json.RawMessage) error {
+	if len(params) == 0 || string(params) == "null" {
+		return nil
+	}
+	var extra map[string]json.RawMessage
+	if err := json.Unmarshal(params, &extra); err != nil {
+		return errors.New("json output params must be a JSON object")
+	}
+	if raw, ok := extra["response_format"]; ok {
+		var responseFormat dto.ResponseFormat
+		if err := json.Unmarshal(raw, &responseFormat); err != nil {
+			return errors.New("response_format in JSON output params is invalid")
+		}
+		request.ResponseFormat = &responseFormat
+	}
+	return nil
+}
+
+func mergeErrorInsightAIJSONParams(jsonData []byte, params json.RawMessage) ([]byte, error) {
+	if len(params) == 0 || string(params) == "null" {
+		return jsonData, nil
+	}
+	var extra map[string]json.RawMessage
+	if err := json.Unmarshal(params, &extra); err != nil {
+		return nil, errors.New("json output params must be a JSON object")
+	}
+	if len(extra) == 0 {
+		return jsonData, nil
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(jsonData, &payload); err != nil {
+		return nil, err
+	}
+	for key, value := range extra {
+		payload[key] = value
+	}
+	return json.Marshal(payload)
+}
+
+func buildErrorInsightAIPrompt(cfg *system_setting.ErrorInsightAISetting, signature string, logs []*model.ErrorLog) (string, error) {
+	samples := make([]map[string]any, 0, len(logs))
+	for _, log := range logs {
+		item := map[string]any{
+			"created_at":             log.CreatedAt,
+			"user_id":                log.UserId,
+			"channel_id":             log.ChannelId,
+			"model_name":             log.ModelName,
+			"request_path":           log.RequestPath,
+			"error_source":           log.ErrorSource,
+			"error_stage":            log.ErrorStage,
+			"client_status_code":     log.ClientStatusCode,
+			"upstream_status_code":   log.UpstreamStatusCode,
+			"safe_error_code":        log.SafeErrorCode,
+			"safe_error_type":        log.SafeErrorType,
+			"safe_error_message":     log.SafeErrorMessage,
+			"original_error_code":    redactErrorInsightAIText(log.OriginalErrorCode, cfg.RedactSensitive),
+			"original_error_type":    redactErrorInsightAIText(log.OriginalErrorType, cfg.RedactSensitive),
+			"normalized_signature":   log.NormalizedSignature,
+			"request_time":           log.RequestTime,
+			"retry_count":            log.RetryCount,
+			"unmatched_reason":       log.UnmatchedReason,
+			"current_rule_matched":   log.RuleMatched,
+			"current_rule_code":      log.RuleCode,
+		}
+		if cfg.IncludeOriginalError {
+			item["original_error_message"] = redactErrorInsightAIText(log.OriginalErrorMessage, cfg.RedactSensitive)
+		}
+		samples = append(samples, item)
+	}
+	sampleBytes, err := json.MarshalIndent(samples, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	prompt := cfg.PromptTemplate
+	prompt = strings.ReplaceAll(prompt, "{{signature}}", signature)
+	prompt = strings.ReplaceAll(prompt, "{{sample_logs}}", string(sampleBytes))
+	return prompt, nil
+}
+
+var errorInsightAIRedactors = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+`),
+	regexp.MustCompile(`(?i)((api[_-]?key|token|secret|cookie|key)\s*[:=]\s*)[^\s,;]+`),
+	regexp.MustCompile(`sk-[A-Za-z0-9_-]{12,}`),
+}
+
+func redactErrorInsightAIText(text string, enabled bool) string {
+	if !enabled || text == "" {
+		return text
+	}
+	for _, re := range errorInsightAIRedactors {
+		text = re.ReplaceAllString(text, `${1}[REDACTED]`)
+	}
+	if len(text) > 2000 {
+		text = text[:2000] + "...[truncated]"
+	}
+	return text
+}
+
+func extractErrorInsightAIContent(body []byte) (string, error) {
+	var payload struct {
+		Choices []struct {
+			Message struct {
+				Content any `json:"content"`
+			} `json:"message"`
+			Text string `json:"text"`
+		} `json:"choices"`
+		OutputText string `json:"output_text"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", err
+	}
+	if len(payload.Choices) > 0 {
+		if content := stringifyAIContent(payload.Choices[0].Message.Content); content != "" {
+			return content, nil
+		}
+		if strings.TrimSpace(payload.Choices[0].Text) != "" {
+			return strings.TrimSpace(payload.Choices[0].Text), nil
+		}
+	}
+	if strings.TrimSpace(payload.OutputText) != "" {
+		return strings.TrimSpace(payload.OutputText), nil
+	}
+	return "", errors.New("AI response does not contain content")
+}
+
+func stringifyAIContent(content any) string {
+	switch value := content.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case []any:
+		parts := make([]string, 0, len(value))
+		for _, item := range value {
+			if m, ok := item.(map[string]any); ok {
+				if text, ok := m["text"].(string); ok {
+					parts = append(parts, text)
+				}
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, ""))
+	default:
+		return ""
+	}
+}
+
+type ErrorInsightAIRuleSuggestion struct {
+	RuleCode         string  `json:"rule_code"`
+	Category         string  `json:"category"`
+	MatchType        string  `json:"match_type"`
+	MatchPattern     string  `json:"match_pattern"`
+	SafeErrorCode    string  `json:"safe_error_code"`
+	SafeErrorType    string  `json:"safe_error_type"`
+	SafeErrorMessage string  `json:"safe_error_message"`
+	Confidence       float64 `json:"confidence"`
+	Reason           string  `json:"reason"`
+}
+
+func parseErrorInsightAISuggestions(content string) ([]ErrorInsightAIRuleSuggestion, json.RawMessage, error) {
+	trimmed := strings.TrimSpace(content)
+	trimmed = strings.TrimPrefix(trimmed, "```json")
+	trimmed = strings.TrimPrefix(trimmed, "```")
+	trimmed = strings.TrimSuffix(trimmed, "```")
+	trimmed = strings.TrimSpace(trimmed)
+	var payload struct {
+		Rules []ErrorInsightAIRuleSuggestion `json:"rules"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return nil, nil, errors.New("AI response is not valid JSON")
+	}
+	for i := range payload.Rules {
+		payload.Rules[i].RuleCode = strings.TrimSpace(payload.Rules[i].RuleCode)
+		payload.Rules[i].Category = strings.TrimSpace(payload.Rules[i].Category)
+		payload.Rules[i].MatchType = strings.TrimSpace(payload.Rules[i].MatchType)
+		payload.Rules[i].MatchPattern = strings.TrimSpace(payload.Rules[i].MatchPattern)
+		payload.Rules[i].SafeErrorCode = strings.TrimSpace(payload.Rules[i].SafeErrorCode)
+		payload.Rules[i].SafeErrorType = strings.TrimSpace(payload.Rules[i].SafeErrorType)
+		payload.Rules[i].SafeErrorMessage = strings.TrimSpace(payload.Rules[i].SafeErrorMessage)
+		payload.Rules[i].Reason = strings.TrimSpace(payload.Rules[i].Reason)
+		if payload.Rules[i].MatchType == "regex" && payload.Rules[i].MatchPattern != "" {
+			if _, err := regexp.Compile(payload.Rules[i].MatchPattern); err != nil {
+				return nil, nil, fmt.Errorf("AI generated invalid regex for rule %s", payload.Rules[i].RuleCode)
+			}
+		}
+	}
+	if payload.Rules == nil {
+		payload.Rules = []ErrorInsightAIRuleSuggestion{}
+	}
+	return payload.Rules, json.RawMessage(trimmed), nil
+}
+
+var errorInsightAIRuleCodePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,80}$`)
+
+func normalizeErrorInsightCustomRule(input ErrorInsightAIRuleSuggestion) (system_setting.RelayErrorGovernanceCustomRuleConfig, error) {
+	ruleCode := strings.TrimSpace(input.RuleCode)
+	if ruleCode == "" {
+		ruleCode = "ai_" + strings.TrimSpace(input.Category)
+	}
+	ruleCode = strings.ReplaceAll(ruleCode, " ", "_")
+	if !errorInsightAIRuleCodePattern.MatchString(ruleCode) {
+		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("rule code must contain only letters, numbers, dot, underscore, or dash")
+	}
+	matchType := strings.TrimSpace(input.MatchType)
+	if matchType != "contains" && matchType != "regex" {
+		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match type must be contains or regex")
+	}
+	matchPattern := strings.TrimSpace(input.MatchPattern)
+	if matchPattern == "" {
+		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern is required")
+	}
+	if len(matchPattern) > 1000 {
+		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern is too long")
+	}
+	if matchType == "regex" {
+		if _, err := regexp.Compile(matchPattern); err != nil {
+			return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern must be a valid regex")
+		}
+	}
+	safeMessage := strings.TrimSpace(input.SafeErrorMessage)
+	if safeMessage == "" {
+		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("safe error message is required")
+	}
+	if len(safeMessage) > 500 {
+		safeMessage = safeMessage[:500]
+	}
+	safeCode := strings.TrimSpace(input.SafeErrorCode)
+	if safeCode == "" || !errorInsightAIRuleCodePattern.MatchString(safeCode) {
+		safeCode = ruleCode
+	}
+	safeType := strings.TrimSpace(input.SafeErrorType)
+	if safeType == "" || !errorInsightAIRuleCodePattern.MatchString(safeType) {
+		safeType = "service_unavailable"
+	}
+	return system_setting.RelayErrorGovernanceCustomRuleConfig{
+		Enabled:          true,
+		RuleCode:         ruleCode,
+		Category:         strings.TrimSpace(input.Category),
+		MatchType:        matchType,
+		MatchPattern:     matchPattern,
+		SafeErrorCode:    safeCode,
+		SafeErrorType:    safeType,
+		SafeErrorMessage: safeMessage,
+		StatusCode:       http.StatusServiceUnavailable,
+	}, nil
+}
+
+func mustMarshalString(value any) string {
+	return string(mustMarshalBytes(value))
+}
+
+func mustMarshalBytes(value any) []byte {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return []byte("null")
+	}
+	return data
 }

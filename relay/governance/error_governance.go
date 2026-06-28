@@ -63,6 +63,7 @@ const (
 	RelayMatchSourceExactParam   = "exact_param"
 	RelayMatchSourceKeyword      = "keyword"
 	RelayMatchSourceStatusCode   = "status_code"
+	RelayMatchSourceCustomRule   = "custom_rule"
 	RelayMatchSourceFallback     = "fallback"
 	RelayMatchSourceDisabledRule = "disabled_rule_fallback"
 )
@@ -272,12 +273,12 @@ func SanitizeRelayErrorForClient(c *gin.Context, err *types.NewAPIError) SafeErr
 
 	oai := types.OpenAIError{
 		Message: withLocalRequestID(c, effectiveMessage(effectiveCode, rules)),
-		Type:    ruleType(effectiveCode),
+		Type:    ruleType(effectiveCode, rules),
 		Code:    effectiveCode,
-		Param:   ruleParam(effectiveCode),
+		Param:   ruleParam(effectiveCode, rules),
 	}
 	return SafeErrorPayload{
-		StatusCode:  normalizedStatusFor(effectiveCode, in.StatusCode, cls.StatusCode),
+		StatusCode:  normalizedStatusFor(effectiveCode, in.StatusCode, cls.StatusCode, rules),
 		OpenAIError: oai,
 	}
 }
@@ -331,19 +332,50 @@ func NormalizeRelayErrorForAnalytics(in RelayErrorInput, ruleCode string, source
 }
 
 func classifyWithRules(in RelayErrorInput, rules map[string]effectiveRelayRule) Classification {
+	if match, ok := matchCustomRelayError(in, rules); ok {
+		return byMatchWithRules(match, rules)
+	}
 	match := classifyMatchWithContext(in, "", "")
 	if rule, ok := rules[match.Code]; ok && !rule.Enabled {
 		match = relayErrorMatch{Code: RelayRuleInternalError, RuleMatched: false, MatchSource: RelayMatchSourceDisabledRule, UnmatchedReason: RelayUnmatchedReasonDisabledRuleFallback}
 	}
-	return byMatch(match)
+	return byMatchWithRules(match, rules)
 }
 
 func classifyWithContext(in RelayErrorInput, source string, stage string) Classification {
+	rules := effectiveRules()
+	if match, ok := matchCustomRelayError(in, rules); ok {
+		return byMatchWithRules(match, rules)
+	}
 	match := classifyMatchWithContext(in, source, stage)
 	if _, ok := relayRules[match.Code]; !ok {
 		match = relayErrorMatch{Code: RelayRuleInternalError, RuleMatched: false, MatchSource: RelayMatchSourceFallback, UnmatchedReason: RelayUnmatchedReasonLocalSystemError}
 	}
-	return byMatch(match)
+	return byMatchWithRules(match, rules)
+}
+
+func matchCustomRelayError(in RelayErrorInput, rules map[string]effectiveRelayRule) (relayErrorMatch, bool) {
+	msg := lowerJoin(in.Message, in.Param, in.Code, in.Type)
+	if strings.TrimSpace(msg) == "" {
+		return relayErrorMatch{}, false
+	}
+	for code, rule := range rules {
+		if !rule.Custom || !rule.Enabled || rule.MatchPattern == "" {
+			continue
+		}
+		switch rule.MatchType {
+		case "contains":
+			if strings.Contains(msg, strings.ToLower(rule.MatchPattern)) {
+				return matched(code, RelayMatchSourceCustomRule), true
+			}
+		case "regex":
+			re, err := regexp.Compile(rule.MatchPattern)
+			if err == nil && re.MatchString(msg) {
+				return matched(code, RelayMatchSourceCustomRule), true
+			}
+		}
+	}
+	return relayErrorMatch{}, false
 }
 
 func classifyMatchWithContext(in RelayErrorInput, source string, stage string) relayErrorMatch {
@@ -505,6 +537,23 @@ func unmatched(reason string) relayErrorMatch {
 }
 
 func byMatch(match relayErrorMatch) Classification {
+	return byMatchWithRules(match, defaultEffectiveRules())
+}
+
+func byMatchWithRules(match relayErrorMatch, rules map[string]effectiveRelayRule) Classification {
+	if rule, ok := rules[match.Code]; ok {
+		return Classification{
+			AdviceCode:      rule.Code,
+			StatusCode:      rule.Status,
+			Type:            rule.Type,
+			Code:            rule.Code,
+			Param:           rule.Param,
+			RuleMatched:     match.RuleMatched,
+			MatchSource:     match.MatchSource,
+			UnmatchedReason: match.UnmatchedReason,
+			RuleVersion:     RelayErrorGovernanceRuleVersion,
+		}
+	}
 	rule, ok := relayRules[match.Code]
 	if !ok {
 		rule = relayRules[RelayRuleInternalError]
@@ -529,21 +578,31 @@ func byMatch(match relayErrorMatch) Classification {
 // --- Rule resolution helpers ---
 
 type effectiveRelayRule struct {
-	Enabled bool
-	Message string
+	Enabled      bool
+	Code         string
+	Status       int
+	Type         string
+	Param        string
+	Message      string
+	Custom       bool
+	MatchType    string
+	MatchPattern string
 }
 
 func defaultEffectiveRules() map[string]effectiveRelayRule {
 	rules := make(map[string]effectiveRelayRule, len(relayRules))
 	for _, code := range relayRuleOrder {
-		rule := relayRules[code]
-		rules[code] = effectiveRelayRule{Enabled: true, Message: rule.Message}
+		rule, ok := relayRules[code]
+		if !ok {
+			continue
+		}
+		rules[code] = effectiveRelayRule{Enabled: true, Code: rule.Code, Status: rule.Status, Type: rule.Type, Param: rule.Param, Message: rule.Message}
 	}
 	return rules
 }
 
-func normalizedStatusFor(code string, fallback int, clsStatus int) int {
-	if rule, ok := relayRules[code]; ok {
+func normalizedStatusFor(code string, fallback int, clsStatus int, rules map[string]effectiveRelayRule) int {
+	if rule, ok := rules[code]; ok && rule.Status > 0 {
 		return rule.Status
 	}
 	if fallback != 0 {
@@ -559,15 +618,15 @@ func normalizedStatusFallback(in RelayErrorInput) int {
 	return relayRules[RelayRuleInternalError].Status
 }
 
-func ruleType(code string) string {
-	if rule, ok := relayRules[code]; ok {
+func ruleType(code string, rules map[string]effectiveRelayRule) string {
+	if rule, ok := rules[code]; ok && rule.Type != "" {
 		return rule.Type
 	}
 	return relayRules[RelayRuleInternalError].Type
 }
 
-func ruleParam(code string) string {
-	if rule, ok := relayRules[code]; ok {
+func ruleParam(code string, rules map[string]effectiveRelayRule) string {
+	if rule, ok := rules[code]; ok {
 		return rule.Param
 	}
 	return ""
@@ -737,23 +796,77 @@ func governanceEnabled() bool {
 func effectiveRules() map[string]effectiveRelayRule {
 	rules := defaultEffectiveRules()
 	cfg := system_setting.GetRelayErrorGovernanceSetting()
-	if cfg == nil || cfg.Rules == nil {
+	if cfg == nil {
 		return rules
 	}
-	for code, override := range cfg.Rules {
-		rule, ok := rules[code]
-		if !ok {
+	if cfg.Rules != nil {
+		for code, override := range cfg.Rules {
+			rule, ok := rules[code]
+			if !ok {
+				continue
+			}
+			if override.Enabled != nil {
+				rule.Enabled = *override.Enabled
+			}
+			if msg := safeRuleMessage(override.Message); msg != "" {
+				rule.Message = msg
+			}
+			rules[code] = rule
+		}
+	}
+	for _, custom := range cfg.CustomRules {
+		code := safeCustomRuleCode(custom.RuleCode)
+		if code == "" || strings.TrimSpace(custom.MatchPattern) == "" {
 			continue
 		}
-		if override.Enabled != nil {
-			rule.Enabled = *override.Enabled
+		matchType := strings.TrimSpace(custom.MatchType)
+		if matchType != "contains" && matchType != "regex" {
+			continue
 		}
-		if msg := safeRuleMessage(override.Message); msg != "" {
-			rule.Message = msg
+		if matchType == "regex" {
+			if _, err := regexp.Compile(custom.MatchPattern); err != nil {
+				continue
+			}
 		}
-		rules[code] = rule
+		message := safeRuleMessage(custom.SafeErrorMessage)
+		if message == "" {
+			continue
+		}
+		status := custom.StatusCode
+		if status < 400 || status > 599 {
+			status = http.StatusServiceUnavailable
+		}
+		rules[code] = effectiveRelayRule{
+			Enabled:      custom.Enabled,
+			Code:         code,
+			Status:       status,
+			Type:         safeCustomErrorToken(custom.SafeErrorType, relayRules[RelayRuleInternalError].Type),
+			Message:      message,
+			Custom:       true,
+			MatchType:    matchType,
+			MatchPattern: strings.TrimSpace(custom.MatchPattern),
+		}
 	}
 	return rules
+}
+
+func safeCustomRuleCode(code string) string {
+	code = strings.TrimSpace(code)
+	if code == "" || len(code) > 80 {
+		return ""
+	}
+	if !safeAnalyticsTokenPattern.MatchString(code) {
+		return ""
+	}
+	return code
+}
+
+func safeCustomErrorToken(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > safeAnalyticsTokenMaxLen || !safeAnalyticsTokenPattern.MatchString(value) {
+		return fallback
+	}
+	return value
 }
 
 // safeRuleMessage validates that an admin-provided message override is safe:

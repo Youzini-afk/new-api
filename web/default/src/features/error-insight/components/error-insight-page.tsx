@@ -42,6 +42,7 @@ import { SummaryCards } from './summary-cards'
 import { FiltersBar, type FiltersValue } from './filters-bar'
 import { SignaturesTable } from './signatures-table'
 import { LogsTable } from './logs-table'
+import { AISettingsDialog } from './ai-settings-dialog'
 
 function isTabId(value: string): value is ErrorInsightTabId {
   return ERROR_INSIGHT_TABS.some((tab) => tab.id === value)
@@ -52,6 +53,7 @@ export function ErrorInsightPage() {
   const [activeTab, setActiveTab] = useState<ErrorInsightTabId>(
     ERROR_INSIGHT_DEFAULT_TAB
   )
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [filters, setFilters] = useState<FiltersValue>({
     timeRange: 86400,
     ruleMatched: 'unmatched',
@@ -135,7 +137,10 @@ export function ErrorInsightPage() {
 
             <div>
               {activeTab === 'signatures' ? (
-                <SignaturesTable params={apiParams} />
+                <SignaturesTable
+                  params={apiParams}
+                  onOpenAISettings={() => setSettingsOpen(true)}
+                />
               ) : (
                 <LogsTable params={apiParams} />
               )}
@@ -143,6 +148,7 @@ export function ErrorInsightPage() {
           </Tabs>
         </div>
       </SectionPageLayout.Content>
+      <AISettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </SectionPageLayout>
   )
 }

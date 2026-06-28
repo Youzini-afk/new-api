@@ -21,6 +21,8 @@ For commercial licensing, please contact support@quantumnous.com
  */
 import { api } from '@/lib/api'
 import type {
+  ErrorInsightAIGenerateResult,
+  ErrorInsightAISetting,
   ErrorInsightDeleteResult,
   ErrorInsightFilterParams,
   ErrorInsightLogsData,
@@ -81,5 +83,33 @@ export function deleteErrorInsightSignature(
     .delete(
       `/api/error_insight/signatures/${encodeURIComponent(signature)}`
     )
+    .then((res) => res.data)
+}
+
+export function getErrorInsightAISetting(): Promise<
+  ErrorInsightResponse<ErrorInsightAISetting>
+> {
+  return api.get('/api/error_insight/ai/settings').then((res) => res.data)
+}
+
+export function saveErrorInsightAISetting(
+  data: ErrorInsightAISetting
+): Promise<ErrorInsightResponse<ErrorInsightAISetting>> {
+  return api.put('/api/error_insight/ai/settings', data).then((res) => res.data)
+}
+
+export function generateErrorInsightAIRules(
+  signature: string
+): Promise<ErrorInsightResponse<ErrorInsightAIGenerateResult>> {
+  return api
+    .post('/api/error_insight/ai/generate', { signature })
+    .then((res) => res.data)
+}
+
+export function saveErrorInsightAIRule(
+  rule: ErrorInsightAIRuleSuggestion
+): Promise<ErrorInsightResponse<ErrorInsightAIRuleSuggestion>> {
+  return api
+    .post('/api/error_insight/ai/rules', { rule })
     .then((res) => res.data)
 }

@@ -11,6 +11,18 @@ type RelayErrorGovernanceRuleConfig struct {
 	Message string `json:"message,omitempty"`
 }
 
+type RelayErrorGovernanceCustomRuleConfig struct {
+	Enabled          bool   `json:"enabled"`
+	RuleCode         string `json:"rule_code"`
+	Category         string `json:"category,omitempty"`
+	MatchType        string `json:"match_type"`
+	MatchPattern     string `json:"match_pattern"`
+	SafeErrorCode    string `json:"safe_error_code"`
+	SafeErrorType    string `json:"safe_error_type"`
+	SafeErrorMessage string `json:"safe_error_message"`
+	StatusCode       int    `json:"status_code,omitempty"`
+}
+
 // RelayErrorGovernanceSetting is the registered system-level config for relay
 // error governance. Admins configure this in System Settings.
 type RelayErrorGovernanceSetting struct {
@@ -20,7 +32,8 @@ type RelayErrorGovernanceSetting struct {
 	// Rules is an optional per-rule override map keyed by rule code. Missing
 	// rules use built-in defaults. This mirrors the JSON structure:
 	// {"version":1,"rules":{"internal_error":{"enabled":false,"message":"..."}}}
-	Rules map[string]RelayErrorGovernanceRuleConfig `json:"rules,omitempty"`
+	Rules       map[string]RelayErrorGovernanceRuleConfig       `json:"rules,omitempty"`
+	CustomRules []RelayErrorGovernanceCustomRuleConfig          `json:"custom_rules,omitempty"`
 }
 
 var defaultRelayErrorGovernanceSetting = RelayErrorGovernanceSetting{

@@ -135,3 +135,32 @@ export interface ErrorInsightLogsData {
 export interface ErrorInsightDeleteResult {
   deleted: number
 }
+
+export interface ErrorInsightAISetting {
+  enabled: boolean
+  channel_id: number
+  model: string
+  sample_size: number
+  batch_limit: number
+  include_original_error: boolean
+  redact_sensitive: boolean
+  prompt_template: string
+  json_output_params: unknown
+}
+
+export interface ErrorInsightAIRuleSuggestion {
+  rule_code: string
+  category: string
+  match_type: string
+  match_pattern: string
+  safe_error_code: string
+  safe_error_type: string
+  safe_error_message: string
+  confidence: number
+  reason: string
+}
+
+export interface ErrorInsightAIGenerateResult {
+  rules: ErrorInsightAIRuleSuggestion[]
+  raw: unknown
+}
