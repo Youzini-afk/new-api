@@ -18,11 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
+import { Link } from '@tanstack/react-router'
+import { Store } from 'lucide-react'
 import { ConfigDrawer } from '@/components/config-drawer'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { Search } from '@/components/search'
+import { Button } from '@/components/ui/button'
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import { type TopNavLink } from '../types'
 import { Header } from './header'
@@ -105,6 +108,7 @@ export function AppHeader({
   // Prioritize dynamically generated links from backend
   const dynamicLinks = useTopNavLinks()
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
+  const modelSquareLink = links.find((link) => link.href === '/pricing')
 
   // Notifications hook
   const notifications = useNotifications()
@@ -125,7 +129,21 @@ export function AppHeader({
                 <TopNav links={links} />
               </div>
             )}
-            {showSearch && <Search />}
+            {showSearch && modelSquareLink && !modelSquareLink.disabled && (
+              <Button
+                variant='outline'
+                size='sm'
+                className='bg-muted/25 text-muted-foreground hover:bg-accent h-8 shrink-0 rounded-full px-3 sm:hidden'
+                aria-label={modelSquareLink.title}
+                asChild
+              >
+                <Link to='/pricing'>
+                  <Store className='h-4 w-4' />
+                  <span className='text-sm'>{modelSquareLink.title}</span>
+                </Link>
+              </Button>
+            )}
+            {showSearch && <Search className='hidden sm:flex' />}
             {showNotifications && (
               <NotificationPopover
                 open={notifications.popoverOpen}
