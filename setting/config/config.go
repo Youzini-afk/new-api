@@ -112,10 +112,9 @@ func configToMap(config interface{}) (map[string]string, error) {
 			continue
 		}
 
-		// 获取json标签作为键名
-		key := fieldType.Tag.Get("json")
-		if key == "" || key == "-" {
-			key = fieldType.Name
+		key := jsonFieldName(fieldType)
+		if key == "-" {
+			continue
 		}
 
 		// 处理不同类型的字段
@@ -183,10 +182,9 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 			continue
 		}
 
-		// 获取json标签作为键名
-		key := fieldType.Tag.Get("json")
-		if key == "" || key == "-" {
-			key = fieldType.Name
+		key := jsonFieldName(fieldType)
+		if key == "-" {
+			continue
 		}
 
 		// 检查map中是否有对应的值
@@ -270,6 +268,18 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 	}
 
 	return nil
+}
+
+func jsonFieldName(fieldType reflect.StructField) string {
+	tag := fieldType.Tag.Get("json")
+	if tag == "-" {
+		return "-"
+	}
+	name := strings.Split(tag, ",")[0]
+	if name == "" {
+		return fieldType.Name
+	}
+	return name
 }
 
 // ConfigToMap 将配置对象转换为map（导出函数）

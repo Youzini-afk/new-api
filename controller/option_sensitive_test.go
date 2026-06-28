@@ -108,6 +108,56 @@ func TestGetOptions_IncludesRelayErrorGovernanceWhenFullKeyMissing(t *testing.T)
 	assert.True(t, found)
 }
 
+func TestSaveErrorInsightCustomAIRule_SyncsRelayErrorGovernanceConfig(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+
+	cfg := system_setting.GetRelayErrorGovernanceSetting()
+	originalEnabled := cfg.Enabled
+	originalRules := cfg.Rules
+	originalCustomRules := append([]system_setting.RelayErrorGovernanceCustomRuleConfig(nil), cfg.CustomRules...)
+	t.Cleanup(func() {
+		cfg.Enabled = originalEnabled
+		cfg.Rules = originalRules
+		cfg.CustomRules = originalCustomRules
+	})
+
+	cfg.Enabled = true
+	cfg.Rules = map[string]system_setting.RelayErrorGovernanceRuleConfig{}
+	cfg.CustomRules = nil
+
+	body := `{"rule":{"rule_code":"ai_saved_rule","category":"upstream","match_type":"contains","match_pattern":"upstream overloaded","safe_error_code":"upstream_overloaded","safe_error_type":"upstream_error","safe_error_message":"Upstream service is busy. Please try again later."}}`
+	ctx, recorder := newLogScreeningAdminContext(t, http.MethodPost, "/api/error_insight/ai/rules", body)
+	SaveErrorInsightCustomAIRule(ctx)
+
+	resp := decodeLogScreeningResponse(t, recorder)
+	require.True(t, resp.Success, resp.Message)
+	require.Len(t, cfg.CustomRules, 1)
+	assert.Equal(t, "ai_saved_rule", cfg.CustomRules[0].RuleCode)
+
+	recorder = httptest.NewRecorder()
+	ctx, _ = gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/option/", nil)
+	GetOptions(ctx)
+
+	resp = decodeLogScreeningResponse(t, recorder)
+	require.True(t, resp.Success, resp.Message)
+	var options []model.Option
+	require.NoError(t, json.Unmarshal(resp.Data, &options))
+	found := false
+	for _, option := range options {
+		if option.Key != "relay_error_governance" {
+			continue
+		}
+		found = true
+		var parsed system_setting.RelayErrorGovernanceSetting
+		require.NoError(t, json.Unmarshal([]byte(option.Value), &parsed))
+		require.Len(t, parsed.CustomRules, 1)
+		assert.Equal(t, "ai_saved_rule", parsed.CustomRules[0].RuleCode)
+	}
+	assert.True(t, found)
+}
+
 // TestUpdateOption_SensitiveRegexValidation verifies the controller wires
 // service.ValidateSensitiveRegexOptions for the Phase 5 sensitive regex keys:
 // valid values are persisted; invalid values are rejected with a message.
