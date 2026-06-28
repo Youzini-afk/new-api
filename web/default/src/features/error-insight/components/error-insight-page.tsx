@@ -147,8 +147,8 @@ export function ErrorInsightPage() {
             </div>
           </Tabs>
         </div>
+        <AISettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       </SectionPageLayout.Content>
-      <AISettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </SectionPageLayout>
   )
 }
