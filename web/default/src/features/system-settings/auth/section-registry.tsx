@@ -58,6 +58,20 @@ const AUTH_SECTIONS = [
             settings['discord.register_gate_enabled'],
           'discord.register_gate': settings['discord.register_gate'],
           'discord.login_gate_enabled': settings['discord.login_gate_enabled'],
+          'discord.login_gate_patrol_enabled':
+            settings['discord.login_gate_patrol_enabled'],
+          'discord.login_gate_patrol_interval_minutes':
+            settings['discord.login_gate_patrol_interval_minutes'],
+          'discord.login_gate_patrol_target_sweep_hours':
+            settings['discord.login_gate_patrol_target_sweep_hours'],
+          'discord.login_gate_patrol_max_batch_size':
+            settings['discord.login_gate_patrol_max_batch_size'],
+          'discord.login_gate_patrol_worker_count':
+            settings['discord.login_gate_patrol_worker_count'],
+          'discord.login_gate_patrol_max_rps':
+            settings['discord.login_gate_patrol_max_rps'],
+          'discord.login_gate_patrol_max_retries':
+            settings['discord.login_gate_patrol_max_retries'],
           'oidc.enabled': settings['oidc.enabled'],
           'oidc.client_id': settings['oidc.client_id'],
           'oidc.client_secret': settings['oidc.client_secret'],

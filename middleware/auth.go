@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-contrib/sessions"
@@ -136,6 +137,16 @@ func authHelper(c *gin.Context, minRole int) {
 		c.Abort()
 		return
 	}
+	if !useAccessToken && role.(int) < common.RoleAdminUser && discordSessionReauthRequired(id.(int)) {
+		session.Clear()
+		_ = session.Save()
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "Discord verification is required. Please sign in again with Discord.",
+		})
+		c.Abort()
+		return
+	}
 	if !validUserInfo(username.(string), role.(int)) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -164,6 +175,29 @@ func authHelper(c *gin.Context, minRole int) {
 	c.Next()
 
 	finishAdminAudit(c, auditWriter)
+}
+
+func discordSessionReauthRequired(userID int) bool {
+	settings := system_setting.GetDiscordSettings()
+	if userID <= 0 || !settings.Enabled || (!settings.LoginGateEnabled && !settings.LoginGatePatrolEnabled) {
+		return false
+	}
+	var user model.User
+	if err := model.DB.Select("id", "discord_id", "discord_gate_passed", "discord_gate_exempt", "discord_oauth_scopes", "discord_gate_scope_status").First(&user, userID).Error; err != nil {
+		common.SysLog(fmt.Sprintf("discord session reauth check failed for user %d: %v", userID, err))
+		return false
+	}
+	if user.DiscordId == "" || user.DiscordGateExempt {
+		return false
+	}
+	if !user.DiscordGatePassed {
+		return true
+	}
+	scopeStatus := strings.TrimSpace(user.DiscordGateScopeStatus)
+	if scopeStatus == "" {
+		scopeStatus = model.DiscordGateScopeStatusForScopes(user.DiscordOAuthScopes)
+	}
+	return scopeStatus != model.DiscordGateScopeStatusOK
 }
 
 func TryUserAuth() func(c *gin.Context) {
@@ -207,6 +241,16 @@ func TokenOrUserAuth() func(c *gin.Context) {
 		session := sessions.Default(c)
 		if id := session.Get("id"); id != nil {
 			if status, ok := session.Get("status").(int); ok && status == common.UserStatusEnabled {
+				if userID, ok := id.(int); ok && discordSessionReauthRequired(userID) {
+					session.Clear()
+					_ = session.Save()
+					c.JSON(http.StatusUnauthorized, gin.H{
+						"success": false,
+						"message": "Discord verification is required. Please sign in again with Discord.",
+					})
+					c.Abort()
+					return
+				}
 				c.Set("id", id)
 				c.Next()
 				return

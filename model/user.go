@@ -65,13 +65,68 @@ type User struct {
 	// (gate not passed / not exempt) is enforced by the zero value here.
 	// DiscordRefreshToken stores an encrypted refresh token and must never be
 	// serialized in API responses.
-	DiscordRefreshToken    string `json:"-" gorm:"column:discord_refresh_token;type:text"`
-	DiscordGatePassed      bool   `json:"discord_gate_passed" gorm:"column:discord_gate_passed"`
-	DiscordGateExempt      bool   `json:"discord_gate_exempt" gorm:"column:discord_gate_exempt"`
-	DiscordLastCheckAt     int64  `json:"discord_last_check_at" gorm:"column:discord_last_check_at"`
-	DiscordLastCheckResult string `json:"discord_last_check_result" gorm:"column:discord_last_check_result;type:varchar(32)"`
-	DiscordLastCheckReason string `json:"discord_last_check_reason" gorm:"column:discord_last_check_reason;type:varchar(128)"`
-	DiscordGateMessage     string `json:"discord_gate_message" gorm:"column:discord_gate_message;type:text"`
+	DiscordRefreshToken        string `json:"-" gorm:"column:discord_refresh_token;type:text"`
+	DiscordGatePassed          bool   `json:"discord_gate_passed" gorm:"column:discord_gate_passed"`
+	DiscordGateExempt          bool   `json:"discord_gate_exempt" gorm:"column:discord_gate_exempt"`
+	DiscordLastCheckAt         int64  `json:"discord_last_check_at" gorm:"column:discord_last_check_at"`
+	DiscordLastCheckResult     string `json:"discord_last_check_result" gorm:"column:discord_last_check_result;type:varchar(32)"`
+	DiscordLastCheckReason     string `json:"discord_last_check_reason" gorm:"column:discord_last_check_reason;type:varchar(128)"`
+	DiscordGateMessage         string `json:"discord_gate_message" gorm:"column:discord_gate_message;type:text"`
+	DiscordOAuthScopes         string `json:"discord_oauth_scopes" gorm:"column:discord_oauth_scopes;type:varchar(512)"`
+	DiscordOAuthScopesSyncedAt int64  `json:"discord_oauth_scopes_synced_at" gorm:"column:discord_oauth_scopes_synced_at;index"`
+	DiscordGateScopeStatus     string `json:"discord_gate_scope_status" gorm:"column:discord_gate_scope_status;type:varchar(32);index"`
+	DiscordPatrolRetryAt       int64  `json:"discord_patrol_retry_at" gorm:"column:discord_patrol_retry_at;index"`
+	DiscordPatrolRetryCount    int    `json:"discord_patrol_retry_count" gorm:"column:discord_patrol_retry_count"`
+	DiscordPatrolLastError     string `json:"discord_patrol_last_error" gorm:"column:discord_patrol_last_error;type:varchar(128)"`
+}
+
+const (
+	DiscordGateScopeStatusUnknown                  = "scope_unknown"
+	DiscordGateScopeStatusMissingGuilds            = "scope_missing_guilds"
+	DiscordGateScopeStatusMissingGuildsMembersRead = "scope_missing_guilds_members_read"
+	DiscordGateScopeStatusOK                       = "scope_ok"
+
+	DiscordRequiredScopeGuilds            = "guilds"
+	DiscordRequiredScopeGuildsMembersRead = "guilds.members.read"
+)
+
+func NormalizeDiscordOAuthScopes(raw string) string {
+	parts := strings.Fields(strings.ToLower(raw))
+	if len(parts) == 0 {
+		return ""
+	}
+	seen := make(map[string]struct{}, len(parts))
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		result = append(result, part)
+	}
+	return strings.Join(result, " ")
+}
+
+func DiscordGateScopeStatusForScopes(scopes string) string {
+	normalized := NormalizeDiscordOAuthScopes(scopes)
+	if normalized == "" {
+		return DiscordGateScopeStatusUnknown
+	}
+	set := map[string]struct{}{}
+	for _, scope := range strings.Fields(normalized) {
+		set[scope] = struct{}{}
+	}
+	if _, ok := set[DiscordRequiredScopeGuilds]; !ok {
+		return DiscordGateScopeStatusMissingGuilds
+	}
+	if _, ok := set[DiscordRequiredScopeGuildsMembersRead]; !ok {
+		return DiscordGateScopeStatusMissingGuildsMembersRead
+	}
+	return DiscordGateScopeStatusOK
 }
 
 func (user *User) ToBaseUser() *UserBase {

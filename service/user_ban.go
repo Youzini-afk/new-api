@@ -52,12 +52,25 @@ func BanUserAndDisableTokens(user *model.User, reason string) error {
 	// token-disable failure rolls back the user.Status update so we never leave
 	// a user disabled with active tokens.
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.User{}).Where("id = ?", user.Id).
+		var current model.User
+		if err := tx.Select("id", "role").First(&current, user.Id).Error; err != nil {
+			return err
+		}
+		if current.Role >= common.RoleAdminUser {
+			return fmt.Errorf("cannot ban admin/root user")
+		}
+		userUpdate := tx.Model(&model.User{}).Where("id = ? AND role < ?", user.Id, common.RoleAdminUser).
 			Updates(map[string]interface{}{
 				"status": common.UserStatusDisabled,
 				"remark": user.Remark,
-			}).Error; err != nil {
-			return err
+			})
+		if userUpdate.Error != nil {
+			return userUpdate.Error
+		}
+		if userUpdate.RowsAffected == 0 {
+			if err := ensureUserStillNonAdmin(tx, user.Id, "cannot ban admin/root user"); err != nil {
+				return err
+			}
 		}
 		if err := tx.Model(&model.Token{}).
 			Where("user_id = ?", user.Id).
@@ -72,6 +85,164 @@ func BanUserAndDisableTokens(user *model.User, reason string) error {
 	// Cache invalidation + manage log happen only after the transaction commits.
 	if err := model.InvalidateUserCache(user.Id); err != nil {
 		common.SysLog("ban user cache invalidate failed: " + err.Error())
+	}
+	if err := model.InvalidateUserTokensCache(user.Id); err != nil {
+		common.SysLog("ban user token cache invalidate failed: " + err.Error())
+	}
+	return nil
+}
+
+// BanUserForDiscordPatrolAndDisableTokens atomically records the Discord patrol
+// ban decision, disables the user, and revokes all API tokens. Admin/root users
+// are protected by a transaction-local role read before token revocation.
+func BanUserForDiscordPatrolAndDisableTokens(user *model.User, banReason, gateReason, gateMessage string, checkedAt int64) error {
+	if user == nil || user.Id <= 0 {
+		return fmt.Errorf("invalid user")
+	}
+	if user.Role >= common.RoleAdminUser {
+		return fmt.Errorf("cannot ban admin/root user")
+	}
+	if checkedAt <= 0 {
+		checkedAt = common.GetTimestamp()
+	}
+	remark := strings.TrimSpace(user.Remark)
+	banReason = strings.TrimSpace(banReason)
+	if banReason != "" {
+		if remark == "" {
+			remark = banReason
+		} else {
+			exists := false
+			for _, item := range strings.Split(remark, "\n") {
+				if strings.TrimSpace(item) == banReason {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				remark += "\n" + banReason
+			}
+		}
+	}
+	if len([]rune(remark)) > 255 {
+		remark = string([]rune(remark)[:255])
+	}
+
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var current model.User
+		if err := tx.Select("id", "role").First(&current, user.Id).Error; err != nil {
+			return err
+		}
+		if current.Role >= common.RoleAdminUser {
+			return fmt.Errorf("cannot ban admin/root user")
+		}
+		userUpdate := tx.Model(&model.User{}).Where("id = ? AND role < ?", user.Id, common.RoleAdminUser).Updates(map[string]interface{}{
+			"status":                     common.UserStatusDisabled,
+			"remark":                     remark,
+			"discord_gate_passed":        false,
+			"discord_last_check_at":      checkedAt,
+			"discord_last_check_result":  "ban_matched",
+			"discord_last_check_reason":  gateReason,
+			"discord_gate_message":       gateMessage,
+			"discord_patrol_retry_at":    0,
+			"discord_patrol_retry_count": 0,
+			"discord_patrol_last_error":  "",
+		})
+		if userUpdate.Error != nil {
+			return userUpdate.Error
+		}
+		if userUpdate.RowsAffected == 0 {
+			if err := ensureUserStillNonAdmin(tx, user.Id, "cannot ban admin/root user"); err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&model.Token{}).Where("user_id = ?", user.Id).Update("status", common.TokenStatusDisabled).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := model.InvalidateUserCache(user.Id); err != nil {
+		common.SysLog("discord patrol ban cache invalidate failed: " + err.Error())
+	}
+	if err := model.InvalidateUserTokensCache(user.Id); err != nil {
+		common.SysLog("discord patrol ban token cache invalidate failed: " + err.Error())
+	}
+	return nil
+}
+
+// MarkDiscordGateFailedAndDisableTokens revokes a non-admin user's API tokens
+// because they no longer satisfy the Discord allow gate, but it does not disable
+// the user account. This is intentionally separate from BanUserAndDisableTokens:
+// missing a required Discord guild/role is a reauthorization problem, not a ban.
+func MarkDiscordGateFailedAndDisableTokens(user *model.User, reason, message string, checkedAt int64) error {
+	if user == nil || user.Id <= 0 {
+		return fmt.Errorf("invalid user")
+	}
+	if user.Role >= common.RoleAdminUser {
+		return fmt.Errorf("cannot disable admin/root tokens")
+	}
+	reason = strings.TrimSpace(reason)
+	message = strings.TrimSpace(message)
+	if checkedAt <= 0 {
+		checkedAt = common.GetTimestamp()
+	}
+
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var current model.User
+		if err := tx.Select("id", "role").First(&current, user.Id).Error; err != nil {
+			return err
+		}
+		if current.Role >= common.RoleAdminUser {
+			return fmt.Errorf("cannot disable admin/root tokens")
+		}
+		userUpdate := tx.Model(&model.User{}).
+			Where("id = ? AND role < ?", user.Id, common.RoleAdminUser).
+			Updates(map[string]interface{}{
+				"discord_gate_passed":        false,
+				"discord_last_check_at":      checkedAt,
+				"discord_last_check_result":  "allow_failed",
+				"discord_last_check_reason":  reason,
+				"discord_gate_message":       message,
+				"discord_patrol_retry_at":    0,
+				"discord_patrol_retry_count": 0,
+				"discord_patrol_last_error":  "",
+			})
+		if userUpdate.Error != nil {
+			return userUpdate.Error
+		}
+		if userUpdate.RowsAffected == 0 {
+			if err := ensureUserStillNonAdmin(tx, user.Id, "cannot disable admin/root tokens"); err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&model.Token{}).
+			Where("user_id = ?", user.Id).
+			Update("status", common.TokenStatusDisabled).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := model.InvalidateUserCache(user.Id); err != nil {
+		common.SysLog("discord gate token disable cache invalidate failed: " + err.Error())
+	}
+	if err := model.InvalidateUserTokensCache(user.Id); err != nil {
+		common.SysLog("discord gate token cache invalidate failed: " + err.Error())
+	}
+	return nil
+}
+
+func ensureUserStillNonAdmin(tx *gorm.DB, userID int, message string) error {
+	var current model.User
+	if err := tx.Select("id", "role").First(&current, userID).Error; err != nil {
+		return err
+	}
+	if current.Role >= common.RoleAdminUser {
+		return errors.New(message)
 	}
 	return nil
 }
@@ -121,14 +292,14 @@ func AppendUserRemarkLine(userId int, line string) (string, error) {
 // during a local auto-ban. Source is one of: prompt_auto_ban / ua_auto_ban /
 // empty_ua_auto_ban. No ban_sync / external bot fields.
 type MarkSuspiciousIPInput struct {
-	UserID       int
-	Username     string
-	IP           string
-	Source       string
-	Context      string
-	BanContext   string
-	BanReason    string
-	TriggeredAt  int64
+	UserID      int
+	Username    string
+	IP          string
+	Source      string
+	Context     string
+	BanContext  string
+	BanReason   string
+	TriggeredAt int64
 }
 
 // MarkSuspiciousIP upserts a local suspicious-IP mark via

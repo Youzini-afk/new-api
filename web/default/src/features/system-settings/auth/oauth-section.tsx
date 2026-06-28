@@ -16,13 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useRef, useState } from 'react'
-import * as z from 'zod'
-import axios from 'axios'
-import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import axios from 'axios'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import * as z from 'zod'
+
+import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
@@ -33,12 +35,19 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Progress } from '@/components/ui/progress'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
+
+import {
+  getCurrentDiscordGatePatrolTask,
+  startDiscordGatePatrolTask,
+} from '../api'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
 import {
+  SettingsControlGroup,
   SettingsForm,
   SettingsSwitchContent,
   SettingsSwitchItem,
@@ -46,6 +55,8 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import type { DiscordGatePatrolTask } from '../types'
+import { safeNumberFieldProps } from '../utils/numeric-field'
 
 /**
  * react-hook-form 7 treats dotted `name` strings as nested paths. To keep
@@ -64,6 +75,17 @@ const oauthSchema = z.object({
     register_gate_enabled: z.boolean(),
     register_gate: z.string(),
     login_gate_enabled: z.boolean(),
+    login_gate_patrol_enabled: z.boolean(),
+    login_gate_patrol_interval_minutes: z.coerce.number().int().min(1).max(60),
+    login_gate_patrol_target_sweep_hours: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(168),
+    login_gate_patrol_max_batch_size: z.coerce.number().int().min(50).max(5000),
+    login_gate_patrol_worker_count: z.coerce.number().int().min(1).max(32),
+    login_gate_patrol_max_rps: z.coerce.number().int().min(1).max(50),
+    login_gate_patrol_max_retries: z.coerce.number().int().min(0).max(5),
   }),
   oidc: z.object({
     enabled: z.boolean(),
@@ -87,7 +109,8 @@ const oauthSchema = z.object({
   WeChatAccountQRCodeImageURL: z.string(),
 })
 
-type OAuthFormValues = z.infer<typeof oauthSchema>
+type OAuthFormInput = z.input<typeof oauthSchema>
+type OAuthFormValues = z.output<typeof oauthSchema>
 
 type FlatOAuthDefaults = {
   GitHubOAuthEnabled: boolean
@@ -99,6 +122,13 @@ type FlatOAuthDefaults = {
   'discord.register_gate_enabled': boolean
   'discord.register_gate': string
   'discord.login_gate_enabled': boolean
+  'discord.login_gate_patrol_enabled': boolean
+  'discord.login_gate_patrol_interval_minutes': number
+  'discord.login_gate_patrol_target_sweep_hours': number
+  'discord.login_gate_patrol_max_batch_size': number
+  'discord.login_gate_patrol_worker_count': number
+  'discord.login_gate_patrol_max_rps': number
+  'discord.login_gate_patrol_max_retries': number
   'oidc.enabled': boolean
   'oidc.client_id': string
   'oidc.client_secret': string
@@ -122,7 +152,7 @@ type FlatOAuthDefaults = {
 const oauthTabContentClassName =
   'grid min-w-0 gap-x-5 gap-y-6 lg:grid-cols-2 [&>[data-slot=form-item]]:min-w-0 lg:[&>[data-slot=form-item]:has([data-slot=switch])]:col-span-2'
 
-const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormValues => ({
+const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormInput => ({
   GitHubOAuthEnabled: defaults.GitHubOAuthEnabled,
   GitHubClientId: defaults.GitHubClientId ?? '',
   GitHubClientSecret: defaults.GitHubClientSecret ?? '',
@@ -133,6 +163,18 @@ const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormValues => ({
     register_gate_enabled: defaults['discord.register_gate_enabled'],
     register_gate: defaults['discord.register_gate'] ?? '',
     login_gate_enabled: defaults['discord.login_gate_enabled'],
+    login_gate_patrol_enabled: defaults['discord.login_gate_patrol_enabled'],
+    login_gate_patrol_interval_minutes:
+      defaults['discord.login_gate_patrol_interval_minutes'],
+    login_gate_patrol_target_sweep_hours:
+      defaults['discord.login_gate_patrol_target_sweep_hours'],
+    login_gate_patrol_max_batch_size:
+      defaults['discord.login_gate_patrol_max_batch_size'],
+    login_gate_patrol_worker_count:
+      defaults['discord.login_gate_patrol_worker_count'],
+    login_gate_patrol_max_rps: defaults['discord.login_gate_patrol_max_rps'],
+    login_gate_patrol_max_retries:
+      defaults['discord.login_gate_patrol_max_retries'],
   },
   oidc: {
     enabled: defaults['oidc.enabled'],
@@ -166,6 +208,18 @@ const normalizeFormValues = (values: OAuthFormValues): FlatOAuthDefaults => ({
   'discord.register_gate_enabled': values.discord.register_gate_enabled,
   'discord.register_gate': values.discord.register_gate,
   'discord.login_gate_enabled': values.discord.login_gate_enabled,
+  'discord.login_gate_patrol_enabled': values.discord.login_gate_patrol_enabled,
+  'discord.login_gate_patrol_interval_minutes':
+    values.discord.login_gate_patrol_interval_minutes,
+  'discord.login_gate_patrol_target_sweep_hours':
+    values.discord.login_gate_patrol_target_sweep_hours,
+  'discord.login_gate_patrol_max_batch_size':
+    values.discord.login_gate_patrol_max_batch_size,
+  'discord.login_gate_patrol_worker_count':
+    values.discord.login_gate_patrol_worker_count,
+  'discord.login_gate_patrol_max_rps': values.discord.login_gate_patrol_max_rps,
+  'discord.login_gate_patrol_max_retries':
+    values.discord.login_gate_patrol_max_retries,
   'oidc.enabled': values.oidc.enabled,
   'oidc.client_id': values.oidc.client_id,
   'oidc.client_secret': values.oidc.client_secret,
@@ -200,7 +254,7 @@ export function OAuthSection(props: OAuthSectionProps) {
     [props.defaultValues]
   )
 
-  const form = useForm<OAuthFormValues>({
+  const form = useForm<OAuthFormInput, unknown, OAuthFormValues>({
     resolver: zodResolver(oauthSchema),
     defaultValues: formDefaults,
   })
@@ -467,7 +521,9 @@ export function OAuthSection(props: OAuthSectionProps) {
                       <SettingsSwitchContent>
                         <FormLabel>{t('Register Gate Enabled')}</FormLabel>
                         <FormDescription>
-                          {t('Require new Discord signups and bindings to pass Discord Gate')}
+                          {t(
+                            'Require new Discord signups and bindings to pass Discord Gate'
+                          )}
                         </FormDescription>
                       </SettingsSwitchContent>
                       <FormControl>
@@ -488,7 +544,9 @@ export function OAuthSection(props: OAuthSectionProps) {
                       <FormLabel>{t('Register Gate Config')}</FormLabel>
                       <FormControl>
                         <Textarea
-                          placeholder={t('{"groups":[{"rules":[{"guild_id":"...","role_ids":["..."],"role_match":"any","min_join_hours":0}]}]}')}
+                          placeholder={t(
+                            '{"groups":[{"rules":[{"guild_id":"...","role_ids":["..."],"role_match":"any","min_join_hours":0}]}]}'
+                          )}
                           className='min-h-28 font-mono text-xs'
                           value={field.value ?? ''}
                           onChange={(event) =>
@@ -500,7 +558,9 @@ export function OAuthSection(props: OAuthSectionProps) {
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('Nested config supports groups, ban_groups, role_match, min_join_hours')}
+                        {t(
+                          'Nested config supports groups, ban_groups, role_match, min_join_hours'
+                        )}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -515,7 +575,9 @@ export function OAuthSection(props: OAuthSectionProps) {
                       <SettingsSwitchContent>
                         <FormLabel>{t('Login Gate Enabled')}</FormLabel>
                         <FormDescription>
-                          {t('Require existing Discord users to pass Discord Gate during login')}
+                          {t(
+                            'Require existing Discord users to pass Discord Gate during login'
+                          )}
                         </FormDescription>
                       </SettingsSwitchContent>
                       <FormControl>
@@ -529,19 +591,212 @@ export function OAuthSection(props: OAuthSectionProps) {
                 />
 
                 <div className='text-muted-foreground space-y-2 rounded-lg border p-3 text-sm lg:col-span-2'>
-                  <p className='font-medium text-foreground'>
+                  <p className='text-foreground font-medium'>
                     {t('Discord Gate runtime notes')}
                   </p>
                   <p>
-                    {t('Login Gate uses the same Discord Gate config as Register Gate. Existing users who previously passed may continue when Discord returns a temporary unknown result.')}
+                    {t(
+                      'Login Gate uses the same Discord Gate config as Register Gate. OAuth login only passes on a confirmed Discord Gate match; temporary Discord API errors require retrying later.'
+                    )}
                   </p>
                   <p>
-                    {t('Invite restriction has no separate backend option in this version.')}
+                    {t(
+                      'Invite restriction has no separate backend option in this version.'
+                    )}
                   </p>
                   <p>
-                    {t('The server Crypto Secret must stay stable because it encrypts stored Discord refresh tokens.')}
+                    {t(
+                      'The server Crypto Secret must stay stable because it encrypts stored Discord refresh tokens.'
+                    )}
                   </p>
                 </div>
+
+                <SettingsControlGroup className='space-y-4'>
+                  <div className='space-y-1'>
+                    <h4 className='text-sm font-medium'>
+                      {t('Discord gate patrol')}
+                    </h4>
+                    <p className='text-muted-foreground text-sm'>
+                      {t(
+                        'Periodically rechecks existing Discord users against the configured gate: banned guilds and required guild/role conditions. Users missing the guilds scope only need to reauthorize — their API tokens are not disabled.'
+                      )}
+                    </p>
+                  </div>
+
+                  <FormField
+                    control={form.control}
+                    name='discord.login_gate_patrol_enabled'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>{t('Enable scheduled patrol')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Runs a background batch on the configured interval. Turn off to keep only manual runs.'
+                            )}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
+
+                  <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+                    <FormField
+                      control={form.control}
+                      name='discord.login_gate_patrol_interval_minutes'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Interval (minutes)')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min={1}
+                              max={60}
+                              step={1}
+                              {...safeNumberFieldProps(field)}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t('How often the scheduled patrol runs. (1–60)')}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='discord.login_gate_patrol_target_sweep_hours'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>
+                            {t('Target sweep window (hours)')}
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min={1}
+                              max={168}
+                              step={1}
+                              {...safeNumberFieldProps(field)}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'Batch size is sized to cover all eligible users within this window. (1–168)'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='discord.login_gate_patrol_max_batch_size'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Max batch size')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min={50}
+                              max={5000}
+                              step={1}
+                              {...safeNumberFieldProps(field)}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'Upper bound for users checked per run. (50–5000)'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='discord.login_gate_patrol_worker_count'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Workers')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min={1}
+                              max={32}
+                              step={1}
+                              {...safeNumberFieldProps(field)}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t('Concurrent Discord API workers. (1–32)')}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='discord.login_gate_patrol_max_rps'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Max RPS')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min={1}
+                              max={50}
+                              step={1}
+                              {...safeNumberFieldProps(field)}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t('Discord API rate limit across workers. (1–50)')}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='discord.login_gate_patrol_max_retries'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Max retries')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min={0}
+                              max={5}
+                              step={1}
+                              {...safeNumberFieldProps(field)}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'Retries per user on transient Discord errors. (0–5)'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Patrol needs the Discord `guilds` scope to read guild membership. Existing users who never granted it must reauthorize before they can be fully checked.'
+                    )}
+                  </p>
+
+                  <DiscordGatePatrolControls />
+                </SettingsControlGroup>
               </TabsContent>
 
               <TabsContent value='oidc' className={oauthTabContentClassName}>
@@ -995,5 +1250,181 @@ export function OAuthSection(props: OAuthSectionProps) {
         </Form>
       </SettingsSection>
     </>
+  )
+}
+
+const DISCORD_PATROL_OUTCOME_LABELS: Record<string, string> = {
+  pass: 'Passed',
+  ban_matched: 'Banned guild match',
+  allow_failed: 'Gate failed',
+  reauth_required: 'Reauthorization required',
+  transient: 'Transient error',
+  skipped: 'Skipped',
+}
+
+const DISCORD_PATROL_POLL_INTERVAL_MS = 3000
+
+function isPatrolActive(task: DiscordGatePatrolTask | null) {
+  return task?.status === 'pending' || task?.status === 'running'
+}
+
+function patrolStatusLabelKey(status: string): string {
+  if (status === 'pending') return 'Pending'
+  if (status === 'running') return 'Running'
+  if (status === 'succeeded') return 'Completed'
+  return 'Failed'
+}
+
+function DiscordGatePatrolControls() {
+  const { t } = useTranslation()
+  const [task, setTask] = useState<DiscordGatePatrolTask | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isStarting, setIsStarting] = useState(false)
+  const [batchSizeInput, setBatchSizeInput] = useState('')
+
+  const fetchTask = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const res = await getCurrentDiscordGatePatrolTask()
+      if (res.success && res.data) {
+        setTask(res.data)
+      } else {
+        setTask(null)
+      }
+    } catch {
+      /* ignore — refetch button is available */
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchTask()
+  }, [fetchTask])
+
+  const taskStatus = task?.status
+  useEffect(() => {
+    if (taskStatus !== 'pending' && taskStatus !== 'running') return
+    const interval = window.setInterval(() => {
+      fetchTask()
+    }, DISCORD_PATROL_POLL_INTERVAL_MS)
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [taskStatus, fetchTask])
+
+  const handleRun = async () => {
+    setIsStarting(true)
+    try {
+      const trimmed = batchSizeInput.trim()
+      const parsed = trimmed === '' ? Number.NaN : Number(trimmed)
+      const request =
+        Number.isFinite(parsed) && parsed > 0
+          ? { batch_size: parsed }
+          : undefined
+      const res = await startDiscordGatePatrolTask(request)
+      if (!res.success || !res.data) {
+        throw new Error(res.message || t('Failed to start patrol batch'))
+      }
+      setTask(res.data)
+      setBatchSizeInput('')
+      toast.success(t('Patrol batch started.'))
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : t('Failed to start patrol batch')
+      toast.error(message)
+    } finally {
+      setIsStarting(false)
+    }
+  }
+
+  const active = isPatrolActive(task)
+  const progress = Math.min(100, Math.max(0, task?.state?.progress ?? 0))
+  const processed = task?.state?.processed ?? 0
+  const total = task?.state?.total ?? 0
+  const counts = task?.result?.counts ?? {}
+  const hasCounts = Object.keys(counts).length > 0
+
+  return (
+    <div className='space-y-3 border-t pt-3'>
+      <div className='flex flex-wrap items-end gap-3'>
+        <div className='grid gap-1.5'>
+          <FormLabel className='text-xs'>
+            {t('Manual batch size (optional)')}
+          </FormLabel>
+          <Input
+            type='number'
+            min={50}
+            max={5000}
+            step={1}
+            placeholder={t('Uses saved max batch size if empty')}
+            value={batchSizeInput}
+            onChange={(event) => setBatchSizeInput(event.target.value)}
+            className='w-[200px]'
+          />
+        </div>
+        <Button
+          type='button'
+          onClick={handleRun}
+          disabled={isStarting || active}
+        >
+          {isStarting || active ? t('Running...') : t('Run patrol batch now')}
+        </Button>
+        <Button
+          type='button'
+          variant='outline'
+          onClick={fetchTask}
+          disabled={isLoading}
+        >
+          {isLoading ? t('Refreshing...') : t('Refresh status')}
+        </Button>
+      </div>
+
+      {task && (
+        <div className='rounded-md border p-3'>
+          <div className='mb-2 flex items-center justify-between gap-3 text-sm'>
+            <span className='font-medium'>{t('Patrol status')}</span>
+            <span className='text-muted-foreground tabular-nums'>
+              {t(patrolStatusLabelKey(task.status))}
+            </span>
+          </div>
+          {(active || progress > 0) && (
+            <>
+              <Progress value={progress} />
+              <div className='text-muted-foreground mt-2 text-xs'>
+                {t('{{processed}} of {{total}} users checked.', {
+                  processed,
+                  total,
+                })}
+              </div>
+            </>
+          )}
+          {task.status === 'failed' && task.error && (
+            <div className='text-destructive mt-2 text-xs'>{task.error}</div>
+          )}
+          {hasCounts && (
+            <div className='mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+              {Object.entries(counts).map(([key, count]) => (
+                <span key={key} className='text-muted-foreground'>
+                  <span className='text-foreground font-medium'>
+                    {t(DISCORD_PATROL_OUTCOME_LABELS[key] ?? key)}:
+                  </span>{' '}
+                  {count}
+                </span>
+              ))}
+            </div>
+          )}
+          {task.result?.circuit_breaker && (
+            <div className='text-destructive mt-2 text-xs'>
+              {t(
+                'Circuit breaker tripped: too many transient errors. Try again later.'
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

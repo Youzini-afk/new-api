@@ -192,36 +192,16 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
-	case "discord.login_gate_audit_interval_minutes":
-		// Phase 6.1 — audit interval sanity check. Zero = not configured.
-		// Batch is passed as 0 so only the interval is validated here.
+	case "discord.login_gate_patrol_interval_minutes", "discord.login_gate_patrol_target_sweep_hours", "discord.login_gate_patrol_max_batch_size", "discord.login_gate_patrol_worker_count", "discord.login_gate_patrol_max_rps", "discord.login_gate_patrol_max_retries":
 		intVal, err := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
-				"message": "Discord 登录门禁审计间隔必须为整数",
+				"message": "Discord 登录门禁巡检配置必须为整数",
 			})
 			return
 		}
-		if err := system_setting.ValidateDiscordAuditSettings(intVal, 0); err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
-			return
-		}
-	case "discord.login_gate_audit_batch_size":
-		// Phase 6.1 — audit batch sanity check. Zero = not configured.
-		// Interval is passed as 0 so only the batch is validated here.
-		intVal, err := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "Discord 登录门禁审计批量必须为整数",
-			})
-			return
-		}
-		if err := system_setting.ValidateDiscordAuditSettings(0, intVal); err != nil {
+		if err := system_setting.ValidateDiscordPatrolSetting(option.Key, intVal); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": err.Error(),

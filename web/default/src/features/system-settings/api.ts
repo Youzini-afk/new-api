@@ -17,8 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+
 import type {
   ConfirmPaymentComplianceResponse,
+  DiscordGatePatrolTask,
   EnabledModelsResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
@@ -70,6 +72,30 @@ export async function getCurrentLogCleanupTask() {
   return res.data
 }
 
+export async function startDiscordGatePatrolTask(request?: {
+  mode?: 'manual_batch'
+  batch_size?: number
+}) {
+  const res = await api.post<SystemTaskResponse<DiscordGatePatrolTask>>(
+    '/api/system-task/discord-gate-patrol',
+    {
+      mode: 'manual_batch',
+      ...(request?.batch_size ? { batch_size: request.batch_size } : {}),
+    }
+  )
+  return res.data
+}
+
+export async function getCurrentDiscordGatePatrolTask() {
+  const res = await api.get<SystemTaskResponse<DiscordGatePatrolTask | null>>(
+    '/api/system-task/current',
+    {
+      params: { type: 'discord_gate_patrol' },
+    }
+  )
+  return res.data
+}
+
 export async function getSystemTask(taskId: string) {
   const res = await api.get<SystemTaskResponse<LogCleanupTask>>(
     `/api/system-task/${taskId}`
@@ -92,7 +118,9 @@ export async function resetModelRatios() {
 }
 
 export async function getEnabledModels() {
-  const res = await api.get<EnabledModelsResponse>('/api/channel/models_enabled')
+  const res = await api.get<EnabledModelsResponse>(
+    '/api/channel/models_enabled'
+  )
   return res.data
 }
 

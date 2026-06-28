@@ -268,7 +268,7 @@ func TestDiscordPreUserMutation_EnabledEmptyConfigFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "Discord gate is not configured correctly")
 }
 
-func TestDiscordPreUserMutation_LoginUnknownAllowsAlreadyPassedUser(t *testing.T) {
+func TestDiscordPreUserMutation_LoginUnknownBlocksAlreadyPassedUser(t *testing.T) {
 	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
 		settings.RegisterGateEnabled = false
 		settings.LoginGateEnabled = true
@@ -285,9 +285,9 @@ func TestDiscordPreUserMutation_LoginUnknownAllowsAlreadyPassedUser(t *testing.T
 		CurrentUser: &model.User{Id: 1, DiscordGatePassed: true},
 		Result:      result,
 	})
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Discord verification is temporarily unavailable")
 	assert.False(t, result.HasDiscordGateUpdate, "transient unknown must not clear or rewrite passed state")
-	assert.True(t, result.HasDiscordRefreshTokenUpdate)
 }
 
 func TestDiscordPreUserMutation_LoginUnknownBlocksUnpassedUser(t *testing.T) {

@@ -10,11 +10,6 @@ import (
 const (
 	discordGateRoleMatchAny = "any"
 	discordGateRoleMatchAll = "all"
-
-	// discordGateMinAuditInterval is the smallest non-zero audit interval.
-	discordGateMinAuditInterval = 1
-	// discordGateMinAuditBatch is the smallest non-zero audit batch size.
-	discordGateMinAuditBatch = 1
 )
 
 // DiscordRegisterGateConfig is the Discord OAuth gate configuration ported
@@ -172,25 +167,6 @@ func validateDiscordGateGroups(field string, groups []DiscordGateGroup, isBan bo
 				return fmt.Errorf("discord register gate: groups[%d].rules[%d] must configure role_ids or min_join_hours", groupIndex, ruleIndex)
 			}
 		}
-	}
-	return nil
-}
-
-// ValidateDiscordAuditSettings checks the audit interval/batch fields. Zero
-// means "not configured" and is allowed; positive values must be >= the
-// minimum. Negative values are rejected.
-func ValidateDiscordAuditSettings(intervalMinutes, batchSize int) error {
-	if intervalMinutes < 0 {
-		return fmt.Errorf("discord login gate audit: interval_minutes must not be negative")
-	}
-	if intervalMinutes > 0 && intervalMinutes < discordGateMinAuditInterval {
-		return fmt.Errorf("discord login gate audit: interval_minutes must be at least %d", discordGateMinAuditInterval)
-	}
-	if batchSize < 0 {
-		return fmt.Errorf("discord login gate audit: batch_size must not be negative")
-	}
-	if batchSize > 0 && batchSize < discordGateMinAuditBatch {
-		return fmt.Errorf("discord login gate audit: batch_size must be at least %d", discordGateMinAuditBatch)
 	}
 	return nil
 }

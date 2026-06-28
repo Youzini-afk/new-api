@@ -129,6 +129,32 @@ export type LogCleanupTask = SystemTask<
   LogCleanupTaskResult
 >
 
+export type DiscordGatePatrolTaskPayload = {
+  mode?: 'manual_batch' | 'scheduled' | string
+  batch_size?: number
+}
+
+export type DiscordGatePatrolTaskState = {
+  total?: number
+  processed?: number
+  progress?: number
+}
+
+export type DiscordGatePatrolOutcomeCounts = Record<string, number>
+
+export type DiscordGatePatrolTaskResult = {
+  total?: number
+  processed?: number
+  counts?: DiscordGatePatrolOutcomeCounts
+  circuit_breaker?: boolean
+}
+
+export type DiscordGatePatrolTask = SystemTask<
+  DiscordGatePatrolTaskPayload,
+  DiscordGatePatrolTaskState,
+  DiscordGatePatrolTaskResult
+>
+
 export type SystemTaskResponse<TTask = SystemTask | null> = {
   success: boolean
   message: string
@@ -173,6 +199,13 @@ export type AuthSettings = {
   'discord.register_gate_enabled': boolean
   'discord.register_gate': string
   'discord.login_gate_enabled': boolean
+  'discord.login_gate_patrol_enabled': boolean
+  'discord.login_gate_patrol_interval_minutes': number
+  'discord.login_gate_patrol_target_sweep_hours': number
+  'discord.login_gate_patrol_max_batch_size': number
+  'discord.login_gate_patrol_worker_count': number
+  'discord.login_gate_patrol_max_rps': number
+  'discord.login_gate_patrol_max_retries': number
   'oidc.enabled': boolean
   'oidc.client_id': string
   'oidc.client_secret': string

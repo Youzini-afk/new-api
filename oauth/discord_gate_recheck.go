@@ -52,6 +52,18 @@ type discordRefreshTokenResponse struct {
 	Description  string `json:"error_description"`
 }
 
+type discordDiagnosticError struct {
+	Prefix     string
+	Diagnostic discordDiagnostic
+}
+
+func (e discordDiagnosticError) Error() string {
+	if strings.TrimSpace(e.Prefix) == "" {
+		return e.Diagnostic.Raw()
+	}
+	return fmt.Sprintf("%s: %s", e.Prefix, e.Diagnostic.Raw())
+}
+
 // RecheckDiscordGate refreshes a user's Discord access token, evaluates the
 // configured nested gate, and persists last-check state without disabling the
 // user or touching tokens unrelated to Discord OAuth.
@@ -118,6 +130,7 @@ func RecheckDiscordGate(ctx context.Context, user *model.User) (DiscordGateReche
 		}
 		extraUpdates["discord_refresh_token"] = encrypted
 	}
+	addDiscordScopeUpdates(token, extraUpdates)
 	cfg, cfgErr := normalizedDiscordGateConfig()
 	if cfgErr != nil {
 		outcome.Result = discordGateResultError
@@ -150,6 +163,19 @@ func RecheckDiscordGate(ctx context.Context, user *model.User) (DiscordGateReche
 		outcome.Message = discordGateInvalidConfigMessage
 		return persistDiscordGateOutcome(user, outcome, true, extraUpdates)
 	}
+}
+
+func addDiscordScopeUpdates(token *OAuthToken, updates map[string]interface{}) {
+	if token == nil || updates == nil {
+		return
+	}
+	normalized := model.NormalizeDiscordOAuthScopes(token.Scope)
+	if normalized == "" {
+		return
+	}
+	updates["discord_oauth_scopes"] = normalized
+	updates["discord_oauth_scopes_synced_at"] = common.GetTimestamp()
+	updates["discord_gate_scope_status"] = model.DiscordGateScopeStatusForScopes(normalized)
 }
 
 func addDiscordProfileUpdates(ctx context.Context, token *OAuthToken, updates map[string]interface{}) {
@@ -219,13 +245,16 @@ func refreshDiscordAccessToken(ctx context.Context, refreshToken string) (*OAuth
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
+	if err := waitDiscordPatrolLimiter(ctx); err != nil {
+		return nil, false, err
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		diag := classifyDiscordTransportError(err)
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] refresh token failed: %s", diag.Raw()))
 		// Network/timeout failures must NOT clear the refresh token or the
 		// existing gate pass — only an explicit invalid_grant does.
-		return nil, false, fmt.Errorf("discord refresh token: %s", diag.Raw())
+		return nil, false, discordDiagnosticError{Prefix: "discord refresh token", Diagnostic: diag}
 	}
 	defer res.Body.Close()
 
@@ -241,8 +270,9 @@ func refreshDiscordAccessToken(ctx context.Context, refreshToken string) (*OAuth
 			diag.Category = discordCategoryBodyTooLarge
 		}
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] refresh token body read failed: %s", diag.Raw()))
+		recordDiscordPatrolDiagnostic(ctx, diag)
 		// Body-too-large / read failure must NOT clear the refresh token.
-		return nil, false, fmt.Errorf("discord refresh token: %s", diag.Raw())
+		return nil, false, discordDiagnosticError{Prefix: "discord refresh token", Diagnostic: diag}
 	}
 
 	var tokenResponse discordRefreshTokenResponse
@@ -250,7 +280,7 @@ func refreshDiscordAccessToken(ctx context.Context, refreshToken string) (*OAuth
 		diag := discordDiagnostic{Status: res.StatusCode, RetryAfter: retryAfter, Category: discordCategoryBadResponse}
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] refresh token decode failed: %s", diag.Raw()))
 		// Unparseable body must NOT clear the refresh token.
-		return nil, false, fmt.Errorf("discord refresh token: %s", diag.Raw())
+		return nil, false, discordDiagnosticError{Prefix: "discord refresh token", Diagnostic: diag}
 	}
 
 	// Only an explicit invalid_grant clears the refresh token and forces
@@ -268,8 +298,10 @@ func refreshDiscordAccessToken(ctx context.Context, refreshToken string) (*OAuth
 			Status:     res.StatusCode,
 			RetryAfter: retryAfter,
 			Category:   classifyDiscordPayload(res.StatusCode, payload),
+			Global:     payload.Global,
 		}
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] refresh token failed: %s", diag.Raw()))
+		recordDiscordPatrolDiagnostic(ctx, diag)
 		return nil, false, fmt.Errorf("discord refresh token: %s", diag.Raw())
 	}
 

@@ -162,23 +162,27 @@ func TestParseAndValidateDiscordRegisterGate_ReturnsZeroConfigOnError(t *testing
 	assert.Empty(t, cfg.BanGroups)
 }
 
-func TestValidateDiscordAuditSettings_ZeroAllowed(t *testing.T) {
-	// Zero = not configured; allowed.
-	err := ValidateDiscordAuditSettings(0, 0)
-	require.NoError(t, err)
+func TestNormalizeDiscordPatrolSettingsClampsAndDefaults(t *testing.T) {
+	settings := DiscordSettings{
+		LoginGatePatrolIntervalMinutes:  -1,
+		LoginGatePatrolTargetSweepHours: 999,
+		LoginGatePatrolMaxBatchSize:     0,
+		LoginGatePatrolWorkerCount:      99,
+		LoginGatePatrolMaxRPS:           -1,
+		LoginGatePatrolMaxRetries:       -1,
+	}
+	NormalizeDiscordPatrolSettings(&settings)
+	assert.Equal(t, 1, settings.LoginGatePatrolIntervalMinutes)
+	assert.Equal(t, 168, settings.LoginGatePatrolTargetSweepHours)
+	assert.Equal(t, 1000, settings.LoginGatePatrolMaxBatchSize)
+	assert.Equal(t, 32, settings.LoginGatePatrolWorkerCount)
+	assert.Equal(t, 1, settings.LoginGatePatrolMaxRPS)
+	assert.Equal(t, 0, settings.LoginGatePatrolMaxRetries)
 }
 
-func TestValidateDiscordAuditSettings_RejectsNegative(t *testing.T) {
-	err := ValidateDiscordAuditSettings(-1, 0)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "interval_minutes must not be negative")
-
-	err = ValidateDiscordAuditSettings(0, -1)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "batch_size must not be negative")
-}
-
-func TestValidateDiscordAuditSettings_MinimumAllowed(t *testing.T) {
-	err := ValidateDiscordAuditSettings(1, 1)
-	require.NoError(t, err)
+func TestValidateDiscordPatrolSetting(t *testing.T) {
+	require.NoError(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_interval_minutes", 5))
+	require.Error(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_interval_minutes", 0))
+	require.Error(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_max_batch_size", 49))
+	require.NoError(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_max_retries", 0))
 }

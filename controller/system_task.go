@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -10,6 +11,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+type discordGatePatrolTaskRequest struct {
+	Mode      string `json:"mode"`
+	BatchSize int    `json:"batch_size"`
+}
 
 func CreateLogCleanupSystemTask(c *gin.Context) {
 	targetTimestamp, _ := strconv.ParseInt(c.Query("target_timestamp"), 10, 64)
@@ -32,6 +38,37 @@ func CreateLogCleanupSystemTask(c *gin.Context) {
 		"message": "",
 		"data":    task.ToResponse(),
 	})
+}
+
+// CreateDiscordGatePatrolSystemTask enqueues a root-only Discord gate patrol
+// batch task at POST /api/system-task/discord-gate-patrol.
+func CreateDiscordGatePatrolSystemTask(c *gin.Context) {
+	req := discordGatePatrolTaskRequest{Mode: discordGatePatrolModeManualBatch}
+	if c.Request.Body != nil {
+		if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+			common.ApiErrorMsg(c, "invalid request body")
+			return
+		}
+	}
+	req.Mode = strings.TrimSpace(req.Mode)
+	if req.Mode == "" {
+		req.Mode = discordGatePatrolModeManualBatch
+	}
+	if req.Mode != discordGatePatrolModeManualBatch {
+		common.ApiErrorMsg(c, "mode must be manual_batch")
+		return
+	}
+	if req.BatchSize != 0 && (req.BatchSize < 50 || req.BatchSize > 5000) {
+		common.ApiErrorMsg(c, "batch_size must be between 50 and 5000")
+		return
+	}
+	payload := discordGatePatrolPayload{Mode: req.Mode, BatchSize: req.BatchSize}
+	task, _, err := service.EnqueueSystemTask(model.SystemTaskTypeDiscordGatePatrol, payload)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": task.ToResponse()})
 }
 
 func GetCurrentSystemTask(c *gin.Context) {

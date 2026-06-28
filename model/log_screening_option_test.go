@@ -357,26 +357,26 @@ func TestUpdateOption_ShortMsgExtraBillingValidateAndNormalize(t *testing.T) {
 	assert.Contains(t, err.Error(), "mode 必须是")
 
 	// Rule with non-positive fee_quota -> rejected.
-	err = UpdateOption(operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"shadow","rules":[{"id":"r1","model":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":0}]}`)
+	err = UpdateOption(operation_setting.ShortMsgExtraBillingOptionKey, `{"mode":"shadow","rules":[{"id":"r1","group":"m","trigger":"input_tokens_below","threshold":1,"fee_quota":0}]}`)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fee_quota 必须 > 0")
 
 	// Valid config -> persisted + applied + normalized (whitespace trimmed,
 	// duplicate response_modes dropped).
-	raw := `{"mode":"shadow","rules":[{"id":"  r1  ","model":"  gpt-4o-mini  ","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"response_modes":[" claude ","claude"," gemini "]}]}`
+	raw := `{"mode":"shadow","rules":[{"id":"  r1  ","group":"  gpt-4o-mini  ","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"response_modes":[" claude ","claude"," gemini "]}]}`
 	require.NoError(t, UpdateOption(operation_setting.ShortMsgExtraBillingOptionKey, raw))
 
 	qs := operation_setting.GetQuotaSetting()
 	require.Equal(t, operation_setting.ShortMsgExtraBillingModeShadow, qs.ShortMsgExtraBilling.Mode)
 	require.Len(t, qs.ShortMsgExtraBilling.Rules, 1)
 	assert.Equal(t, "r1", qs.ShortMsgExtraBilling.Rules[0].ID)
-	assert.Equal(t, "gpt-4o-mini", qs.ShortMsgExtraBilling.Rules[0].Model)
+	assert.Equal(t, "gpt-4o-mini", qs.ShortMsgExtraBilling.Rules[0].Group)
 	assert.Equal(t, []string{"claude", "gemini"}, qs.ShortMsgExtraBilling.Rules[0].ResponseModes)
 
 	// The DB row holds the normalized form, not the raw input.
 	var opt Option
 	require.NoError(t, DB.WithContext(context.Background()).First(&opt, Option{Key: operation_setting.ShortMsgExtraBillingOptionKey}).Error)
-	assert.JSONEq(t, `{"mode":"shadow","rules":[{"id":"r1","model":"gpt-4o-mini","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"waive_when_completion_tokens_zero":false,"response_modes":["claude","gemini"]}]}`, opt.Value)
+	assert.JSONEq(t, `{"mode":"shadow","rules":[{"id":"r1","group":"gpt-4o-mini","trigger":"input_tokens_below","threshold":100,"fee_quota":500,"waive_when_completion_tokens_zero":false,"response_modes":["claude","gemini"]}]}`, opt.Value)
 }
 
 // TestUpdateOptionsBulk_ShortMsgExtraBillingValidateAndNormalize verifies the
@@ -409,7 +409,7 @@ func TestUpdateOptionsBulk_ShortMsgExtraBillingValidateAndNormalize(t *testing.T
 
 	// Bulk with all valid values -> persisted + normalized.
 	require.NoError(t, UpdateOptionsBulk(map[string]string{
-		operation_setting.ShortMsgExtraBillingOptionKey: `{"mode":"enforce","rules":[{"id":"r1","model":"gpt-4o-mini","trigger":"input_tokens_below","threshold":50,"fee_quota":250}]}`,
+		operation_setting.ShortMsgExtraBillingOptionKey: `{"mode":"enforce","rules":[{"id":"r1","group":"gpt-4o-mini","trigger":"input_tokens_below","threshold":50,"fee_quota":250}]}`,
 		"SensitiveEmptyUABlockedErrorCode":              "bulk_err",
 	}))
 	qs := operation_setting.GetQuotaSetting()
@@ -420,5 +420,5 @@ func TestUpdateOptionsBulk_ShortMsgExtraBillingValidateAndNormalize(t *testing.T
 	var opt Option
 	require.NoError(t, DB.First(&opt, Option{Key: operation_setting.ShortMsgExtraBillingOptionKey}).Error)
 	// Normalized form is persisted (no extra whitespace, stable field order).
-	assert.JSONEq(t, `{"mode":"enforce","rules":[{"id":"r1","model":"gpt-4o-mini","trigger":"input_tokens_below","threshold":50,"fee_quota":250,"waive_when_completion_tokens_zero":false}]}`, opt.Value)
+	assert.JSONEq(t, `{"mode":"enforce","rules":[{"id":"r1","group":"gpt-4o-mini","trigger":"input_tokens_below","threshold":50,"fee_quota":250,"waive_when_completion_tokens_zero":false}]}`, opt.Value)
 }

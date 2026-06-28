@@ -21,7 +21,7 @@ func withDiscordGateRecheckDB(t *testing.T) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}))
 	original := model.DB
 	originalRedisEnabled := common.RedisEnabled
 	model.DB = db

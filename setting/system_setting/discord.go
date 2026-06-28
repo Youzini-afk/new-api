@@ -1,6 +1,10 @@
 package system_setting
 
-import "github.com/QuantumNous/new-api/setting/config"
+import (
+	"fmt"
+
+	"github.com/QuantumNous/new-api/setting/config"
+)
 
 // DiscordSettings holds Discord OAuth credentials and the Discord gate
 // contract. Register/login gate toggles share the nested RegisterGate rule set;
@@ -21,19 +25,24 @@ type DiscordSettings struct {
 	// LoginGateEnabled gates login of existing Discord-bound users.
 	LoginGateEnabled bool `json:"login_gate_enabled"`
 
-	// LoginGateAuditEnabled toggles periodic re-check of existing users.
-	// The audit runner itself is NOT implemented in this phase.
-	LoginGateAuditEnabled bool `json:"login_gate_audit_enabled"`
-	// LoginGateAuditIntervalMinutes is the minimum interval between audit
-	// runs. 0 means "not configured". Must be >= 1 when > 0.
-	LoginGateAuditIntervalMinutes int `json:"login_gate_audit_interval_minutes"`
-	// LoginGateAuditBatchSize is the number of users checked per audit run.
-	// 0 means "not configured". Must be >= 1 when > 0.
-	LoginGateAuditBatchSize int `json:"login_gate_audit_batch_size"`
+	LoginGatePatrolEnabled          bool `json:"login_gate_patrol_enabled"`
+	LoginGatePatrolIntervalMinutes  int  `json:"login_gate_patrol_interval_minutes"`
+	LoginGatePatrolTargetSweepHours int  `json:"login_gate_patrol_target_sweep_hours"`
+	LoginGatePatrolMaxBatchSize     int  `json:"login_gate_patrol_max_batch_size"`
+	LoginGatePatrolWorkerCount      int  `json:"login_gate_patrol_worker_count"`
+	LoginGatePatrolMaxRPS           int  `json:"login_gate_patrol_max_rps"`
+	LoginGatePatrolMaxRetries       int  `json:"login_gate_patrol_max_retries"`
 }
 
 // 默认配置
-var defaultDiscordSettings = DiscordSettings{}
+var defaultDiscordSettings = DiscordSettings{
+	LoginGatePatrolIntervalMinutes:  5,
+	LoginGatePatrolTargetSweepHours: 24,
+	LoginGatePatrolMaxBatchSize:     1000,
+	LoginGatePatrolWorkerCount:      8,
+	LoginGatePatrolMaxRPS:           8,
+	LoginGatePatrolMaxRetries:       3,
+}
 
 func init() {
 	// 注册到全局配置管理器
@@ -41,5 +50,54 @@ func init() {
 }
 
 func GetDiscordSettings() *DiscordSettings {
+	NormalizeDiscordPatrolSettings(&defaultDiscordSettings)
 	return &defaultDiscordSettings
+}
+
+func NormalizeDiscordPatrolSettings(settings *DiscordSettings) {
+	if settings == nil {
+		return
+	}
+	settings.LoginGatePatrolIntervalMinutes = clampDiscordPatrolInt(settings.LoginGatePatrolIntervalMinutes, 1, 60, 5)
+	settings.LoginGatePatrolTargetSweepHours = clampDiscordPatrolInt(settings.LoginGatePatrolTargetSweepHours, 1, 168, 24)
+	settings.LoginGatePatrolMaxBatchSize = clampDiscordPatrolInt(settings.LoginGatePatrolMaxBatchSize, 50, 5000, 1000)
+	settings.LoginGatePatrolWorkerCount = clampDiscordPatrolInt(settings.LoginGatePatrolWorkerCount, 1, 32, 8)
+	settings.LoginGatePatrolMaxRPS = clampDiscordPatrolInt(settings.LoginGatePatrolMaxRPS, 1, 50, 8)
+	if settings.LoginGatePatrolMaxRetries < 0 {
+		settings.LoginGatePatrolMaxRetries = 0
+	} else if settings.LoginGatePatrolMaxRetries > 5 {
+		settings.LoginGatePatrolMaxRetries = 5
+	}
+}
+
+func clampDiscordPatrolInt(value, min, max, def int) int {
+	if value == 0 {
+		return def
+	}
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func ValidateDiscordPatrolSetting(key string, value int) error {
+	ranges := map[string][2]int{
+		"discord.login_gate_patrol_interval_minutes":   {1, 60},
+		"discord.login_gate_patrol_target_sweep_hours": {1, 168},
+		"discord.login_gate_patrol_max_batch_size":     {50, 5000},
+		"discord.login_gate_patrol_worker_count":       {1, 32},
+		"discord.login_gate_patrol_max_rps":            {1, 50},
+		"discord.login_gate_patrol_max_retries":        {0, 5},
+	}
+	bounds, ok := ranges[key]
+	if !ok {
+		return nil
+	}
+	if value < bounds[0] || value > bounds[1] {
+		return fmt.Errorf("%s must be between %d and %d", key, bounds[0], bounds[1])
+	}
+	return nil
 }

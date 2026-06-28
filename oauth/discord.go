@@ -75,9 +75,10 @@ type discordGateResult struct {
 }
 
 type discordMemberFetchResult struct {
-	Member *discordGuildMember
-	Status int
-	Err    error
+	Member     *discordGuildMember
+	Status     int
+	Err        error
+	Diagnostic discordDiagnostic
 }
 
 type discordRuleResult int
@@ -147,6 +148,7 @@ type discordDiagnostic struct {
 	Category   discordErrorCategory
 	Status     int
 	RetryAfter time.Duration
+	Global     bool
 }
 
 // Raw renders a compact, secret-free diagnostic string suitable for logs and
@@ -158,6 +160,9 @@ func (d discordDiagnostic) Raw() string {
 	}
 	if d.RetryAfter > 0 {
 		parts = append(parts, "retry_after="+d.RetryAfter.String())
+	}
+	if d.Global {
+		parts = append(parts, "global=true")
 	}
 	return strings.Join(parts, " ")
 }
@@ -281,6 +286,7 @@ func classifyDiscordResponseError(res *http.Response) discordDiagnostic {
 		return diag
 	}
 	diag.Category = classifyDiscordPayload(res.StatusCode, payload)
+	diag.Global = payload.Global
 	return diag
 }
 
@@ -330,6 +336,9 @@ func (p *DiscordProvider) ExchangeToken(ctx context.Context, code string, c *gin
 	client := discordHTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
+	}
+	if err := waitDiscordPatrolLimiter(ctx); err != nil {
+		return nil, err
 	}
 	res, err := client.Do(req)
 	if err != nil {
@@ -460,9 +469,11 @@ func (p *DiscordProvider) PreUserMutation(ctx context.Context, preCtx PreUserMut
 		gateEnabled = settings.LoginGateEnabled
 	}
 	if !gateEnabled {
+		fillDiscordScopeResult(preCtx.Token, preCtx.Result)
 		return nil
 	}
 	if preCtx.CurrentUser != nil && preCtx.CurrentUser.DiscordGateExempt {
+		fillDiscordScopeResult(preCtx.Token, preCtx.Result)
 		return nil
 	}
 	if preCtx.Token == nil || strings.TrimSpace(preCtx.Token.AccessToken) == "" {
@@ -490,6 +501,7 @@ func (p *DiscordProvider) PreUserMutation(ctx context.Context, preCtx PreUserMut
 		preCtx.Result.HasDiscordGateUpdate = true
 	}
 	if preCtx.Result != nil {
+		fillDiscordScopeResult(preCtx.Token, preCtx.Result)
 		preCtx.Result.DiscordLastCheckAt = time.Now().Unix()
 		preCtx.Result.DiscordLastCheckResult = string(gateResult.Decision)
 		preCtx.Result.DiscordLastCheckReason = truncateRunes(gateResult.Reason, discordGateReasonMaxRunes)
@@ -503,6 +515,20 @@ func (p *DiscordProvider) PreUserMutation(ctx context.Context, preCtx PreUserMut
 		return err
 	}
 	return nil
+}
+
+func fillDiscordScopeResult(token *OAuthToken, result *PreUserMutationResult) {
+	if token == nil || result == nil {
+		return
+	}
+	normalized := model.NormalizeDiscordOAuthScopes(token.Scope)
+	if normalized == "" {
+		return
+	}
+	result.DiscordOAuthScopes = normalized
+	result.DiscordOAuthScopesSyncedAt = time.Now().Unix()
+	result.DiscordGateScopeStatus = model.DiscordGateScopeStatusForScopes(normalized)
+	result.HasDiscordScopeUpdate = true
 }
 
 func fillDiscordProfileResult(oauthUser *OAuthUser, result *PreUserMutationResult) {
@@ -575,13 +601,7 @@ func fillDiscordRefreshTokenResult(token *OAuthToken, result *PreUserMutationRes
 }
 
 func discordGateAllowsFlow(flow OAuthFlow, currentUser *model.User, result discordGateResult) bool {
-	if result.Decision == discordGateDecisionPass {
-		return true
-	}
-	if flow == OAuthFlowLogin || flow == OAuthFlowExisting {
-		return result.Decision == discordGateDecisionUnknown && currentUser != nil && currentUser.DiscordGatePassed
-	}
-	return false
+	return result.Decision == discordGateDecisionPass
 }
 
 func discordGateUserMessage(result discordGateResult, cfg system_setting.DiscordRegisterGateConfig) string {
@@ -733,10 +753,16 @@ func fetchDiscordGuildMember(ctx context.Context, accessToken, guildID string, c
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
+	if err := waitDiscordPatrolLimiter(ctx); err != nil {
+		result.Err = err
+		result.Diagnostic = discordDiagnostic{Category: discordCategoryTimeout}
+		return result
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		diag := classifyDiscordTransportError(err)
 		result.Err = fmt.Errorf("discord guild member fetch: %s", diag.Raw())
+		result.Diagnostic = diag
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] guild member fetch failed: guild=%s %s", guildID, diag.Raw()))
 		return result
 	}
@@ -748,6 +774,7 @@ func fetchDiscordGuildMember(ctx context.Context, accessToken, guildID string, c
 		if err := decodeDiscordJSONLimited(res.Body, &member); err != nil {
 			diag := discordDecodeDiagnostic(res.StatusCode, err)
 			result.Err = fmt.Errorf("discord guild member decode: %s", diag.Raw())
+			result.Diagnostic = diag
 			logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] guild member decode failed: guild=%s %s", guildID, diag.Raw()))
 			return result
 		}
@@ -760,6 +787,8 @@ func fetchDiscordGuildMember(ctx context.Context, accessToken, guildID string, c
 	// every other status (429/401/403/5xx/body_too_large) stays unknown so
 	// we never accidentally treat a transient outage as "not a member".
 	diag := classifyDiscordResponseError(res)
+	recordDiscordPatrolDiagnostic(ctx, diag)
+	result.Diagnostic = diag
 	logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] guild member fetch non-ok: guild=%s %s", guildID, diag.Raw()))
 	return result
 }

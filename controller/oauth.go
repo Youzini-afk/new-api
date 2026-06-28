@@ -43,6 +43,11 @@ func applyPreMutationResultToUser(user *model.User, result *oauth.PreUserMutatio
 		user.DiscordAvatarHash = result.DiscordAvatarHash
 		user.DiscordProfileSyncedAt = result.DiscordProfileSyncedAt
 	}
+	if result.HasDiscordScopeUpdate {
+		user.DiscordOAuthScopes = result.DiscordOAuthScopes
+		user.DiscordOAuthScopesSyncedAt = result.DiscordOAuthScopesSyncedAt
+		user.DiscordGateScopeStatus = result.DiscordGateScopeStatus
+	}
 }
 
 func addPreMutationResultUpdates(updates map[string]interface{}, result *oauth.PreUserMutationResult) {
@@ -67,6 +72,11 @@ func addPreMutationResultUpdates(updates map[string]interface{}, result *oauth.P
 		updates["discord_discriminator"] = result.DiscordDiscriminator
 		updates["discord_avatar_hash"] = result.DiscordAvatarHash
 		updates["discord_profile_synced_at"] = result.DiscordProfileSyncedAt
+	}
+	if result.HasDiscordScopeUpdate {
+		updates["discord_oauth_scopes"] = result.DiscordOAuthScopes
+		updates["discord_oauth_scopes_synced_at"] = result.DiscordOAuthScopesSyncedAt
+		updates["discord_gate_scope_status"] = result.DiscordGateScopeStatus
 	}
 }
 

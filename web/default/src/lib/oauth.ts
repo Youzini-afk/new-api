@@ -42,7 +42,7 @@ export function buildDiscordOAuthUrl(clientId: string, state: string): string {
   url.searchParams.set('response_type', 'code')
   // Discord's authorization code flow returns a refresh token; requesting the
   // unsupported offline_access scope makes Discord reject the login.
-  url.searchParams.set('scope', 'identify openid guilds.members.read')
+  url.searchParams.set('scope', 'identify openid guilds guilds.members.read')
   url.searchParams.set('state', state)
   return url.toString()
 }
