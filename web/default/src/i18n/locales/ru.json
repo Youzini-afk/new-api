@@ -930,7 +930,7 @@
     "Confirm your identity with Two-factor Authentication before registering a Passkey.": "Подтвердите свою личность с помощью двухфакторной аутентификации перед регистрацией Passkey.",
     "Confirmed at {{time}} by user #{{userId}}": "Подтверждено {{time}} пользователем #{{userId}}",
     "Confirmed payment compliance": "Соответствие платежа подтверждено",
-    "Conflict": "Противоречие",
+    "Conflict": "Conflict",
     "Connect": "Подключение",
     "Connect through OpenAI, Claude, Gemini, and other compatible API routes": "Подключайтесь через OpenAI, Claude, Gemini и другие совместимые API-маршруты",
     "Connected to io.net service normally.": "Соединение с сервисом io.net установлено.",
@@ -5513,6 +5513,12 @@
     "Raw AI Output": "Raw AI Output",
     "Custom AI Rules": "Custom AI Rules",
     "Rules approved from Error Insight AI generation are shown here.": "Rules approved from Error Insight AI generation are shown here.",
-    "No custom AI rules saved yet.": "No custom AI rules saved yet."
+    "No custom AI rules saved yet.": "No custom AI rules saved yet.",
+    "Custom rules are matched from top to bottom. The first matching enabled rule wins.": "Custom rules are matched from top to bottom. The first matching enabled rule wins.",
+    "Conflict detected": "Conflict detected",
+    "Toggle custom rule {{code}}": "Toggle custom rule {{code}}",
+    "Move up": "Move up",
+    "Move down": "Move down",
+    "Delete custom rule": "Delete custom rule"
   }
 }

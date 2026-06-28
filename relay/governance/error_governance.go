@@ -359,7 +359,16 @@ func matchCustomRelayError(in RelayErrorInput, rules map[string]effectiveRelayRu
 	if strings.TrimSpace(msg) == "" {
 		return relayErrorMatch{}, false
 	}
-	for code, rule := range rules {
+	cfg := system_setting.GetRelayErrorGovernanceSetting()
+	if cfg == nil {
+		return relayErrorMatch{}, false
+	}
+	for _, custom := range cfg.CustomRules {
+		code := safeCustomRuleCode(custom.RuleCode)
+		rule, ok := rules[code]
+		if !ok {
+			continue
+		}
 		if !rule.Custom || !rule.Enabled || rule.MatchPattern == "" {
 			continue
 		}
@@ -817,6 +826,9 @@ func effectiveRules() map[string]effectiveRelayRule {
 	for _, custom := range cfg.CustomRules {
 		code := safeCustomRuleCode(custom.RuleCode)
 		if code == "" || strings.TrimSpace(custom.MatchPattern) == "" {
+			continue
+		}
+		if rule, ok := rules[code]; ok && rule.Custom {
 			continue
 		}
 		matchType := strings.TrimSpace(custom.MatchType)

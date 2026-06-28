@@ -71,7 +71,14 @@ export const STATIC_I18N_KEYS = [
   'Reset to default',
   'Custom AI Rules',
   'Rules approved from Error Insight AI generation are shown here.',
+  'Custom rules are matched from top to bottom. The first matching enabled rule wins.',
   'No custom AI rules saved yet.',
+  'Conflict',
+  'Conflict detected',
+  'Toggle custom rule {{code}}',
+  'Move up',
+  'Move down',
+  'Delete custom rule',
 
   // Relay error governance dynamic rule labels/hints/default messages
   'Insufficient user balance',

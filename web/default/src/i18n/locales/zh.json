@@ -930,7 +930,7 @@
     "Confirm your identity with Two-factor Authentication before registering a Passkey.": "在注册 Passkey 前请使用两步验证确认你的身份。",
     "Confirmed at {{time}} by user #{{userId}}": "用户 #{{userId}} 于 {{time}} 确认",
     "Confirmed payment compliance": "确认支付合规",
-    "Conflict": "矛盾",
+    "Conflict": "冲突",
     "Connect": "连接",
     "Connect through OpenAI, Claude, Gemini, and other compatible API routes": "通过 OpenAI、Claude、Gemini 以及其他兼容 API 路由接入",
     "Connected to io.net service normally.": "已正常连接 io.net 服务。",
@@ -5513,6 +5513,12 @@
     "Raw AI Output": "AI 原始输出",
     "Custom AI Rules": "自定义 AI 规则",
     "Rules approved from Error Insight AI generation are shown here.": "从错误洞察 AI 生成并审核通过的规则会显示在这里。",
-    "No custom AI rules saved yet.": "还没有保存自定义 AI 规则。"
+    "No custom AI rules saved yet.": "还没有保存自定义 AI 规则。",
+    "Custom rules are matched from top to bottom. The first matching enabled rule wins.": "自定义规则会从上到下匹配，第一个启用且命中的规则获胜。",
+    "Conflict detected": "检测到冲突",
+    "Toggle custom rule {{code}}": "切换自定义规则 {{code}}",
+    "Move up": "上移",
+    "Move down": "下移",
+    "Delete custom rule": "删除自定义规则"
   }
 }
