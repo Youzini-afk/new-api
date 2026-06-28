@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 import { Link } from '@tanstack/react-router'
-import { Store } from 'lucide-react'
 import { ConfigDrawer } from '@/components/config-drawer'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
@@ -139,8 +138,7 @@ export function AppHeader({
                 asChild
               >
                 <Link to='/pricing'>
-                  <Store className='h-4 w-4' />
-                  <span className='text-sm'>{modelSquareLink.title}</span>
+                  <span className='whitespace-nowrap text-sm'>{modelSquareLink.title}</span>
                 </Link>
               </Button>
             )}
