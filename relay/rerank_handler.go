@@ -101,6 +101,31 @@ func RerankHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
 	}
-	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+	rerankUsage := normalizeRerankUsage(info, usage)
+	service.PostTextConsumeQuota(c, info, rerankUsage, nil)
 	return nil
+}
+
+func normalizeRerankUsage(info *relaycommon.RelayInfo, usage any) *dto.Usage {
+	rerankUsage, _ := usage.(*dto.Usage)
+	if rerankUsage == nil {
+		rerankUsage = &dto.Usage{}
+	}
+	if rerankUsage.TotalTokens > 0 || rerankUsage.PromptTokens+rerankUsage.CompletionTokens > 0 {
+		if rerankUsage.TotalTokens == 0 {
+			rerankUsage.TotalTokens = rerankUsage.PromptTokens + rerankUsage.CompletionTokens
+		}
+		if rerankUsage.PromptTokens == 0 && rerankUsage.CompletionTokens == 0 {
+			rerankUsage.PromptTokens = rerankUsage.TotalTokens
+		}
+		return rerankUsage
+	}
+	estimateTokens := info.GetEstimatePromptTokens()
+	if estimateTokens <= 0 {
+		estimateTokens = 1
+	}
+	rerankUsage.PromptTokens = estimateTokens
+	rerankUsage.CompletionTokens = 0
+	rerankUsage.TotalTokens = estimateTokens
+	return rerankUsage
 }
