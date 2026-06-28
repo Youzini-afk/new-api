@@ -1,3 +1,5 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Eye, Loader2, Settings, Sparkles, Trash2 } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -19,46 +21,17 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Aggregated error signatures table with per-row delete.
  */
+/* eslint-disable no-nested-ternary, react/no-array-index-key */
 import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Eye, Loader2, Settings, Sparkles, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import { CopyButton } from '@/components/copy-button'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
-import { CopyButton } from '@/components/copy-button'
-import { formatCompactNumber } from '@/lib/format'
-import { formatTimestamp } from '@/lib/format'
-import {
-  deleteErrorInsightSignature,
-  generateErrorInsightAIRules,
-  getErrorInsightAIResult,
-  getErrorInsightLogs,
-  getErrorInsightSignatures,
-  saveErrorInsightAIRule,
-} from '../api'
-import type {
-  ErrorInsightAIGenerateResult,
-  ErrorInsightFilterParams,
-  ErrorInsightLog,
-  ErrorInsightAIRuleSuggestion,
-} from '../types'
-import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -73,6 +46,35 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { formatCompactNumber, formatTimestamp } from '@/lib/format'
+
+import {
+  deleteErrorInsightSignature,
+  generateErrorInsightAIRules,
+  getErrorInsightAIResult,
+  getErrorInsightLogs,
+  getErrorInsightSignatures,
+  saveErrorInsightAIRule,
+} from '../api'
+import type {
+  ErrorInsightAIGenerateResult,
+  ErrorInsightFilterParams,
+  ErrorInsightLog,
+  ErrorInsightAIRuleSuggestion,
+} from '../types'
 
 interface SignaturesTableProps {
   params: ErrorInsightFilterParams
@@ -85,9 +87,15 @@ export function SignaturesTable(props: SignaturesTableProps) {
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [sampleSignature, setSampleSignature] = useState<string | null>(null)
   const [aiPanelSignature, setAIPanelSignature] = useState<string | null>(null)
-  const [aiResults, setAIResults] = useState<Record<string, ErrorInsightAIGenerateResult>>({})
-  const [editableRulesBySignature, setEditableRulesBySignature] = useState<Record<string, ErrorInsightAIRuleSuggestion[]>>({})
-  const [generatingSignatures, setGeneratingSignatures] = useState<Record<string, boolean>>({})
+  const [aiResults, setAIResults] = useState<
+    Record<string, ErrorInsightAIGenerateResult>
+  >({})
+  const [editableRulesBySignature, setEditableRulesBySignature] = useState<
+    Record<string, ErrorInsightAIRuleSuggestion[]>
+  >({})
+  const [generatingSignatures, setGeneratingSignatures] = useState<
+    Record<string, boolean>
+  >({})
 
   const queryKey = useMemo(
     () => ['error-insight', 'signatures', props.params] as const,
@@ -104,17 +112,14 @@ export function SignaturesTable(props: SignaturesTableProps) {
     queryFn: async () => {
       const result = await getErrorInsightSignatures(props.params)
       if (!result.success) {
-        throw new Error(
-          result.message || t('Failed to load signatures')
-        )
+        throw new Error(result.message || t('Failed to load signatures'))
       }
       return result.data ?? []
     },
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (signature: string) =>
-      deleteErrorInsightSignature(signature),
+    mutationFn: (signature: string) => deleteErrorInsightSignature(signature),
     onSuccess: (result) => {
       if (!result.success) {
         toast.error(result.message || t('Failed to delete signature'))
@@ -144,23 +149,30 @@ export function SignaturesTable(props: SignaturesTableProps) {
         toast.error(result.message || t('Failed to generate rules'))
         return
       }
-      setAIResults((current) => ({ ...current, [signature]: result.data }))
+      const generated = result.data
+      setAIResults((current) => ({ ...current, [signature]: generated }))
       setEditableRulesBySignature((current) => ({
         ...current,
-        [signature]: result.data.rules,
+        [signature]: generated.rules,
       }))
       queryClient.setQueryData(
         ['error-insight', 'ai-result', signature],
-        result.data
+        generated
       )
-      void queryClient.invalidateQueries({ queryKey: ['error-insight', 'signatures'] })
-      if (result.data.rules.length > 0) {
-        toast.success(t('Candidate rules generated. Click the AI result eye to review.'))
+      void queryClient.invalidateQueries({
+        queryKey: ['error-insight', 'signatures'],
+      })
+      if (generated.rules.length > 0) {
+        toast.success(
+          t('Candidate rules generated. Click the AI result eye to review.')
+        )
       } else {
         toast.warning(t('AI did not return usable candidate rules.'))
       }
     } catch (error) {
-      toast.error(error.message || t('Failed to generate rules'))
+      toast.error(
+        error instanceof Error ? error.message : t('Failed to generate rules')
+      )
     } finally {
       setGeneratingSignatures((current) => {
         const next = { ...current }
@@ -176,7 +188,8 @@ export function SignaturesTable(props: SignaturesTableProps) {
   }
 
   const saveRuleMutation = useMutation({
-    mutationFn: (rule: ErrorInsightAIRuleSuggestion) => saveErrorInsightAIRule(rule, aiPanelSignature || undefined),
+    mutationFn: (rule: ErrorInsightAIRuleSuggestion) =>
+      saveErrorInsightAIRule(rule, aiPanelSignature || undefined),
     onSuccess: (result) => {
       if (!result.success) {
         toast.error(result.message || t('Failed to save candidate rule'))
@@ -187,7 +200,11 @@ export function SignaturesTable(props: SignaturesTableProps) {
       void queryClient.invalidateQueries({ queryKey: ['system-options'] })
     },
     onError: (error) => {
-      toast.error(error.message || t('Failed to save candidate rule'))
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to save candidate rule')
+      )
     },
   })
 
@@ -198,15 +215,18 @@ export function SignaturesTable(props: SignaturesTableProps) {
     if (!aiPanelSignature) return
     setEditableRulesBySignature((current) => ({
       ...current,
-      [aiPanelSignature]: (current[aiPanelSignature] ?? []).map((rule, ruleIndex) =>
-        ruleIndex === index ? { ...rule, ...patch } : rule
+      [aiPanelSignature]: (current[aiPanelSignature] ?? []).map(
+        (rule, ruleIndex) =>
+          ruleIndex === index ? { ...rule, ...patch } : rule
       ),
     }))
   }
 
   const items = signatures ?? []
   const selectedAIResult = aiPanelSignature ? aiResults[aiPanelSignature] : null
-  const editableRules = aiPanelSignature ? editableRulesBySignature[aiPanelSignature] ?? [] : []
+  const editableRules = aiPanelSignature
+    ? (editableRulesBySignature[aiPanelSignature] ?? [])
+    : []
 
   const aiResultQuery = useQuery({
     queryKey: ['error-insight', 'ai-result', aiPanelSignature],
@@ -268,11 +288,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
           </p>
         </div>
         <div className='flex flex-wrap items-center gap-2'>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={props.onOpenAISettings}
-          >
+          <Button variant='outline' size='sm' onClick={props.onOpenAISettings}>
             <Settings className='size-4' />
             {t('AI Settings')}
           </Button>
@@ -332,7 +348,9 @@ export function SignaturesTable(props: SignaturesTableProps) {
                 const isMatched = Boolean(signature.rule_code)
                 const aiResult = aiResults[signature.normalized_signature]
                 const hasAIResult = Boolean(aiResult || signature.has_ai_result)
-                const isGeneratingAI = Boolean(generatingSignatures[signature.normalized_signature])
+                const isGeneratingAI = Boolean(
+                  generatingSignatures[signature.normalized_signature]
+                )
                 return (
                   <TableRow
                     key={signature.normalized_signature}
@@ -376,9 +394,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
                           {signature.unmatched_reason}
                         </span>
                       ) : (
-                        <span className='text-muted-foreground'>
-                          -
-                        </span>
+                        <span className='text-muted-foreground'>-</span>
                       )}
                     </TableCell>
                     <TableCell className='py-5 text-right text-lg font-bold tabular-nums'>
@@ -414,10 +430,12 @@ export function SignaturesTable(props: SignaturesTableProps) {
                       <Button
                         variant='ghost'
                         size='icon'
-                        className='text-muted-foreground hover:text-amber-500 size-8'
+                        className='text-muted-foreground size-8 hover:text-amber-500'
                         aria-label={t('AI Generate Rules')}
                         disabled={isGeneratingAI}
-                        onClick={() => handleGenerateAI(signature.normalized_signature)}
+                        onClick={() =>
+                          handleGenerateAI(signature.normalized_signature)
+                        }
                       >
                         {isGeneratingAI ? (
                           <Loader2 className='size-4 animate-spin' />
@@ -430,7 +448,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
                         size='icon'
                         className={
                           hasAIResult
-                            ? 'text-cyan-500 hover:text-cyan-400 size-8'
+                            ? 'size-8 text-cyan-500 hover:text-cyan-400'
                             : 'text-muted-foreground/40 size-8'
                         }
                         aria-label={t('View AI Result')}
@@ -450,9 +468,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
                               className='text-muted-foreground hover:text-destructive size-7'
                               aria-label={t('Delete signature')}
                               onClick={() =>
-                                setPendingDelete(
-                                  signature.normalized_signature
-                                )
+                                setPendingDelete(signature.normalized_signature)
                               }
                             />
                           }
@@ -510,7 +526,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
             <DialogTitle className='text-2xl font-bold'>
               {t('Error Signature Sample Logs')}
             </DialogTitle>
-            <DialogDescription className='break-all font-mono text-xs'>
+            <DialogDescription className='font-mono text-xs break-all'>
               {sampleSignature || '-'}
             </DialogDescription>
           </DialogHeader>
@@ -558,7 +574,9 @@ export function SignaturesTable(props: SignaturesTableProps) {
             </SheetTitle>
             <SheetDescription className='space-y-2'>
               <span className='block'>
-                {t('Generated results are saved as drafts. Review them from this side panel before saving.')}
+                {t(
+                  'Generated results are saved as drafts. Review them from this side panel before saving.'
+                )}
               </span>
               <code className='bg-muted block max-w-full truncate rounded px-2 py-1 font-mono text-xs'>
                 {aiPanelSignature || '-'}
@@ -577,7 +595,9 @@ export function SignaturesTable(props: SignaturesTableProps) {
             ) : aiResultQuery.isLoading ? (
               <div className='mb-4 flex min-h-[180px] flex-col items-center justify-center gap-3'>
                 <Loader2 className='text-muted-foreground size-6 animate-spin' />
-                <p className='text-muted-foreground text-sm'>{t('Loading...')}</p>
+                <p className='text-muted-foreground text-sm'>
+                  {t('Loading...')}
+                </p>
               </div>
             ) : null}
 
@@ -586,7 +606,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
                 <summary className='text-muted-foreground cursor-pointer text-sm font-semibold'>
                   {t('Raw AI Output')}
                 </summary>
-                <pre className='mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs'>
+                <pre className='mt-3 max-h-48 overflow-auto text-xs break-words whitespace-pre-wrap'>
                   {JSON.stringify(selectedAIResult.raw, null, 2)}
                 </pre>
               </details>
@@ -595,59 +615,85 @@ export function SignaturesTable(props: SignaturesTableProps) {
             <div className='space-y-4'>
               {editableRules.length ? (
                 editableRules.map((rule, index) => (
-                  <div key={`${rule.rule_code}-${index}`} className='bg-muted/40 rounded-2xl p-5'>
+                  <div
+                    key={`${rule.rule_code}-${index}`}
+                    className='bg-muted/40 rounded-2xl p-5'
+                  >
                     <div className='flex flex-wrap items-center gap-2'>
-                      <Badge variant='secondary'>{t('Candidate')} #{index + 1}</Badge>
+                      <Badge variant='secondary'>
+                        {t('Candidate')} #{index + 1}
+                      </Badge>
                       <Badge variant='outline'>{rule.category || '-'}</Badge>
                       <Badge className='bg-cyan-500/20 text-cyan-500 hover:bg-cyan-500/20'>
                         {rule.match_type || '-'}
                       </Badge>
                       <Badge className='bg-amber-500/20 text-amber-500 hover:bg-amber-500/20'>
-                        {t('Confidence')} {Math.round((rule.confidence || 0) * 100)}%
+                        {t('Confidence')}{' '}
+                        {Math.round((rule.confidence || 0) * 100)}%
                       </Badge>
                     </div>
                     <div className='mt-4 grid gap-4 md:grid-cols-2'>
                       <RuleInput
                         label={t('Rule Code')}
                         value={rule.rule_code}
-                        onChange={(value) => updateEditableRule(index, { rule_code: value })}
+                        onChange={(value) =>
+                          updateEditableRule(index, { rule_code: value })
+                        }
                       />
                       <RuleSelect
                         label={t('Match Type')}
                         value={rule.match_type}
-                        onChange={(value) => updateEditableRule(index, { match_type: value })}
+                        onChange={(value) =>
+                          updateEditableRule(index, { match_type: value })
+                        }
                       />
                       <RuleTextarea
                         label={t('Match Pattern')}
                         value={rule.match_pattern}
-                        onChange={(value) => updateEditableRule(index, { match_pattern: value })}
+                        onChange={(value) =>
+                          updateEditableRule(index, { match_pattern: value })
+                        }
                       />
                       <RuleInput
                         label={t('Safe Error Code')}
                         value={rule.safe_error_code}
-                        onChange={(value) => updateEditableRule(index, { safe_error_code: value })}
+                        onChange={(value) =>
+                          updateEditableRule(index, { safe_error_code: value })
+                        }
                       />
                       <RuleInput
                         label={t('Safe Error Type')}
                         value={rule.safe_error_type}
-                        onChange={(value) => updateEditableRule(index, { safe_error_type: value })}
+                        onChange={(value) =>
+                          updateEditableRule(index, { safe_error_type: value })
+                        }
                       />
                       <RuleTextarea
                         label={t('Safe Error Message')}
                         value={rule.safe_error_message}
-                        onChange={(value) => updateEditableRule(index, { safe_error_message: value })}
+                        onChange={(value) =>
+                          updateEditableRule(index, {
+                            safe_error_message: value,
+                          })
+                        }
                       />
                     </div>
                     <div className='mt-4'>
-                      <p className='text-muted-foreground text-xs font-semibold'>{t('Reason')}</p>
-                      <p className='mt-1 text-sm whitespace-pre-wrap'>{rule.reason || '-'}</p>
+                      <p className='text-muted-foreground text-xs font-semibold'>
+                        {t('Reason')}
+                      </p>
+                      <p className='mt-1 text-sm whitespace-pre-wrap'>
+                        {rule.reason || '-'}
+                      </p>
                     </div>
                     <div className='mt-5 flex justify-end'>
                       <Button
                         disabled={saveRuleMutation.isPending}
                         onClick={() => saveRuleMutation.mutate(rule)}
                       >
-                        {saveRuleMutation.isPending && <Loader2 className='size-4 animate-spin' />}
+                        {saveRuleMutation.isPending && (
+                          <Loader2 className='size-4 animate-spin' />
+                        )}
                         {t('Approve and Save Rule')}
                       </Button>
                     </div>
@@ -668,10 +714,16 @@ export function SignaturesTable(props: SignaturesTableProps) {
   )
 }
 
-function RuleInput(props: { label: string; value: string; onChange: (value: string) => void }) {
+function RuleInput(props: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
   return (
     <div className='space-y-1.5'>
-      <p className='text-muted-foreground text-xs font-semibold'>{props.label}</p>
+      <p className='text-muted-foreground text-xs font-semibold'>
+        {props.label}
+      </p>
       <input
         value={props.value || ''}
         className='border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
@@ -681,10 +733,16 @@ function RuleInput(props: { label: string; value: string; onChange: (value: stri
   )
 }
 
-function RuleTextarea(props: { label: string; value: string; onChange: (value: string) => void }) {
+function RuleTextarea(props: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
   return (
     <div className='space-y-1.5'>
-      <p className='text-muted-foreground text-xs font-semibold'>{props.label}</p>
+      <p className='text-muted-foreground text-xs font-semibold'>
+        {props.label}
+      </p>
       <textarea
         value={props.value || ''}
         className='border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-24 w-full rounded-md border px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
@@ -694,10 +752,16 @@ function RuleTextarea(props: { label: string; value: string; onChange: (value: s
   )
 }
 
-function RuleSelect(props: { label: string; value: string; onChange: (value: string) => void }) {
+function RuleSelect(props: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
   return (
     <div className='space-y-1.5'>
-      <p className='text-muted-foreground text-xs font-semibold'>{props.label}</p>
+      <p className='text-muted-foreground text-xs font-semibold'>
+        {props.label}
+      </p>
       <select
         value={props.value || 'contains'}
         className='border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
@@ -760,7 +824,7 @@ function SampleLogCard({ log }: { log: ErrorInsightLog }) {
           {log.original_error_message || '-'}
         </pre>
         <div>
-          <p className='text-cyan-500 text-sm font-semibold'>
+          <p className='text-sm font-semibold text-cyan-500'>
             {t('Normalized Error Text')}:
           </p>
           <p className='mt-2 font-mono text-sm break-words whitespace-pre-wrap'>

@@ -1,3 +1,11 @@
+import { Link } from '@tanstack/react-router'
+
+import { ConfigDrawer } from '@/components/config-drawer'
+import { LanguageSwitcher } from '@/components/language-switcher'
+import { NotificationPopover } from '@/components/notification-popover'
+import { ProfileDropdown } from '@/components/profile-dropdown'
+import { Search } from '@/components/search'
+import { Button } from '@/components/ui/button'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -18,15 +26,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
-import { Link } from '@tanstack/react-router'
-import { ConfigDrawer } from '@/components/config-drawer'
-import { LanguageSwitcher } from '@/components/language-switcher'
-import { NotificationPopover } from '@/components/notification-popover'
-import { ProfileDropdown } from '@/components/profile-dropdown'
-import { Search } from '@/components/search'
-import { Button } from '@/components/ui/button'
+
 import { defaultTopNavLinks } from '../config/top-nav.config'
-import { type TopNavLink } from '../types'
+import type { TopNavLink } from '../types'
 import { Header } from './header'
 import { SystemBrand } from './system-brand'
 import { TopNav } from './top-nav'
@@ -108,61 +110,61 @@ export function AppHeader({
   const dynamicLinks = useTopNavLinks()
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
   const modelSquareLink = links.find((link) => link.href === '/pricing')
-  const showMobileModelSquare = Boolean(modelSquareLink && !modelSquareLink.disabled)
+  const showMobileModelSquare = Boolean(
+    modelSquareLink && !modelSquareLink.disabled
+  )
 
   // Notifications hook
   const notifications = useNotifications()
 
   return (
-    <>
-      <Header>
-        <SystemBrand variant='inline' />
+    <Header>
+      <SystemBrand variant='inline' />
 
-        {leftContent ? (
-          <div className='ms-2 flex items-center'>{leftContent}</div>
-        ) : null}
+      {leftContent ? (
+        <div className='ms-2 flex items-center'>{leftContent}</div>
+      ) : null}
 
-        {rightContent ?? (
-          <div className='ms-auto flex items-center gap-1 sm:gap-2'>
-            {showTopNav && (
-              <div className='me-1 hidden lg:block'>
-                <TopNav links={links} />
-              </div>
-            )}
-            {showSearch && showMobileModelSquare && modelSquareLink && (
-              <Button
-                variant='outline'
-                size='sm'
-                className='bg-muted/25 text-muted-foreground hover:bg-accent h-8 shrink-0 rounded-full px-3 sm:hidden'
-                aria-label={modelSquareLink.title}
-                asChild
-              >
-                <Link to='/pricing'>
-                  <span className='whitespace-nowrap text-sm'>{modelSquareLink.title}</span>
-                </Link>
-              </Button>
-            )}
-            {showSearch && (
-              <Search className={showMobileModelSquare ? 'hidden sm:flex' : ''} />
-            )}
-            {showNotifications && (
-              <NotificationPopover
-                open={notifications.popoverOpen}
-                onOpenChange={notifications.setPopoverOpen}
-                unreadCount={notifications.unreadCount}
-                activeTab={notifications.activeTab}
-                onTabChange={notifications.setActiveTab}
-                notice={notifications.notice}
-                announcements={notifications.announcements}
-                loading={notifications.loading}
-              />
-            )}
-            <LanguageSwitcher />
-            {showConfigDrawer && <ConfigDrawer />}
-            {showProfileDropdown && <ProfileDropdown />}
-          </div>
-        )}
-      </Header>
-    </>
+      {rightContent ?? (
+        <div className='ms-auto flex items-center gap-1 sm:gap-2'>
+          {showTopNav && (
+            <div className='me-1 hidden lg:block'>
+              <TopNav links={links} />
+            </div>
+          )}
+          {showSearch && showMobileModelSquare && modelSquareLink && (
+            <Button
+              variant='outline'
+              size='sm'
+              className='bg-muted/25 text-muted-foreground hover:bg-accent h-8 shrink-0 rounded-full px-3 sm:hidden'
+              aria-label={modelSquareLink.title}
+              render={<Link to='/pricing' />}
+            >
+              <span className='text-sm whitespace-nowrap'>
+                {modelSquareLink.title}
+              </span>
+            </Button>
+          )}
+          {showSearch && (
+            <Search className={showMobileModelSquare ? 'hidden sm:flex' : ''} />
+          )}
+          {showNotifications && (
+            <NotificationPopover
+              open={notifications.popoverOpen}
+              onOpenChange={notifications.setPopoverOpen}
+              unreadCount={notifications.unreadCount}
+              activeTab={notifications.activeTab}
+              onTabChange={notifications.setActiveTab}
+              notice={notifications.notice}
+              announcements={notifications.announcements}
+              loading={notifications.loading}
+            />
+          )}
+          <LanguageSwitcher />
+          {showConfigDrawer && <ConfigDrawer />}
+          {showProfileDropdown && <ProfileDropdown />}
+        </div>
+      )}
+    </Header>
   )
 }
