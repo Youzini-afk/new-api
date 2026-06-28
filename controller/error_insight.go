@@ -564,36 +564,76 @@ type ErrorInsightAIRuleSuggestion struct {
 }
 
 func parseErrorInsightAISuggestions(content string) ([]ErrorInsightAIRuleSuggestion, json.RawMessage, error) {
+	trimmed := normalizeErrorInsightAIJSONContent(content)
+	rules, err := decodeErrorInsightAIRules([]byte(trimmed))
+	if err != nil {
+		return nil, nil, errors.New("AI response is not valid JSON")
+	}
+	for i := range rules {
+		rules[i].RuleCode = strings.TrimSpace(rules[i].RuleCode)
+		rules[i].Category = strings.TrimSpace(rules[i].Category)
+		rules[i].MatchType = strings.TrimSpace(rules[i].MatchType)
+		rules[i].MatchPattern = strings.TrimSpace(rules[i].MatchPattern)
+		rules[i].SafeErrorCode = strings.TrimSpace(rules[i].SafeErrorCode)
+		rules[i].SafeErrorType = strings.TrimSpace(rules[i].SafeErrorType)
+		rules[i].SafeErrorMessage = strings.TrimSpace(rules[i].SafeErrorMessage)
+		rules[i].Reason = strings.TrimSpace(rules[i].Reason)
+		if rules[i].MatchType == "regex" && rules[i].MatchPattern != "" {
+			if _, err := regexp.Compile(rules[i].MatchPattern); err != nil {
+				return nil, nil, fmt.Errorf("AI generated invalid regex for rule %s", rules[i].RuleCode)
+			}
+		}
+	}
+	if rules == nil {
+		rules = []ErrorInsightAIRuleSuggestion{}
+	}
+	return rules, json.RawMessage(trimmed), nil
+}
+
+func normalizeErrorInsightAIJSONContent(content string) string {
 	trimmed := strings.TrimSpace(content)
 	trimmed = strings.TrimPrefix(trimmed, "```json")
 	trimmed = strings.TrimPrefix(trimmed, "```")
 	trimmed = strings.TrimSuffix(trimmed, "```")
 	trimmed = strings.TrimSpace(trimmed)
+	start := strings.IndexAny(trimmed, "{[")
+	if start > 0 {
+		trimmed = trimmed[start:]
+	}
+	return strings.TrimSpace(trimmed)
+}
+
+func decodeErrorInsightAIRules(data []byte) ([]ErrorInsightAIRuleSuggestion, error) {
+	var arrayPayload []ErrorInsightAIRuleSuggestion
+	if err := json.Unmarshal(data, &arrayPayload); err == nil {
+		return arrayPayload, nil
+	}
 	var payload struct {
-		Rules []ErrorInsightAIRuleSuggestion `json:"rules"`
+		Rules          []ErrorInsightAIRuleSuggestion `json:"rules"`
+		Rule           *ErrorInsightAIRuleSuggestion  `json:"rule"`
+		CandidateRules []ErrorInsightAIRuleSuggestion `json:"candidate_rules"`
+		Candidates     []ErrorInsightAIRuleSuggestion `json:"candidates"`
+		Suggestions    []ErrorInsightAIRuleSuggestion `json:"suggestions"`
 	}
-	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		return nil, nil, errors.New("AI response is not valid JSON")
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
 	}
-	for i := range payload.Rules {
-		payload.Rules[i].RuleCode = strings.TrimSpace(payload.Rules[i].RuleCode)
-		payload.Rules[i].Category = strings.TrimSpace(payload.Rules[i].Category)
-		payload.Rules[i].MatchType = strings.TrimSpace(payload.Rules[i].MatchType)
-		payload.Rules[i].MatchPattern = strings.TrimSpace(payload.Rules[i].MatchPattern)
-		payload.Rules[i].SafeErrorCode = strings.TrimSpace(payload.Rules[i].SafeErrorCode)
-		payload.Rules[i].SafeErrorType = strings.TrimSpace(payload.Rules[i].SafeErrorType)
-		payload.Rules[i].SafeErrorMessage = strings.TrimSpace(payload.Rules[i].SafeErrorMessage)
-		payload.Rules[i].Reason = strings.TrimSpace(payload.Rules[i].Reason)
-		if payload.Rules[i].MatchType == "regex" && payload.Rules[i].MatchPattern != "" {
-			if _, err := regexp.Compile(payload.Rules[i].MatchPattern); err != nil {
-				return nil, nil, fmt.Errorf("AI generated invalid regex for rule %s", payload.Rules[i].RuleCode)
-			}
-		}
+	if len(payload.Rules) > 0 {
+		return payload.Rules, nil
 	}
-	if payload.Rules == nil {
-		payload.Rules = []ErrorInsightAIRuleSuggestion{}
+	if payload.Rule != nil {
+		return []ErrorInsightAIRuleSuggestion{*payload.Rule}, nil
 	}
-	return payload.Rules, json.RawMessage(trimmed), nil
+	if len(payload.CandidateRules) > 0 {
+		return payload.CandidateRules, nil
+	}
+	if len(payload.Candidates) > 0 {
+		return payload.Candidates, nil
+	}
+	if len(payload.Suggestions) > 0 {
+		return payload.Suggestions, nil
+	}
+	return []ErrorInsightAIRuleSuggestion{}, nil
 }
 
 var errorInsightAIRuleCodePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,80}$`)

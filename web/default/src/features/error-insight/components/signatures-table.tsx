@@ -134,7 +134,11 @@ export function SignaturesTable(props: SignaturesTableProps) {
       }
       setAIResult(result.data)
       setEditableRules(result.data.rules)
-      toast.success(t('Candidate rules generated'))
+      if (result.data.rules.length > 0) {
+        toast.success(t('Candidate rules generated'))
+      } else {
+        toast.warning(t('AI did not return usable candidate rules.'))
+      }
     },
     onError: (error) => {
       toast.error(error.message || t('Failed to generate rules'))
