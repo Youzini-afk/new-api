@@ -155,6 +155,35 @@ export type DiscordGatePatrolTask = SystemTask<
   DiscordGatePatrolTaskResult
 >
 
+/**
+ * Eligibility breakdown for the Discord Gate patrol.
+ *
+ * The patrol only checks a subset of users (eligible). This breakdown
+ * explains *why* only N users are checked by accounting for every
+ * exclusion reason. Numbers are counts of users.
+ */
+export type DiscordGatePatrolEligibility = {
+  total_users: number
+  eligible: number
+  disabled: number
+  admin_or_root: number
+  exempt: number
+  missing_discord_binding: number
+  missing_refresh_token: number
+  gate_not_passed: number
+  scope_ok: number
+  scope_unknown: number
+  scope_missing_guilds: number
+  scope_missing_guilds_members_read: number
+  retry_waiting: number
+}
+
+export type DiscordGatePatrolEligibilityResponse = {
+  success: boolean
+  message: string
+  data?: DiscordGatePatrolEligibility
+}
+
 export type SystemTaskResponse<TTask = SystemTask | null> = {
   success: boolean
   message: string

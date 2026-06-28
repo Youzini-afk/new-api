@@ -5590,6 +5590,23 @@
     "Unknown mode": "未知模式",
     "Upper bound for users checked per run. (50–100000)": "每次运行检查用户数的上限。（50–100000）",
     "Concurrent Discord API workers. (1–64)": "并发 Discord API 工作线程数。（1–64）",
-    "Discord API rate limit across workers. (1–100)": "所有工作线程共享的 Discord API 速率限制。（1–100）"
+    "Discord API rate limit across workers. (1–100)": "所有工作线程共享的 Discord API 速率限制。（1–100）",
+    "Eligible": "符合资格",
+    "Total users": "总用户数",
+    "Missing refresh token": "缺少刷新令牌",
+    "Need reauthorization": "需要重新授权",
+    "Gate not passed": "未通过门禁",
+    "Retry waiting": "等待重试",
+    "Admin or root": "管理员或 Root",
+    "Exempt": "已豁免",
+    "Missing Discord binding": "未绑定 Discord",
+    "Scope OK": "Scope 正常",
+    "Scope unknown": "Scope 未知",
+    "Missing guilds scope": "缺少 guilds scope",
+    "Missing guilds.members.read scope": "缺少 guilds.members.read scope",
+    "Patrol eligibility": "巡检资格",
+    "Not loaded": "未加载",
+    "Eligibility data unavailable. Click Refresh status to load.": "资格数据不可用。点击“刷新状态”加载。",
+    "Only eligible users are checked. The rest are skipped for the reasons above.": "仅检查符合资格的用户，其余用户因上述原因被跳过。"
   }
 }

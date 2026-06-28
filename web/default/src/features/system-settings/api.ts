@@ -20,6 +20,7 @@ import { api } from '@/lib/api'
 
 import type {
   ConfirmPaymentComplianceResponse,
+  DiscordGatePatrolEligibilityResponse,
   DiscordGatePatrolTask,
   EnabledModelsResponse,
   FetchUpstreamRatiosRequest,
@@ -102,6 +103,13 @@ export async function getLatestDiscordGatePatrolTask() {
     {
       params: { type: 'discord_gate_patrol' },
     }
+  )
+  return res.data
+}
+
+export async function getDiscordGatePatrolEligibility() {
+  const res = await api.get<DiscordGatePatrolEligibilityResponse>(
+    '/api/system-task/discord-gate-patrol/eligibility-summary'
   )
   return res.data
 }

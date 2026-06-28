@@ -5590,6 +5590,23 @@
     "Unknown mode": "Unknown mode",
     "Upper bound for users checked per run. (50–100000)": "Upper bound for users checked per run. (50–100000)",
     "Concurrent Discord API workers. (1–64)": "Concurrent Discord API workers. (1–64)",
-    "Discord API rate limit across workers. (1–100)": "Discord API rate limit across workers. (1–100)"
+    "Discord API rate limit across workers. (1–100)": "Discord API rate limit across workers. (1–100)",
+    "Eligible": "Eligible",
+    "Total users": "Total users",
+    "Missing refresh token": "Missing refresh token",
+    "Need reauthorization": "Need reauthorization",
+    "Gate not passed": "Gate not passed",
+    "Retry waiting": "Retry waiting",
+    "Admin or root": "Admin or root",
+    "Exempt": "Exempt",
+    "Missing Discord binding": "Missing Discord binding",
+    "Scope OK": "Scope OK",
+    "Scope unknown": "Scope unknown",
+    "Missing guilds scope": "Missing guilds scope",
+    "Missing guilds.members.read scope": "Missing guilds.members.read scope",
+    "Patrol eligibility": "Patrol eligibility",
+    "Not loaded": "Not loaded",
+    "Eligibility data unavailable. Click Refresh status to load.": "Eligibility data unavailable. Click Refresh status to load.",
+    "Only eligible users are checked. The rest are skipped for the reasons above.": "Only eligible users are checked. The rest are skipped for the reasons above."
   }
 }

@@ -71,6 +71,17 @@ func CreateDiscordGatePatrolSystemTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": task.ToResponse()})
 }
 
+// GetDiscordGatePatrolEligibilitySummary returns root-only counts explaining
+// which users are eligible for Discord gate patrol and why others are skipped.
+func GetDiscordGatePatrolEligibilitySummary(c *gin.Context) {
+	summary, err := model.GetDiscordGatePatrolEligibilitySummary(c.Request.Context())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, summary)
+}
+
 func GetCurrentSystemTask(c *gin.Context) {
 	taskType := c.Query("type")
 	if taskType == "" {
