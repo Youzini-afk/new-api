@@ -59,8 +59,6 @@ export function ErrorInsightPage() {
     unmatchedReason: '',
     modelName: '',
   })
-  const [selectedSignature, setSelectedSignature] = useState('')
-
   const buildParams = useCallback(
     (value: FiltersValue): ErrorInsightFilterParams => {
       const params: ErrorInsightFilterParams = {}
@@ -81,13 +79,6 @@ export function ErrorInsightPage() {
   )
 
   const apiParams = useMemo(() => buildParams(filters), [filters, buildParams])
-  const logsParams = useMemo(
-    () =>
-      selectedSignature
-        ? { ...apiParams, normalized_signature: selectedSignature }
-        : apiParams,
-    [apiParams, selectedSignature]
-  )
 
   const {
     data: summary,
@@ -108,11 +99,6 @@ export function ErrorInsightPage() {
   const handleTabChange = useCallback((tab: string) => {
     if (!isTabId(tab)) return
     setActiveTab(tab)
-  }, [])
-
-  const handleViewSignatureLogs = useCallback((signature: string) => {
-    setSelectedSignature(signature)
-    setActiveTab('logs')
   }, [])
 
   return (
@@ -149,12 +135,9 @@ export function ErrorInsightPage() {
 
             <div>
               {activeTab === 'signatures' ? (
-                <SignaturesTable
-                  params={apiParams}
-                  onViewSampleLogs={handleViewSignatureLogs}
-                />
+                <SignaturesTable params={apiParams} />
               ) : (
-                <LogsTable params={logsParams} />
+                <LogsTable params={apiParams} />
               )}
             </div>
           </Tabs>

@@ -44,19 +44,30 @@ import { ErrorState } from '@/components/error-state'
 import { CopyButton } from '@/components/copy-button'
 import { formatCompactNumber } from '@/lib/format'
 import { formatTimestamp } from '@/lib/format'
-import { deleteErrorInsightSignature, getErrorInsightSignatures } from '../api'
-import type { ErrorInsightFilterParams } from '../types'
+import {
+  deleteErrorInsightSignature,
+  getErrorInsightLogs,
+  getErrorInsightSignatures,
+} from '../api'
+import type { ErrorInsightFilterParams, ErrorInsightLog } from '../types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 interface SignaturesTableProps {
   params: ErrorInsightFilterParams
-  onViewSampleLogs?: (signature: string) => void
 }
 
 export function SignaturesTable(props: SignaturesTableProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [sampleSignature, setSampleSignature] = useState<string | null>(null)
 
   const queryKey = useMemo(
     () => ['error-insight', 'signatures', props.params] as const,
@@ -110,6 +121,27 @@ export function SignaturesTable(props: SignaturesTableProps) {
   }
 
   const items = signatures ?? []
+
+  const sampleQuery = useQuery({
+    queryKey: [
+      'error-insight',
+      'sample-logs',
+      { ...props.params, normalized_signature: sampleSignature, page_size: 10 },
+    ],
+    enabled: Boolean(sampleSignature),
+    queryFn: async () => {
+      const result = await getErrorInsightLogs({
+        ...props.params,
+        normalized_signature: sampleSignature || undefined,
+        page: 1,
+        page_size: 10,
+      })
+      if (!result.success) {
+        throw new Error(result.message || t('Failed to load sample logs'))
+      }
+      return result.data
+    },
+  })
 
   return (
     <div className='bg-card flex flex-col overflow-hidden rounded-2xl border-0 shadow-sm'>
@@ -249,11 +281,9 @@ export function SignaturesTable(props: SignaturesTableProps) {
                         size='icon'
                         className='text-muted-foreground hover:text-foreground size-8'
                         aria-label={t('View Details')}
-                        onClick={() => {
-                          props.onViewSampleLogs?.(
-                            signature.normalized_signature
-                          )
-                        }}
+                        onClick={() =>
+                          setSampleSignature(signature.normalized_signature)
+                        }
                       >
                         <Eye className='size-4' />
                       </Button>
@@ -314,6 +344,114 @@ export function SignaturesTable(props: SignaturesTableProps) {
         }
         confirmText={t('Delete')}
       />
+
+      <Dialog
+        open={sampleSignature !== null}
+        onOpenChange={(open) => {
+          if (!open) setSampleSignature(null)
+        }}
+      >
+        <DialogContent className='max-h-[88vh] overflow-y-auto p-6 sm:max-w-6xl'>
+          <DialogHeader className='gap-3'>
+            <DialogTitle className='text-2xl font-bold'>
+              {t('Error Signature Sample Logs')}
+            </DialogTitle>
+            <DialogDescription className='break-all font-mono text-xs'>
+              {sampleSignature || '-'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className='space-y-4'>
+            {sampleQuery.error ? (
+              <ErrorState
+                title={t('Failed to load sample logs')}
+                description={sampleQuery.error.message}
+                onRetry={sampleQuery.refetch}
+                className='min-h-[240px]'
+              />
+            ) : sampleQuery.isLoading ? (
+              <div className='flex min-h-[240px] flex-col items-center justify-center gap-3'>
+                <Loader2 className='text-muted-foreground size-6 animate-spin' />
+                <p className='text-muted-foreground text-sm'>
+                  {t('Loading...')}
+                </p>
+              </div>
+            ) : sampleQuery.data?.logs.length ? (
+              sampleQuery.data.logs.map((log) => (
+                <SampleLogCard key={log.id} log={log} />
+              ))
+            ) : (
+              <EmptyState
+                title={t('No logs found')}
+                description={t('No error logs match the current filters.')}
+                className='min-h-[240px]'
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+function SampleLogCard({ log }: { log: ErrorInsightLog }) {
+  const { t } = useTranslation()
+  return (
+    <div className='bg-muted/40 rounded-2xl p-5'>
+      <div className='text-primary/60 flex flex-wrap gap-x-6 gap-y-2 text-sm font-medium'>
+        <span>{formatTimestamp(log.created_at)}</span>
+        <span>
+          {t('User')}: {log.user_id || '-'}
+        </span>
+        <span>
+          {t('Channel')}: {log.channel_id || '-'}
+        </span>
+        <span>
+          {t('Model')}: {log.model_name || '-'}
+        </span>
+      </div>
+
+      <div className='mt-3 flex flex-wrap gap-2'>
+        <Badge variant='secondary'>
+          {t('Client')} {log.client_status_code || '-'}
+        </Badge>
+        <Badge variant='secondary'>
+          {t('Upstream')} {log.upstream_status_code || '-'}
+        </Badge>
+        <Badge className='bg-amber-500/20 text-amber-500 hover:bg-amber-500/20'>
+          {log.rule_matched ? t('Matched') : t('Unmatched')}
+        </Badge>
+        <Badge variant='outline'>{log.rule_code || '-'}</Badge>
+      </div>
+
+      <p className='mt-3 font-mono text-sm break-words whitespace-pre-wrap'>
+        {log.safe_error_message || '-'}
+        {log.request_id ? ` (request id: ${log.request_id})` : ''}
+      </p>
+
+      <div className='border-border mt-4 space-y-3 border-t border-dashed pt-4'>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Badge className='bg-orange-500/20 text-orange-500 hover:bg-orange-500/20'>
+            {t('Original Error')}
+          </Badge>
+          <span className='text-primary/60 text-sm'>
+            {t(
+              'Visible to admin/root only. Secrets, tokens, and cookies are masked.'
+            )}
+          </span>
+        </div>
+        <pre className='overflow-x-auto rounded-lg bg-orange-100 p-4 font-mono text-sm whitespace-pre-wrap text-red-700 dark:bg-orange-100 dark:text-red-700'>
+          {log.original_error_message || '-'}
+        </pre>
+        <div>
+          <p className='text-cyan-500 text-sm font-semibold'>
+            {t('Normalized Error Text')}:
+          </p>
+          <p className='mt-2 font-mono text-sm break-words whitespace-pre-wrap'>
+            {log.normalized_signature || '-'}
+          </p>
+        </div>
+      </div>
     </div>
   )
 }
