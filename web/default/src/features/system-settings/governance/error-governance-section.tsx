@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Loader2, RefreshCw, Settings, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Code2, Copy, Loader2, RefreshCw, Settings, Sparkles, Trash2 } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -194,6 +194,8 @@ export function ErrorGovernanceSection({
   const [draftCustomRules, setDraftCustomRules] = useState<RelayErrorCustomRule[] | null>(null)
   const [aiSettingsOpen, setAISettingsOpen] = useState(false)
   const [aiResultOpen, setAIResultOpen] = useState(false)
+  const [jsonModeOpen, setJsonModeOpen] = useState(false)
+  const [governanceJsonText, setGovernanceJsonText] = useState('')
   const [aiResult, setAIResult] = useState<ErrorGovernanceAIOrganizeResult | null>(null)
   const [aiForm, setAIForm] = useState<ErrorGovernanceAISetting>(defaultAISetting)
   const [jsonParamsText, setJsonParamsText] = useState(JSON.stringify(defaultAISetting.json_output_params, null, 2))
@@ -372,6 +374,83 @@ export function ErrorGovernanceSection({
     toast.success(t('AI organization applied to draft. Review and save to publish.'))
   }
 
+  const openJsonMode = () => {
+    const config = serializeGovernanceConfig(effectiveEnabled, effectiveRows, t, customRules)
+    setGovernanceJsonText(JSON.stringify(config, null, 2))
+    setJsonModeOpen(true)
+  }
+
+  const copyGovernanceJson = async () => {
+    try {
+      await navigator.clipboard.writeText(governanceJsonText)
+      toast.success(t('Governance JSON copied'))
+    } catch {
+      toast.error(t('Failed to copy governance JSON'))
+    }
+  }
+
+  const normalizeJsonCustomRules = (rules: unknown): RelayErrorCustomRule[] | null => {
+    if (!Array.isArray(rules)) return null
+    return rules
+      .filter((rule): rule is Partial<RelayErrorCustomRule> => typeof rule === 'object' && rule !== null)
+      .map((rule) => ({
+        enabled: typeof rule.enabled === 'boolean' ? rule.enabled : true,
+        rule_code: String(rule.rule_code ?? '').trim(),
+        category: rule.category ? String(rule.category).trim() : undefined,
+        match_type: String(rule.match_type ?? '').trim(),
+        match_pattern: String(rule.match_pattern ?? '').trim(),
+        safe_error_code: String(rule.safe_error_code ?? '').trim(),
+        safe_error_type: String(rule.safe_error_type ?? '').trim(),
+        safe_error_message: String(rule.safe_error_message ?? '').trim(),
+        status_code: typeof rule.status_code === 'number' ? rule.status_code : undefined,
+      }))
+      .filter((rule) => rule.rule_code && rule.match_type && rule.match_pattern && rule.safe_error_message)
+  }
+
+  const applyGovernanceJson = () => {
+    let parsedJson: unknown
+    try {
+      parsedJson = JSON.parse(governanceJsonText)
+    } catch {
+      toast.error(t('Governance JSON must be valid JSON'))
+      return
+    }
+    const source =
+      parsedJson && typeof parsedJson === 'object' && 'governance_config' in parsedJson
+        ? (parsedJson as { governance_config?: unknown }).governance_config
+        : parsedJson
+    if (!source || typeof source !== 'object') {
+      toast.error(t('Governance JSON must be an object'))
+      return
+    }
+    const sourceObject = source as Partial<RelayErrorGovernanceConfig> & {
+      rules?: unknown
+      custom_rules?: unknown
+    }
+    if (Array.isArray(sourceObject.rules) && !sourceObject.custom_rules) {
+      const nextRules = normalizeJsonCustomRules(sourceObject.rules)
+      if (!nextRules) {
+        toast.error(t('Governance JSON must contain custom_rules or rules array'))
+        return
+      }
+      setDraftCustomRules(nextRules)
+      setJsonModeOpen(false)
+      toast.success(t('Governance JSON applied to draft'))
+      return
+    }
+    const config = parseGovernanceConfig(JSON.stringify(source))
+    if (!config) {
+      toast.error(t('Governance JSON must contain custom_rules or rules array'))
+      return
+    }
+    const nextCustomRules = normalizeJsonCustomRules(config.custom_rules ?? []) ?? []
+    setDraftEnabled(config.enabled)
+    setDraftRows(buildGovernanceRows(config, t))
+    setDraftCustomRules(nextCustomRules)
+    setJsonModeOpen(false)
+    toast.success(t('Governance JSON applied to draft'))
+  }
+
   return (
     <SettingsSection title={t('Relay Error Governance')}>
       <SettingsSwitchField
@@ -492,6 +571,15 @@ export function ErrorGovernanceSection({
             </p>
           </div>
           <div className='flex items-center gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={openJsonMode}
+            >
+              <Code2 className='h-4 w-4' />
+              {t('JSON Mode')}
+            </Button>
             <Button
               type='button'
               variant='outline'
@@ -749,6 +837,45 @@ export function ErrorGovernanceSection({
               {saveAISettingMutation.isPending && <Loader2 className='h-4 w-4 animate-spin' />}
               {t('Save')}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={jsonModeOpen} onOpenChange={setJsonModeOpen}>
+        <DialogContent className='max-h-[88vh] overflow-y-auto sm:max-w-5xl'>
+          <DialogHeader>
+            <DialogTitle>{t('Governance JSON Mode')}</DialogTitle>
+            <DialogDescription>
+              {t('Copy the current governance JSON to an external AI or agent, then paste the organized JSON back to replace the current draft.')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className='grid gap-4 py-2'>
+            <div className='bg-muted/40 rounded-xl border p-4 text-sm'>
+              <p className='font-medium'>{t('Supported paste formats')}</p>
+              <p className='text-muted-foreground mt-1'>
+                {t('You can paste the full relay_error_governance JSON, an object with governance_config, or an object with rules array.')}
+              </p>
+            </div>
+            <Textarea
+              value={governanceJsonText}
+              className='min-h-[52vh] font-mono text-xs'
+              spellCheck={false}
+              onChange={(event) => setGovernanceJsonText(event.target.value)}
+            />
+          </div>
+
+          <DialogFooter className='gap-2 sm:justify-between'>
+            <Button variant='outline' onClick={copyGovernanceJson}>
+              <Copy className='h-4 w-4' />
+              {t('Copy Current JSON')}
+            </Button>
+            <div className='flex gap-2'>
+              <Button variant='outline' onClick={() => setJsonModeOpen(false)}>
+                {t('Cancel')}
+              </Button>
+              <Button onClick={applyGovernanceJson}>{t('Apply JSON to Draft')}</Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
