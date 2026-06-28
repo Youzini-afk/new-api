@@ -109,6 +109,7 @@ export function AppHeader({
   const dynamicLinks = useTopNavLinks()
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
   const modelSquareLink = links.find((link) => link.href === '/pricing')
+  const showMobileModelSquare = Boolean(modelSquareLink && !modelSquareLink.disabled)
 
   // Notifications hook
   const notifications = useNotifications()
@@ -129,7 +130,7 @@ export function AppHeader({
                 <TopNav links={links} />
               </div>
             )}
-            {showSearch && modelSquareLink && !modelSquareLink.disabled && (
+            {showSearch && showMobileModelSquare && modelSquareLink && (
               <Button
                 variant='outline'
                 size='sm'
@@ -143,7 +144,9 @@ export function AppHeader({
                 </Link>
               </Button>
             )}
-            {showSearch && <Search className='hidden sm:flex' />}
+            {showSearch && (
+              <Search className={showMobileModelSquare ? 'hidden sm:flex' : ''} />
+            )}
             {showNotifications && (
               <NotificationPopover
                 open={notifications.popoverOpen}
