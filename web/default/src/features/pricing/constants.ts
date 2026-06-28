@@ -42,6 +42,7 @@ export function getSortLabels(t: TFunction): Record<SortOption, string> {
 
 /** Filter values */
 export const FILTER_ALL = 'all'
+export const FILTER_UNKNOWN_VENDOR = '__unknown_vendor__'
 
 /** Quota type options */
 export const QUOTA_TYPES = {

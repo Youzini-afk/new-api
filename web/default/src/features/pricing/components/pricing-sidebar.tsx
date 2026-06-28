@@ -31,6 +31,7 @@ import {
 import {
   ENDPOINT_TYPES,
   FILTER_ALL,
+  FILTER_UNKNOWN_VENDOR,
   QUOTA_TYPES,
   getEndpointTypeLabels,
   getQuotaTypeLabels,
@@ -158,6 +159,7 @@ export function PricingSidebar(props: PricingSidebarProps) {
   const { t } = useTranslation()
   const quotaTypeLabels = getQuotaTypeLabels(t)
   const endpointTypeLabels = getEndpointTypeLabels(t)
+  const unknownVendorCount = countBy(props.models, (model) => !model.vendor_name)
 
   const vendorOptions: FilterOption[] = [
     {
@@ -176,6 +178,15 @@ export function PricingSidebar(props: PricingSidebarProps) {
         icon: vendor.icon ? getLobeIcon(vendor.icon, 14) : undefined,
       }))
       .filter((vendor) => vendor.count > 0),
+    ...(unknownVendorCount > 0
+      ? [
+          {
+            value: FILTER_UNKNOWN_VENDOR,
+            label: t('Unknown Provider'),
+            count: unknownVendorCount,
+          },
+        ]
+      : []),
   ]
 
   const groupOptions: FilterOption[] = [

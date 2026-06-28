@@ -271,6 +271,7 @@
     "All Tags": "すべてのタグ",
     "All Types": "すべてのタイプ",
     "All Vendors": "すべてのベンダー",
+    "Unknown Provider": "不明なプロバイダー",
     "All categories": "すべてのカテゴリ",
     "All conditions must match before this tier is used.": "この段階を使用するには、すべての条件に一致する必要があります。",
     "All edits are overwrite operations. Leave fields empty to keep current values unchanged.": "すべての編集は上書き操作です。現在の値を変更しないままにするには、フィールドを空のままにしてください。",

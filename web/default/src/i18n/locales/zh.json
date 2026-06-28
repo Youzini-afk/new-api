@@ -271,6 +271,7 @@
     "All Tags": "所有标签",
     "All Types": "所有类型",
     "All Vendors": "所有供应商",
+    "Unknown Provider": "未知提供商",
     "All categories": "全部分类",
     "All conditions must match before this tier is used.": "所有条件都匹配后才会使用此阶梯。",
     "All edits are overwrite operations. Leave fields empty to keep current values unchanged.": "所有编辑都是覆盖操作。留空字段将保持当前值不变。",

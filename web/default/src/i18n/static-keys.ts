@@ -32,6 +32,7 @@ export const STATIC_I18N_KEYS = [
   'Console',
   'Model Square',
   'Model Market',
+  'Unknown Provider',
   'Rankings',
   'Docs',
   'About',

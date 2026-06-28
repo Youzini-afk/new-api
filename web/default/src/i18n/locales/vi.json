@@ -271,6 +271,7 @@
     "All Tags": "Tất cả Thẻ",
     "All Types": "All types",
     "All Vendors": "Tất cả Nhà cung cấp",
+    "Unknown Provider": "Nhà cung cấp không xác định",
     "All categories": "Tất cả danh mục",
     "All conditions must match before this tier is used.": "Tất cả điều kiện phải khớp trước khi tầng này được sử dụng.",
     "All edits are overwrite operations. Leave fields empty to keep current values unchanged.": "Tất cả các chỉnh sửa đều là thao tác ghi đè. Để trống các trường để giữ nguyên giá trị hiện tại.",

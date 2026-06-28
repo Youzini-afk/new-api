@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   SORT_OPTIONS,
   FILTER_ALL,
+  FILTER_UNKNOWN_VENDOR,
   QUOTA_TYPES,
   QUOTA_TYPE_VALUES,
   ENDPOINT_TYPES,
@@ -56,6 +57,9 @@ export function filterByVendor(
   vendor: string
 ): PricingModel[] {
   if (vendor === FILTER_ALL) return models
+  if (vendor === FILTER_UNKNOWN_VENDOR) {
+    return models.filter((m) => !m.vendor_name)
+  }
   return models.filter((m) => m.vendor_name === vendor)
 }
 
