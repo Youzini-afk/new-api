@@ -5559,11 +5559,8 @@
     "Target sweep window (hours)": "Target sweep window (hours)",
     "Batch size is sized to cover all eligible users within this window. (1–168)": "Batch size is sized to cover all eligible users within this window. (1–168)",
     "Max batch size": "Max batch size",
-    "Upper bound for users checked per run. (50–5000)": "Upper bound for users checked per run. (50–5000)",
     "Workers": "Workers",
-    "Concurrent Discord API workers. (1–32)": "Concurrent Discord API workers. (1–32)",
     "Max RPS": "Max RPS",
-    "Discord API rate limit across workers. (1–50)": "Discord API rate limit across workers. (1–50)",
     "Max retries": "Max retries",
     "Retries per user on transient Discord errors. (0–5)": "Retries per user on transient Discord errors. (0–5)",
     "Patrol needs the Discord `guilds` scope to read guild membership. Existing users who never granted it must reauthorize before they can be fully checked.": "Patrol needs the Discord `guilds` scope to read guild membership. Existing users who never granted it must reauthorize before they can be fully checked.",
@@ -5590,6 +5587,9 @@
     "No patrol has run yet": "No patrol has run yet",
     "Periodically rechecks existing Discord users against the configured gate: banned guilds and required guild/role conditions. Users missing the guilds scope only need to reauthorize — their API tokens are not disabled.": "Periodically rechecks existing Discord users against the configured gate: banned guilds and required guild/role conditions. Users missing the guilds scope only need to reauthorize — their API tokens are not disabled.",
     "Scheduled patrol": "Scheduled patrol",
-    "Unknown mode": "Unknown mode"
+    "Unknown mode": "Unknown mode",
+    "Upper bound for users checked per run. (50–100000)": "Upper bound for users checked per run. (50–100000)",
+    "Concurrent Discord API workers. (1–64)": "Concurrent Discord API workers. (1–64)",
+    "Discord API rate limit across workers. (1–100)": "Discord API rate limit across workers. (1–100)"
   }
 }

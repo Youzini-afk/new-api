@@ -174,8 +174,8 @@ func TestNormalizeDiscordPatrolSettingsClampsAndDefaults(t *testing.T) {
 	NormalizeDiscordPatrolSettings(&settings)
 	assert.Equal(t, 1, settings.LoginGatePatrolIntervalMinutes)
 	assert.Equal(t, 168, settings.LoginGatePatrolTargetSweepHours)
-	assert.Equal(t, 1000, settings.LoginGatePatrolMaxBatchSize)
-	assert.Equal(t, 32, settings.LoginGatePatrolWorkerCount)
+	assert.Equal(t, 50000, settings.LoginGatePatrolMaxBatchSize)
+	assert.Equal(t, 64, settings.LoginGatePatrolWorkerCount)
 	assert.Equal(t, 1, settings.LoginGatePatrolMaxRPS)
 	assert.Equal(t, 0, settings.LoginGatePatrolMaxRetries)
 }
@@ -184,5 +184,7 @@ func TestValidateDiscordPatrolSetting(t *testing.T) {
 	require.NoError(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_interval_minutes", 5))
 	require.Error(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_interval_minutes", 0))
 	require.Error(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_max_batch_size", 49))
+	require.NoError(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_max_batch_size", 100000))
+	require.Error(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_max_batch_size", 100001))
 	require.NoError(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_max_retries", 0))
 }

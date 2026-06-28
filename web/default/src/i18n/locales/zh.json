@@ -5559,11 +5559,8 @@
     "Target sweep window (hours)": "目标覆盖窗口（小时）",
     "Batch size is sized to cover all eligible users within this window. (1–168)": "批量大小会按此窗口内覆盖全部符合条件用户来计算。（1–168）",
     "Max batch size": "最大批量大小",
-    "Upper bound for users checked per run. (50–5000)": "每次运行检查用户数的上限。（50–5000）",
     "Workers": "工作线程数",
-    "Concurrent Discord API workers. (1–32)": "并发 Discord API 工作线程数。（1–32）",
     "Max RPS": "最大 RPS",
-    "Discord API rate limit across workers. (1–50)": "所有工作线程共享的 Discord API 速率限制。（1–50）",
     "Max retries": "最大重试次数",
     "Retries per user on transient Discord errors. (0–5)": "遇到 Discord 瞬时错误时每用户的重试次数。（0–5）",
     "Patrol needs the Discord `guilds` scope to read guild membership. Existing users who never granted it must reauthorize before they can be fully checked.": "巡检需要 Discord `guilds` 权限以读取服务器成员信息。此前未授权该权限的用户必须重新授权后才能被完整检查。",
@@ -5590,6 +5587,9 @@
     "No patrol has run yet": "还没有执行过巡检",
     "Periodically rechecks existing Discord users against the configured gate: banned guilds and required guild/role conditions. Users missing the guilds scope only need to reauthorize — their API tokens are not disabled.": "按配置的门禁定期复查现有 Discord 用户：禁止服务器、必需服务器和身份组条件。缺少 guilds 权限的用户只需要重新授权，API token 不会被禁用。",
     "Scheduled patrol": "定时巡检",
-    "Unknown mode": "未知模式"
+    "Unknown mode": "未知模式",
+    "Upper bound for users checked per run. (50–100000)": "每次运行检查用户数的上限。（50–100000）",
+    "Concurrent Discord API workers. (1–64)": "并发 Discord API 工作线程数。（1–64）",
+    "Discord API rate limit across workers. (1–100)": "所有工作线程共享的 Discord API 速率限制。（1–100）"
   }
 }

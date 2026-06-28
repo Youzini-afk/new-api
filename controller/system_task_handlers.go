@@ -215,7 +215,7 @@ func (discordGatePatrolHandler) Run(ctx context.Context, task *model.SystemTask,
 
 func discordGatePatrolBatchSize(eligibleCount int64, intervalMinutes, targetSweepHours, maxBatchSize int) int {
 	if maxBatchSize <= 0 {
-		maxBatchSize = 1000
+		maxBatchSize = 50000
 	}
 	if eligibleCount <= 0 {
 		return 1
@@ -235,7 +235,7 @@ func discordGatePatrolBatchSize(eligibleCount int64, intervalMinutes, targetSwee
 }
 
 func discordGatePatrolEffectiveBatchSize(mode string, requestedBatchSize int, eligibleCount int64, settings *system_setting.DiscordSettings) int {
-	maxBatchSize := 1000
+	maxBatchSize := 50000
 	intervalMinutes := 5
 	targetSweepHours := 24
 	if settings != nil {
@@ -244,7 +244,7 @@ func discordGatePatrolEffectiveBatchSize(mode string, requestedBatchSize int, el
 		targetSweepHours = settings.LoginGatePatrolTargetSweepHours
 	}
 	if maxBatchSize <= 0 {
-		maxBatchSize = 1000
+		maxBatchSize = 50000
 	}
 	if requestedBatchSize > 0 {
 		if requestedBatchSize > maxBatchSize {

@@ -16,14 +16,14 @@ func TestDiscordGatePatrolBatchSize(t *testing.T) {
 
 func TestDiscordGatePatrolEffectiveBatchSize(t *testing.T) {
 	settings := &system_setting.DiscordSettings{
-		LoginGatePatrolIntervalMinutes:  5,
-		LoginGatePatrolTargetSweepHours: 24,
-		LoginGatePatrolMaxBatchSize:     1000,
+		LoginGatePatrolIntervalMinutes:  2,
+		LoginGatePatrolTargetSweepHours: 12,
+		LoginGatePatrolMaxBatchSize:     50000,
 	}
 
-	assert.Equal(t, 1000, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeManualBatch, 0, 100, settings))
+	assert.Equal(t, 50000, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeManualBatch, 0, 100, settings))
 	assert.Equal(t, 200, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeManualBatch, 200, 100, settings))
-	assert.Equal(t, 1000, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeManualBatch, 5000, 100, settings))
+	assert.Equal(t, 50000, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeManualBatch, 100000, 100, settings))
 	assert.Equal(t, 1, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeScheduled, 0, 100, settings))
-	assert.Equal(t, 174, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeScheduled, 0, 50000, settings))
+	assert.Equal(t, 139, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeScheduled, 0, 50000, settings))
 }

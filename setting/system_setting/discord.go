@@ -36,11 +36,11 @@ type DiscordSettings struct {
 
 // 默认配置
 var defaultDiscordSettings = DiscordSettings{
-	LoginGatePatrolIntervalMinutes:  5,
-	LoginGatePatrolTargetSweepHours: 24,
-	LoginGatePatrolMaxBatchSize:     1000,
-	LoginGatePatrolWorkerCount:      8,
-	LoginGatePatrolMaxRPS:           8,
+	LoginGatePatrolIntervalMinutes:  2,
+	LoginGatePatrolTargetSweepHours: 12,
+	LoginGatePatrolMaxBatchSize:     50000,
+	LoginGatePatrolWorkerCount:      16,
+	LoginGatePatrolMaxRPS:           25,
 	LoginGatePatrolMaxRetries:       3,
 }
 
@@ -58,11 +58,11 @@ func NormalizeDiscordPatrolSettings(settings *DiscordSettings) {
 	if settings == nil {
 		return
 	}
-	settings.LoginGatePatrolIntervalMinutes = clampDiscordPatrolInt(settings.LoginGatePatrolIntervalMinutes, 1, 60, 5)
-	settings.LoginGatePatrolTargetSweepHours = clampDiscordPatrolInt(settings.LoginGatePatrolTargetSweepHours, 1, 168, 24)
-	settings.LoginGatePatrolMaxBatchSize = clampDiscordPatrolInt(settings.LoginGatePatrolMaxBatchSize, 50, 5000, 1000)
-	settings.LoginGatePatrolWorkerCount = clampDiscordPatrolInt(settings.LoginGatePatrolWorkerCount, 1, 32, 8)
-	settings.LoginGatePatrolMaxRPS = clampDiscordPatrolInt(settings.LoginGatePatrolMaxRPS, 1, 50, 8)
+	settings.LoginGatePatrolIntervalMinutes = clampDiscordPatrolInt(settings.LoginGatePatrolIntervalMinutes, 1, 60, 2)
+	settings.LoginGatePatrolTargetSweepHours = clampDiscordPatrolInt(settings.LoginGatePatrolTargetSweepHours, 1, 168, 12)
+	settings.LoginGatePatrolMaxBatchSize = clampDiscordPatrolInt(settings.LoginGatePatrolMaxBatchSize, 50, 100000, 50000)
+	settings.LoginGatePatrolWorkerCount = clampDiscordPatrolInt(settings.LoginGatePatrolWorkerCount, 1, 64, 16)
+	settings.LoginGatePatrolMaxRPS = clampDiscordPatrolInt(settings.LoginGatePatrolMaxRPS, 1, 100, 25)
 	if settings.LoginGatePatrolMaxRetries < 0 {
 		settings.LoginGatePatrolMaxRetries = 0
 	} else if settings.LoginGatePatrolMaxRetries > 5 {
@@ -87,9 +87,9 @@ func ValidateDiscordPatrolSetting(key string, value int) error {
 	ranges := map[string][2]int{
 		"discord.login_gate_patrol_interval_minutes":   {1, 60},
 		"discord.login_gate_patrol_target_sweep_hours": {1, 168},
-		"discord.login_gate_patrol_max_batch_size":     {50, 5000},
-		"discord.login_gate_patrol_worker_count":       {1, 32},
-		"discord.login_gate_patrol_max_rps":            {1, 50},
+		"discord.login_gate_patrol_max_batch_size":     {50, 100000},
+		"discord.login_gate_patrol_worker_count":       {1, 64},
+		"discord.login_gate_patrol_max_rps":            {1, 100},
 		"discord.login_gate_patrol_max_retries":        {0, 5},
 	}
 	bounds, ok := ranges[key]

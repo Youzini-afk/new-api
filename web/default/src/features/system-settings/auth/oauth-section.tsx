@@ -83,9 +83,13 @@ const oauthSchema = z.object({
       .int()
       .min(1)
       .max(168),
-    login_gate_patrol_max_batch_size: z.coerce.number().int().min(50).max(5000),
-    login_gate_patrol_worker_count: z.coerce.number().int().min(1).max(32),
-    login_gate_patrol_max_rps: z.coerce.number().int().min(1).max(50),
+    login_gate_patrol_max_batch_size: z.coerce
+      .number()
+      .int()
+      .min(50)
+      .max(100000),
+    login_gate_patrol_worker_count: z.coerce.number().int().min(1).max(64),
+    login_gate_patrol_max_rps: z.coerce.number().int().min(1).max(100),
     login_gate_patrol_max_retries: z.coerce.number().int().min(0).max(5),
   }),
   oidc: z.object({
@@ -706,14 +710,14 @@ export function OAuthSection(props: OAuthSectionProps) {
                             <Input
                               type='number'
                               min={50}
-                              max={5000}
+                              max={100000}
                               step={1}
                               {...safeNumberFieldProps(field)}
                             />
                           </FormControl>
                           <FormDescription>
                             {t(
-                              'Upper bound for users checked per run. (50–5000)'
+                              'Upper bound for users checked per run. (50–100000)'
                             )}
                           </FormDescription>
                           <FormMessage />
@@ -730,13 +734,13 @@ export function OAuthSection(props: OAuthSectionProps) {
                             <Input
                               type='number'
                               min={1}
-                              max={32}
+                              max={64}
                               step={1}
                               {...safeNumberFieldProps(field)}
                             />
                           </FormControl>
                           <FormDescription>
-                            {t('Concurrent Discord API workers. (1–32)')}
+                            {t('Concurrent Discord API workers. (1–64)')}
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -752,13 +756,15 @@ export function OAuthSection(props: OAuthSectionProps) {
                             <Input
                               type='number'
                               min={1}
-                              max={50}
+                              max={100}
                               step={1}
                               {...safeNumberFieldProps(field)}
                             />
                           </FormControl>
                           <FormDescription>
-                            {t('Discord API rate limit across workers. (1–50)')}
+                            {t(
+                              'Discord API rate limit across workers. (1–100)'
+                            )}
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -1378,7 +1384,7 @@ function DiscordGatePatrolControls() {
           <Input
             type='number'
             min={50}
-            max={5000}
+            max={100000}
             step={1}
             placeholder={t('Uses saved max batch size if empty')}
             value={batchSizeInput}

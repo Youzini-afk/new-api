@@ -58,8 +58,8 @@ func CreateDiscordGatePatrolSystemTask(c *gin.Context) {
 		common.ApiErrorMsg(c, "mode must be manual_batch")
 		return
 	}
-	if req.BatchSize != 0 && (req.BatchSize < 50 || req.BatchSize > 5000) {
-		common.ApiErrorMsg(c, "batch_size must be between 50 and 5000")
+	if req.BatchSize != 0 && (req.BatchSize < 50 || req.BatchSize > 100000) {
+		common.ApiErrorMsg(c, "batch_size must be between 50 and 100000")
 		return
 	}
 	payload := discordGatePatrolPayload{Mode: req.Mode, BatchSize: req.BatchSize}
