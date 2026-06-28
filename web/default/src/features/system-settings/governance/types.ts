@@ -54,10 +54,23 @@ export type RelayErrorRuleOverride = {
   message?: string
 }
 
+export type RelayErrorCustomRule = {
+  enabled: boolean
+  rule_code: string
+  category?: string
+  match_type: string
+  match_pattern: string
+  safe_error_code: string
+  safe_error_type: string
+  safe_error_message: string
+  status_code?: number
+}
+
 /** Shape of the `relay_error_governance` system option (stored as JSON string). */
 export type RelayErrorGovernanceConfig = {
   enabled: boolean
   rules: Record<string, RelayErrorRuleOverride>
+  custom_rules?: RelayErrorCustomRule[]
 }
 
 /** Editable row state used by the governance section form. */

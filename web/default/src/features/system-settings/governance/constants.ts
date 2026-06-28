@@ -197,7 +197,8 @@ export function buildGovernanceRows(
 export function serializeGovernanceConfig(
   enabled: boolean,
   rows: GovernanceRuleRow[],
-  translate?: (key: string) => string
+  translate?: (key: string) => string,
+  customRules?: RelayErrorGovernanceConfig['custom_rules']
 ): RelayErrorGovernanceConfig {
   const rules: Record<string, RelayErrorRuleOverride> = {}
   for (const row of rows) {
@@ -210,5 +211,5 @@ export function serializeGovernanceConfig(
         defaultMessageKey,
     }
   }
-  return { enabled, rules }
+  return { enabled, rules, custom_rules: customRules ?? [] }
 }

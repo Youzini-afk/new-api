@@ -5510,6 +5510,9 @@
     "Candidate rules generated. Click the AI result eye to review.": "Candidate rules generated. Click the AI result eye to review.",
     "Generated results are stored on this row. Review them from this side panel before saving.": "Generated results are stored on this row. Review them from this side panel before saving.",
     "View AI Result": "View AI Result",
-    "Raw AI Output": "Raw AI Output"
+    "Raw AI Output": "Raw AI Output",
+    "Custom AI Rules": "Custom AI Rules",
+    "Rules approved from Error Insight AI generation are shown here.": "Rules approved from Error Insight AI generation are shown here.",
+    "No custom AI rules saved yet.": "No custom AI rules saved yet."
   }
 }

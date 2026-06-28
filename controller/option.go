@@ -82,6 +82,11 @@ func GetOptions(c *gin.Context) {
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
 		value := common.Interface2String(v)
+		if k == "relay_error_governance" {
+			if data, err := common.Marshal(system_setting.GetRelayErrorGovernanceSetting()); err == nil {
+				value = string(data)
+			}
+		}
 		isSensitiveKey := strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
 			strings.HasSuffix(k, "Key") ||
@@ -413,6 +418,42 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 		option.Value = normalized
+	case "relay_error_governance":
+		var cfg system_setting.RelayErrorGovernanceSetting
+		if err := common.UnmarshalJsonStr(option.Value.(string), &cfg); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "中继错误治理配置必须是合法 JSON",
+			})
+			return
+		}
+		rules, err := common.Marshal(cfg.Rules)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		customRules, err := common.Marshal(cfg.CustomRules)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if err := model.UpdateOptionsBulk(map[string]string{
+			"relay_error_governance.enabled":      strconv.FormatBool(cfg.Enabled),
+			"relay_error_governance.rules":        string(rules),
+			"relay_error_governance.custom_rules": string(customRules),
+			"relay_error_governance":              option.Value.(string),
+		}); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		recordManageAudit(c, "option.update", map[string]interface{}{
+			"key": option.Key,
+		})
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+		})
+		return
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {

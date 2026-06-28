@@ -69,6 +69,9 @@ export const STATIC_I18N_KEYS = [
   'Rule codes are fixed by the backend. Each rule message is editable; use reset to restore the default response message.',
   'Reset rule {{code}} to default',
   'Reset to default',
+  'Custom AI Rules',
+  'Rules approved from Error Insight AI generation are shown here.',
+  'No custom AI rules saved yet.',
 
   // Relay error governance dynamic rule labels/hints/default messages
   'Insufficient user balance',

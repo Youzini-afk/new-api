@@ -63,6 +63,9 @@ function parseGovernanceConfig(raw: string): RelayErrorGovernanceConfig | null {
       enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : false,
       rules:
         parsed.rules && typeof parsed.rules === 'object' ? parsed.rules : {},
+      custom_rules: Array.isArray(parsed.custom_rules)
+        ? parsed.custom_rules
+        : [],
     }
   } catch {
     return null
@@ -94,6 +97,7 @@ export function ErrorGovernanceSection({
 
   const effectiveEnabled = draftEnabled ?? parsed?.enabled ?? false
   const effectiveRows = draftRows ?? parsedRows
+  const customRules = parsed?.custom_rules ?? []
   const hasChanges = draftEnabled !== null || draftRows !== null
 
   const updateRow = (code: string, patch: Partial<GovernanceRuleRow>) => {
@@ -118,7 +122,7 @@ export function ErrorGovernanceSection({
   }
 
   const handleSave = async () => {
-    const config = serializeGovernanceConfig(effectiveEnabled, effectiveRows, t)
+    const config = serializeGovernanceConfig(effectiveEnabled, effectiveRows, t, customRules)
     await updateOption.mutateAsync({
       key: RELAY_ERROR_GOVERNANCE_OPTION_KEY,
       value: JSON.stringify(config),
@@ -231,6 +235,75 @@ export function ErrorGovernanceSection({
             })}
           </TableBody>
         </Table>
+      </div>
+
+      <div className='space-y-3'>
+        <div className='flex items-center justify-between gap-3'>
+          <div>
+            <h3 className='text-sm font-semibold'>{t('Custom AI Rules')}</h3>
+            <p className='text-muted-foreground text-xs'>
+              {t('Rules approved from Error Insight AI generation are shown here.')}
+            </p>
+          </div>
+          <Badge variant='secondary'>{customRules.length}</Badge>
+        </div>
+        <div className='overflow-x-auto rounded-lg border'>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className='min-w-[180px]'>{t('Rule Code')}</TableHead>
+                <TableHead className='min-w-[170px]'>{t('Match Type')}</TableHead>
+                <TableHead className='min-w-[260px]'>{t('Match Pattern')}</TableHead>
+                <TableHead className='min-w-[260px]'>{t('Safe Error Message')}</TableHead>
+                <TableHead className='w-[90px] text-center'>{t('Enabled')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {customRules.length ? (
+                customRules.map((rule) => (
+                  <TableRow key={rule.rule_code}>
+                    <TableCell>
+                      <div className='flex flex-col gap-1'>
+                        <Badge variant='outline' className='w-fit font-mono'>
+                          {rule.rule_code}
+                        </Badge>
+                        {rule.category ? (
+                          <span className='text-muted-foreground text-xs'>
+                            {rule.category}
+                          </span>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant='secondary'>{rule.match_type || '-'}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <code className='text-muted-foreground line-clamp-2 max-w-[340px] break-all text-xs'>
+                        {rule.match_pattern || '-'}
+                      </code>
+                    </TableCell>
+                    <TableCell>
+                      <span className='line-clamp-2 max-w-[360px] text-sm'>
+                        {rule.safe_error_message || '-'}
+                      </span>
+                    </TableCell>
+                    <TableCell className='text-center'>
+                      <Badge variant={rule.enabled ? 'default' : 'secondary'}>
+                        {rule.enabled ? t('Enabled') : t('Disabled')}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={5} className='text-muted-foreground py-8 text-center text-sm'>
+                    {t('No custom AI rules saved yet.')}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       <SettingsPageFormActions
