@@ -182,6 +182,47 @@ func TestGetErrorInsightAIResult_ReturnsPersistedDraft(t *testing.T) {
 	assert.JSONEq(t, `{"rules":[{"rule_code":"ai_draft_rule"}]}`, string(result.Raw))
 }
 
+func TestSaveErrorGovernanceAISetting_SyncsConfig(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+
+	cfg := system_setting.GetErrorGovernanceAISetting()
+	originalEnabled := cfg.Enabled
+	originalChannelID := cfg.ChannelID
+	originalModel := cfg.Model
+	originalRedactSensitive := cfg.RedactSensitive
+	originalPromptTemplate := cfg.PromptTemplate
+	originalJSONOutputParams := append([]byte(nil), cfg.JSONOutputParams...)
+	t.Cleanup(func() {
+		cfg.Enabled = originalEnabled
+		cfg.ChannelID = originalChannelID
+		cfg.Model = originalModel
+		cfg.RedactSensitive = originalRedactSensitive
+		cfg.PromptTemplate = originalPromptTemplate
+		cfg.JSONOutputParams = originalJSONOutputParams
+	})
+
+	body := `{"enabled":true,"channel_id":12,"model":"gpt-test","redact_sensitive":true,"prompt_template":"organize {{governance_config}} {{conflicts}}","json_output_params":{"response_format":{"type":"json_object"}}}`
+	ctx, recorder := newLogScreeningAdminContext(t, http.MethodPut, "/api/error_insight/governance-ai/settings", body)
+	SaveErrorGovernanceAISetting(ctx)
+
+	resp := decodeLogScreeningResponse(t, recorder)
+	require.True(t, resp.Success, resp.Message)
+	assert.True(t, cfg.Enabled)
+	assert.Equal(t, 12, cfg.ChannelID)
+	assert.Equal(t, "gpt-test", cfg.Model)
+	assert.Contains(t, cfg.PromptTemplate, "governance_config")
+}
+
+func TestParseErrorGovernanceAIOrganization_NormalizesRules(t *testing.T) {
+	result, err := parseErrorGovernanceAIOrganization(`{"summary":"merged duplicates","rules":[{"enabled":true,"rule_code":"ai_rule","category":"upstream","match_type":"contains","match_pattern":"all keys cooling down","safe_error_code":"upstream_cooling","safe_error_type":"upstream_error","safe_error_message":"Upstream is busy."}]}`)
+	require.NoError(t, err)
+	assert.Equal(t, "merged duplicates", result.Summary)
+	require.Len(t, result.Rules, 1)
+	assert.Equal(t, "ai_rule", result.Rules[0].RuleCode)
+	assert.Equal(t, http.StatusServiceUnavailable, result.Rules[0].StatusCode)
+}
+
 // TestUpdateOption_SensitiveRegexValidation verifies the controller wires
 // service.ValidateSensitiveRegexOptions for the Phase 5 sensitive regex keys:
 // valid values are persisted; invalid values are rejected with a message.

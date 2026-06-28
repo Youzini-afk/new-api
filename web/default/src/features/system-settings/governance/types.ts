@@ -73,6 +73,21 @@ export type RelayErrorGovernanceConfig = {
   custom_rules?: RelayErrorCustomRule[]
 }
 
+export type ErrorGovernanceAISetting = {
+  enabled: boolean
+  channel_id: number
+  model: string
+  redact_sensitive: boolean
+  prompt_template: string
+  json_output_params: unknown
+}
+
+export type ErrorGovernanceAIOrganizeResult = {
+  summary: string
+  rules: RelayErrorCustomRule[]
+  raw: unknown
+}
+
 /** Editable row state used by the governance section form. */
 export type GovernanceRuleRow = {
   code: RelayErrorRuleCode

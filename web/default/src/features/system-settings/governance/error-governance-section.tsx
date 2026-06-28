@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Loader2, RefreshCw, Settings, Sparkles, Trash2 } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -18,10 +18,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import {
   Table,
@@ -32,6 +35,29 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import { getChannels } from '@/features/channels/api'
 
 import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
@@ -47,14 +73,34 @@ import {
   serializeGovernanceConfig,
 } from './constants'
 import type {
+  ErrorGovernanceAIOrganizeResult,
+  ErrorGovernanceAISetting,
   GovernanceRuleRow,
   RelayErrorCustomRule,
   RelayErrorGovernanceConfig,
 } from './types'
+import {
+  generateErrorGovernanceAIOrganization,
+  getErrorGovernanceAISetting,
+  saveErrorGovernanceAISetting,
+} from './api'
 
 type ErrorGovernanceSectionProps = {
   /** Raw JSON string of the `relay_error_governance` system option. */
   defaultValue: string
+}
+
+const defaultAISetting: ErrorGovernanceAISetting = {
+  enabled: false,
+  channel_id: 0,
+  model: '',
+  redact_sensitive: true,
+  prompt_template: '',
+  json_output_params: {
+    response_format: {
+      type: 'json_object',
+    },
+  },
 }
 
 function parseGovernanceConfig(raw: string): RelayErrorGovernanceConfig | null {
@@ -133,6 +179,7 @@ export function ErrorGovernanceSection({
 }: ErrorGovernanceSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const queryClient = useQueryClient()
 
   const parsed = useMemo(
     () => parseGovernanceConfig(defaultValue),
@@ -145,6 +192,11 @@ export function ErrorGovernanceSection({
   const [draftEnabled, setDraftEnabled] = useState<boolean | null>(null)
   const [draftRows, setDraftRows] = useState<GovernanceRuleRow[] | null>(null)
   const [draftCustomRules, setDraftCustomRules] = useState<RelayErrorCustomRule[] | null>(null)
+  const [aiSettingsOpen, setAISettingsOpen] = useState(false)
+  const [aiResultOpen, setAIResultOpen] = useState(false)
+  const [aiResult, setAIResult] = useState<ErrorGovernanceAIOrganizeResult | null>(null)
+  const [aiForm, setAIForm] = useState<ErrorGovernanceAISetting>(defaultAISetting)
+  const [jsonParamsText, setJsonParamsText] = useState(JSON.stringify(defaultAISetting.json_output_params, null, 2))
 
   // Reset drafts whenever the underlying option is refreshed after a save.
   useEffect(() => {
@@ -161,6 +213,96 @@ export function ErrorGovernanceSection({
     [customRules]
   )
   const hasChanges = draftEnabled !== null || draftRows !== null || draftCustomRules !== null
+
+  const aiSettingQuery = useQuery({
+    queryKey: ['error-governance-ai', 'settings'],
+    enabled: aiSettingsOpen,
+    queryFn: async () => {
+      const result = await getErrorGovernanceAISetting()
+      if (!result.success || !result.data) {
+        throw new Error(result.message || t('Failed to load AI governance settings'))
+      }
+      return result.data
+    },
+  })
+
+  const channelsQuery = useQuery({
+    queryKey: ['channels', 'error-governance-ai'],
+    enabled: aiSettingsOpen,
+    queryFn: async () => {
+      const result = await getChannels({ page_size: 100, status: 'enabled' })
+      if (!result.success) {
+        throw new Error(result.message || t('Failed to load channels'))
+      }
+      return result.data?.items ?? []
+    },
+  })
+
+  useEffect(() => {
+    if (!aiSettingQuery.data) return
+    setAIForm(aiSettingQuery.data)
+    setJsonParamsText(JSON.stringify(aiSettingQuery.data.json_output_params, null, 2))
+  }, [aiSettingQuery.data])
+
+  const selectedAIChannel = useMemo(
+    () => channelsQuery.data?.find((channel) => channel.id === aiForm.channel_id),
+    [channelsQuery.data, aiForm.channel_id]
+  )
+
+  const aiModelOptions = useMemo(() => {
+    if (!selectedAIChannel?.models) return []
+    return selectedAIChannel.models
+      .split(',')
+      .map((model) => model.trim())
+      .filter(Boolean)
+  }, [selectedAIChannel])
+
+  const saveAISettingMutation = useMutation({
+    mutationFn: async () => {
+      let jsonOutputParams: unknown
+      try {
+        jsonOutputParams = JSON.parse(jsonParamsText || '{}')
+      } catch {
+        throw new Error(t('JSON output params must be valid JSON'))
+      }
+      const result = await saveErrorGovernanceAISetting({
+        ...aiForm,
+        json_output_params: jsonOutputParams,
+      })
+      if (!result.success || !result.data) {
+        throw new Error(result.message || t('Failed to save AI governance settings'))
+      }
+      return result.data
+    },
+    onSuccess: (data) => {
+      toast.success(t('AI governance settings saved'))
+      queryClient.setQueryData(['error-governance-ai', 'settings'], data)
+      setAISettingsOpen(false)
+    },
+    onError: (error) => {
+      toast.error(error.message || t('Failed to save AI governance settings'))
+    },
+  })
+
+  const organizeAIMutation = useMutation({
+    mutationFn: async () => {
+      const result = await generateErrorGovernanceAIOrganization(
+        serializeGovernanceConfig(effectiveEnabled, effectiveRows, t, customRules)
+      )
+      if (!result.success || !result.data) {
+        throw new Error(result.message || t('Failed to organize custom rules'))
+      }
+      return result.data
+    },
+    onSuccess: (data) => {
+      setAIResult(data)
+      setAIResultOpen(true)
+      toast.success(t('AI governance organization generated'))
+    },
+    onError: (error) => {
+      toast.error(error.message || t('Failed to organize custom rules'))
+    },
+  })
 
   const updateRow = (code: string, patch: Partial<GovernanceRuleRow>) => {
     setDraftRows((draft) =>
@@ -217,6 +359,17 @@ export function ErrorGovernanceSection({
       key: RELAY_ERROR_GOVERNANCE_OPTION_KEY,
       value: JSON.stringify(config),
     })
+  }
+
+  const updateAIForm = (patch: Partial<ErrorGovernanceAISetting>) => {
+    setAIForm((current) => ({ ...current, ...patch }))
+  }
+
+  const applyAIResult = () => {
+    if (!aiResult) return
+    setDraftCustomRules(aiResult.rules.map((rule) => ({ ...rule })))
+    setAIResultOpen(false)
+    toast.success(t('AI organization applied to draft. Review and save to publish.'))
   }
 
   return (
@@ -338,7 +491,31 @@ export function ErrorGovernanceSection({
               {t('Custom rules are matched from top to bottom. The first matching enabled rule wins.')}
             </p>
           </div>
-          <Badge variant='secondary'>{customRules.length}</Badge>
+          <div className='flex items-center gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={() => setAISettingsOpen(true)}
+            >
+              <Settings className='h-4 w-4' />
+              {t('AI Governance Settings')}
+            </Button>
+            <Button
+              type='button'
+              size='sm'
+              disabled={organizeAIMutation.isPending || customRules.length === 0}
+              onClick={() => organizeAIMutation.mutate()}
+            >
+              {organizeAIMutation.isPending ? (
+                <Loader2 className='h-4 w-4 animate-spin' />
+              ) : (
+                <Sparkles className='h-4 w-4' />
+              )}
+              {t('AI Organize')}
+            </Button>
+            <Badge variant='secondary'>{customRules.length}</Badge>
+          </div>
         </div>
         <div className='overflow-x-auto rounded-lg border'>
           <Table>
@@ -460,6 +637,191 @@ export function ErrorGovernanceSection({
         isResetDisabled={!hasChanges}
         saveLabel='Save error governance'
       />
+
+      <Dialog open={aiSettingsOpen} onOpenChange={setAISettingsOpen}>
+        <DialogContent className='max-h-[88vh] overflow-y-auto sm:max-w-4xl'>
+          <DialogHeader>
+            <DialogTitle>{t('AI Governance Settings')}</DialogTitle>
+            <DialogDescription>
+              {t('Configure the channel, model, prompt, and JSON output parameters used to organize custom governance rules.')}
+            </DialogDescription>
+          </DialogHeader>
+
+          {aiSettingQuery.isLoading ? (
+            <div className='flex min-h-[240px] items-center justify-center'>
+              <Loader2 className='text-muted-foreground size-6 animate-spin' />
+            </div>
+          ) : (
+            <div className='grid gap-5 py-2'>
+              <div className='flex items-center justify-between gap-4 rounded-xl border p-4'>
+                <div>
+                  <p className='font-semibold'>{t('Enable AI Governance')}</p>
+                  <p className='text-muted-foreground text-sm'>
+                    {t('AI only generates an organization draft. Manual review and save are still required.')}
+                  </p>
+                </div>
+                <Switch
+                  checked={aiForm.enabled}
+                  onCheckedChange={(value) => updateAIForm({ enabled: value })}
+                />
+              </div>
+
+              <div className='grid gap-4 md:grid-cols-2'>
+                <div className='space-y-2'>
+                  <label className='text-sm font-medium'>{t('AI Channel')}</label>
+                  <Select
+                    value={aiForm.channel_id > 0 ? String(aiForm.channel_id) : ''}
+                    onValueChange={(value) => updateAIForm({ channel_id: Number(value), model: '' })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={t('Select channel')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(channelsQuery.data ?? []).map((channel) => (
+                        <SelectItem key={channel.id} value={String(channel.id)}>
+                          #{channel.id} {channel.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className='space-y-2'>
+                  <label className='text-sm font-medium'>{t('AI Model')}</label>
+                  <Input
+                    value={aiForm.model}
+                    list='error-governance-ai-models'
+                    placeholder={t('Enter or select a model')}
+                    onChange={(event) => updateAIForm({ model: event.target.value })}
+                  />
+                  <datalist id='error-governance-ai-models'>
+                    {aiModelOptions.map((model) => (
+                      <option key={model} value={model} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              <div className='flex items-center justify-between gap-4 rounded-xl border p-4'>
+                <div>
+                  <p className='font-semibold'>{t('Redact Sensitive Text')}</p>
+                  <p className='text-muted-foreground text-sm'>
+                    {t('Mask keys, tokens, cookies, and secrets before sending rules to AI.')}
+                  </p>
+                </div>
+                <Switch
+                  checked={aiForm.redact_sensitive}
+                  onCheckedChange={(value) => updateAIForm({ redact_sensitive: value })}
+                />
+              </div>
+
+              <div className='space-y-2'>
+                <label className='text-sm font-medium'>{t('Prompt Template')}</label>
+                <Textarea
+                  value={aiForm.prompt_template}
+                  className='min-h-64 font-mono text-xs'
+                  onChange={(event) => updateAIForm({ prompt_template: event.target.value })}
+                />
+                <p className='text-muted-foreground text-xs'>
+                  {t('Available variables: {{governance_config}}, {{conflicts}}')}
+                </p>
+              </div>
+
+              <div className='space-y-2'>
+                <label className='text-sm font-medium'>{t('JSON Output Params')}</label>
+                <Textarea
+                  value={jsonParamsText}
+                  className='min-h-32 font-mono text-xs'
+                  onChange={(event) => setJsonParamsText(event.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant='outline' onClick={() => setAISettingsOpen(false)}>
+              {t('Cancel')}
+            </Button>
+            <Button
+              disabled={saveAISettingMutation.isPending || aiSettingQuery.isLoading}
+              onClick={() => saveAISettingMutation.mutate()}
+            >
+              {saveAISettingMutation.isPending && <Loader2 className='h-4 w-4 animate-spin' />}
+              {t('Save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Sheet open={aiResultOpen} onOpenChange={setAIResultOpen}>
+        <SheetContent className='w-[92vw] p-0 sm:max-w-4xl' side='right'>
+          <SheetHeader className='border-border/70 border-b px-6 py-5'>
+            <SheetTitle className='text-2xl font-bold'>{t('AI Governance Organization')}</SheetTitle>
+            <SheetDescription>
+              {t('Review the organized draft, then apply it to the current custom rules draft before saving.')}
+            </SheetDescription>
+          </SheetHeader>
+          <div className='flex-1 space-y-5 overflow-y-auto px-6 py-5'>
+            {aiResult?.summary ? (
+              <div className='bg-muted/40 rounded-xl p-4 text-sm whitespace-pre-wrap'>
+                {aiResult.summary}
+              </div>
+            ) : null}
+            <div className='overflow-x-auto rounded-lg border'>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className='min-w-[180px]'>{t('Rule Code')}</TableHead>
+                    <TableHead className='min-w-[140px]'>{t('Match Type')}</TableHead>
+                    <TableHead className='min-w-[260px]'>{t('Match Pattern')}</TableHead>
+                    <TableHead className='min-w-[260px]'>{t('Safe Error Message')}</TableHead>
+                    <TableHead className='w-[90px]'>{t('Enabled')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {aiResult?.rules.length ? (
+                    aiResult.rules.map((rule, index) => (
+                      <TableRow key={`${rule.rule_code}-${index}`}>
+                        <TableCell>
+                          <Badge variant='outline' className='font-mono'>#{index + 1} · {rule.rule_code}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant='secondary'>{rule.match_type || '-'}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <code className='text-muted-foreground line-clamp-2 max-w-[360px] break-all text-xs'>
+                            {rule.match_pattern || '-'}
+                          </code>
+                        </TableCell>
+                        <TableCell>
+                          <span className='line-clamp-2 max-w-[360px] text-sm'>
+                            {rule.safe_error_message || '-'}
+                          </span>
+                        </TableCell>
+                        <TableCell>{rule.enabled ? t('Yes') : t('No')}</TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={5} className='text-muted-foreground py-8 text-center text-sm'>
+                        {t('No custom AI rules saved yet.')}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            <div className='flex justify-end gap-2'>
+              <Button variant='outline' onClick={() => setAIResultOpen(false)}>
+                {t('Cancel')}
+              </Button>
+              <Button disabled={!aiResult?.rules.length} onClick={applyAIResult}>
+                {t('Apply to Draft')}
+              </Button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </SettingsSection>
   )
 }

@@ -178,6 +178,84 @@ func SaveErrorInsightAISetting(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": system_setting.GetErrorInsightAISetting()})
 }
 
+func GetErrorGovernanceAISetting(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    system_setting.GetErrorGovernanceAISetting(),
+	})
+}
+
+func SaveErrorGovernanceAISetting(c *gin.Context) {
+	var req system_setting.ErrorGovernanceAISetting
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid request body"})
+		return
+	}
+	req = system_setting.NormalizeErrorGovernanceAISetting(req)
+	if req.Enabled && req.ChannelID <= 0 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel is required when AI governance is enabled"})
+		return
+	}
+	if req.Enabled && strings.TrimSpace(req.Model) == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "model is required when AI governance is enabled"})
+		return
+	}
+	if !json.Valid(req.JSONOutputParams) {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "json output params must be valid JSON"})
+		return
+	}
+	values, err := errorGovernanceAISettingToOptions(req)
+	if err != nil {
+		common.SysError("failed to encode error governance ai setting: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to save setting"})
+		return
+	}
+	if err := model.UpdateOptionsBulk(values); err != nil {
+		common.SysError("failed to save error governance ai setting: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": system_setting.GetErrorGovernanceAISetting()})
+}
+
+func GenerateErrorGovernanceAIOrganization(c *gin.Context) {
+	var req ErrorGovernanceAIOrganizeRequest
+	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid request body"})
+		return
+	}
+	cfg := system_setting.GetErrorGovernanceAISetting()
+	if !cfg.Enabled {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "AI governance is disabled"})
+		return
+	}
+	if cfg.ChannelID <= 0 || strings.TrimSpace(cfg.Model) == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "AI channel and model are required"})
+		return
+	}
+	governanceCfg := system_setting.GetRelayErrorGovernanceSetting()
+	if req.GovernanceConfig != nil {
+		governanceCfg = req.GovernanceConfig
+	}
+	if governanceCfg == nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to load governance setting"})
+		return
+	}
+	content, err := generateErrorGovernanceOrganizationWithAI(c, cfg, governanceCfg)
+	if err != nil {
+		common.SysError("failed to generate error governance ai organization: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	result, err := parseErrorGovernanceAIOrganization(content)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error(), "data": gin.H{"raw": content}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
 type ErrorInsightAIGenerateRequest struct {
 	Signature string `json:"signature"`
 }
@@ -187,9 +265,19 @@ type SaveErrorInsightCustomAIRuleRequest struct {
 	Rule      ErrorInsightAIRuleSuggestion `json:"rule"`
 }
 
+type ErrorGovernanceAIOrganizeRequest struct {
+	GovernanceConfig *system_setting.RelayErrorGovernanceSetting `json:"governance_config"`
+}
+
 type ErrorInsightAIResultResponse struct {
 	Rules []ErrorInsightAIRuleSuggestion `json:"rules"`
 	Raw   json.RawMessage                `json:"raw"`
+}
+
+type ErrorGovernanceAIOrganizeResult struct {
+	Summary string                                                `json:"summary"`
+	Rules   []system_setting.RelayErrorGovernanceCustomRuleConfig `json:"rules"`
+	Raw     json.RawMessage                                       `json:"raw"`
 }
 
 func GenerateErrorInsightAIRules(c *gin.Context) {
@@ -372,32 +460,201 @@ func errorInsightAISettingToOptions(setting system_setting.ErrorInsightAISetting
 	}, nil
 }
 
+func errorGovernanceAISettingToOptions(setting system_setting.ErrorGovernanceAISetting) (map[string]string, error) {
+	jsonParams := json.RawMessage([]byte("{}"))
+	if len(setting.JSONOutputParams) > 0 {
+		jsonParams = setting.JSONOutputParams
+	}
+	if !json.Valid(jsonParams) {
+		return nil, errors.New("invalid json output params")
+	}
+	return map[string]string{
+		"error_governance_ai.enabled":            strconv.FormatBool(setting.Enabled),
+		"error_governance_ai.channel_id":         strconv.Itoa(setting.ChannelID),
+		"error_governance_ai.model":              setting.Model,
+		"error_governance_ai.redact_sensitive":   strconv.FormatBool(setting.RedactSensitive),
+		"error_governance_ai.prompt_template":    setting.PromptTemplate,
+		"error_governance_ai.json_output_params": string(jsonParams),
+	}, nil
+}
+
+func generateErrorGovernanceOrganizationWithAI(c *gin.Context, cfg *system_setting.ErrorGovernanceAISetting, governanceCfg *system_setting.RelayErrorGovernanceSetting) (string, error) {
+	prompt, err := buildErrorGovernanceAIOrganizationPrompt(cfg, governanceCfg)
+	if err != nil {
+		return "", err
+	}
+	return invokeErrorInsightAI(c, cfg.ChannelID, cfg.Model, cfg.JSONOutputParams, prompt)
+}
+
+func buildErrorGovernanceAIOrganizationPrompt(cfg *system_setting.ErrorGovernanceAISetting, governanceCfg *system_setting.RelayErrorGovernanceSetting) (string, error) {
+	governanceData, err := json.MarshalIndent(governanceCfg, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if cfg.RedactSensitive {
+		governanceData = []byte(redactErrorInsightAIText(string(governanceData), true))
+	}
+	conflicts := buildErrorGovernanceAIConflictSummary(governanceCfg.CustomRules)
+	conflictData, err := json.MarshalIndent(conflicts, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	prompt := cfg.PromptTemplate
+	prompt = strings.ReplaceAll(prompt, "{{governance_config}}", string(governanceData))
+	prompt = strings.ReplaceAll(prompt, "{{conflicts}}", string(conflictData))
+	return prompt, nil
+}
+
+func buildErrorGovernanceAIConflictSummary(rules []system_setting.RelayErrorGovernanceCustomRuleConfig) []map[string]any {
+	conflicts := make([]map[string]any, 0)
+	for i, rule := range rules {
+		pattern := strings.TrimSpace(strings.ToLower(rule.MatchPattern))
+		if pattern == "" {
+			continue
+		}
+		for j := i + 1; j < len(rules); j++ {
+			other := rules[j]
+			otherPattern := strings.TrimSpace(strings.ToLower(other.MatchPattern))
+			if otherPattern == "" {
+				continue
+			}
+			reason := ""
+			if rule.RuleCode != "" && rule.RuleCode == other.RuleCode {
+				reason = "duplicate rule_code"
+			} else if rule.MatchType == other.MatchType && pattern == otherPattern {
+				reason = "same match pattern"
+			} else if rule.MatchType == "contains" && other.MatchType == "contains" && (strings.Contains(pattern, otherPattern) || strings.Contains(otherPattern, pattern)) {
+				reason = "contains pattern overlap"
+			} else if rule.MatchType == "regex" {
+				if re, err := regexp.Compile(rule.MatchPattern); err != nil {
+					reason = "invalid regex"
+				} else if re.MatchString(otherPattern) {
+					reason = "regex may cover another pattern"
+				}
+			} else if other.MatchType == "regex" {
+				if re, err := regexp.Compile(other.MatchPattern); err != nil {
+					reason = "other invalid regex"
+				} else if re.MatchString(pattern) {
+					reason = "covered by another regex"
+				}
+			}
+			if reason != "" {
+				conflicts = append(conflicts, map[string]any{
+					"rule_code":       rule.RuleCode,
+					"other_rule_code": other.RuleCode,
+					"reason":          reason,
+				})
+			}
+		}
+	}
+	return conflicts
+}
+
+func parseErrorGovernanceAIOrganization(content string) (ErrorGovernanceAIOrganizeResult, error) {
+	trimmed := normalizeErrorInsightAIJSONContent(content)
+	var payload struct {
+		Summary string                                                `json:"summary"`
+		Rules   []system_setting.RelayErrorGovernanceCustomRuleConfig `json:"rules"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return ErrorGovernanceAIOrganizeResult{}, errors.New("AI response is not valid JSON")
+	}
+	for i := range payload.Rules {
+		rule, err := normalizeErrorGovernanceAICustomRule(payload.Rules[i])
+		if err != nil {
+			return ErrorGovernanceAIOrganizeResult{}, err
+		}
+		payload.Rules[i] = rule
+	}
+	if payload.Rules == nil {
+		payload.Rules = []system_setting.RelayErrorGovernanceCustomRuleConfig{}
+	}
+	return ErrorGovernanceAIOrganizeResult{Summary: strings.TrimSpace(payload.Summary), Rules: payload.Rules, Raw: json.RawMessage(trimmed)}, nil
+}
+
+func normalizeErrorGovernanceAICustomRule(input system_setting.RelayErrorGovernanceCustomRuleConfig) (system_setting.RelayErrorGovernanceCustomRuleConfig, error) {
+	ruleCode := strings.TrimSpace(input.RuleCode)
+	if ruleCode == "" || !errorInsightAIRuleCodePattern.MatchString(ruleCode) {
+		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("rule code must contain only letters, numbers, dot, underscore, or dash")
+	}
+	matchType := strings.TrimSpace(input.MatchType)
+	if matchType != "contains" && matchType != "regex" {
+		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match type must be contains or regex")
+	}
+	matchPattern := strings.TrimSpace(input.MatchPattern)
+	if matchPattern == "" {
+		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern is required")
+	}
+	if len(matchPattern) > 1000 {
+		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern is too long")
+	}
+	if matchType == "regex" {
+		if _, err := regexp.Compile(matchPattern); err != nil {
+			return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern must be a valid regex")
+		}
+	}
+	safeMessage := strings.TrimSpace(input.SafeErrorMessage)
+	if safeMessage == "" {
+		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("safe error message is required")
+	}
+	if len(safeMessage) > 500 {
+		safeMessage = safeMessage[:500]
+	}
+	safeCode := strings.TrimSpace(input.SafeErrorCode)
+	if safeCode == "" || !errorInsightAIRuleCodePattern.MatchString(safeCode) {
+		safeCode = ruleCode
+	}
+	safeType := strings.TrimSpace(input.SafeErrorType)
+	if safeType == "" || !errorInsightAIRuleCodePattern.MatchString(safeType) {
+		safeType = "service_unavailable"
+	}
+	statusCode := input.StatusCode
+	if statusCode == 0 {
+		statusCode = http.StatusServiceUnavailable
+	}
+	return system_setting.RelayErrorGovernanceCustomRuleConfig{
+		Enabled:          input.Enabled,
+		RuleCode:         ruleCode,
+		Category:         strings.TrimSpace(input.Category),
+		MatchType:        matchType,
+		MatchPattern:     matchPattern,
+		SafeErrorCode:    safeCode,
+		SafeErrorType:    safeType,
+		SafeErrorMessage: safeMessage,
+		StatusCode:       statusCode,
+	}, nil
+}
+
 func generateErrorInsightRulesWithAI(c *gin.Context, cfg *system_setting.ErrorInsightAISetting, signature string, logs []*model.ErrorLog) (string, error) {
-	channel, err := model.GetChannelById(cfg.ChannelID, true)
+	prompt, err := buildErrorInsightAIPrompt(cfg, signature, logs)
+	if err != nil {
+		return "", err
+	}
+	return invokeErrorInsightAI(c, cfg.ChannelID, cfg.Model, cfg.JSONOutputParams, prompt)
+}
+
+func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonOutputParams json.RawMessage, prompt string) (string, error) {
+	channel, err := model.GetChannelById(channelID, true)
 	if err != nil {
 		return "", errors.New("failed to load AI channel")
 	}
 	if channel.Status != common.ChannelStatusEnabled {
 		return "", errors.New("AI channel is not enabled")
 	}
-	prompt, err := buildErrorInsightAIPrompt(cfg, signature, logs)
-	if err != nil {
-		return "", err
-	}
 	request := &dto.GeneralOpenAIRequest{
-		Model: cfg.Model,
+		Model: modelName,
 		Messages: []dto.Message{
 			{Role: "user", Content: prompt},
 		},
 	}
-	if err := applyErrorInsightAIJSONParams(request, cfg.JSONOutputParams); err != nil {
+	if err := applyErrorInsightAIJSONParams(request, jsonOutputParams); err != nil {
 		return "", err
 	}
 	relayCtx, _ := gin.CreateTestContext(c.Writer)
 	relayCtx.Request = c.Request.Clone(context.Background())
 	relayCtx.Request.Method = http.MethodPost
 	relayCtx.Request.URL.Path = "/v1/chat/completions"
-	if newAPIError := middleware.SetupContextForSelectedChannel(relayCtx, channel, cfg.Model); newAPIError != nil {
+	if newAPIError := middleware.SetupContextForSelectedChannel(relayCtx, channel, modelName); newAPIError != nil {
 		return "", newAPIError
 	}
 	apiType, ok := common.ChannelType2APIType(channel.Type)
@@ -434,7 +691,7 @@ func generateErrorInsightRulesWithAI(c *gin.Context, cfg *system_setting.ErrorIn
 			return "", err
 		}
 	}
-	jsonData, err = mergeErrorInsightAIJSONParams(jsonData, cfg.JSONOutputParams)
+	jsonData, err = mergeErrorInsightAIJSONParams(jsonData, jsonOutputParams)
 	if err != nil {
 		return "", err
 	}
