@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -156,6 +157,29 @@ func TestSaveErrorInsightCustomAIRule_SyncsRelayErrorGovernanceConfig(t *testing
 		assert.Equal(t, "ai_saved_rule", parsed.CustomRules[0].RuleCode)
 	}
 	assert.True(t, found)
+}
+
+func TestGetErrorInsightAIResult_ReturnsPersistedDraft(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	require.NoError(t, model.UpsertErrorInsightAIResult(
+		context.Background(),
+		"sig_ai_draft",
+		1,
+		`[{"rule_code":"ai_draft_rule","category":"upstream","match_type":"contains","match_pattern":"timeout","safe_error_code":"upstream_timeout","safe_error_type":"upstream_error","safe_error_message":"Upstream timeout.","confidence":0.91,"reason":"matched timeout"}]`,
+		`{"rules":[{"rule_code":"ai_draft_rule"}]}`,
+	))
+
+	ctx, recorder := newLogScreeningAdminContext(t, http.MethodGet, "/api/error_insight/ai/results/sig_ai_draft", "")
+	ctx.Params = gin.Params{{Key: "signature", Value: "sig_ai_draft"}}
+	GetErrorInsightAIResult(ctx)
+
+	resp := decodeLogScreeningResponse(t, recorder)
+	require.True(t, resp.Success, resp.Message)
+	var result ErrorInsightAIResultResponse
+	require.NoError(t, json.Unmarshal(resp.Data, &result))
+	require.Len(t, result.Rules, 1)
+	assert.Equal(t, "ai_draft_rule", result.Rules[0].RuleCode)
+	assert.JSONEq(t, `{"rules":[{"rule_code":"ai_draft_rule"}]}`, string(result.Raw))
 }
 
 // TestUpdateOption_SensitiveRegexValidation verifies the controller wires

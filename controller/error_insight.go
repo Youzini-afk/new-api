@@ -183,7 +183,13 @@ type ErrorInsightAIGenerateRequest struct {
 }
 
 type SaveErrorInsightCustomAIRuleRequest struct {
-	Rule ErrorInsightAIRuleSuggestion `json:"rule"`
+	Signature string                       `json:"signature"`
+	Rule      ErrorInsightAIRuleSuggestion `json:"rule"`
+}
+
+type ErrorInsightAIResultResponse struct {
+	Rules []ErrorInsightAIRuleSuggestion `json:"rules"`
+	Raw   json.RawMessage                `json:"raw"`
 }
 
 func GenerateErrorInsightAIRules(c *gin.Context) {
@@ -228,7 +234,49 @@ func GenerateErrorInsightAIRules(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error(), "data": gin.H{"raw": content}})
 		return
 	}
+	rulesValue, err := json.Marshal(rules)
+	if err != nil {
+		common.SysError("failed to encode error insight ai rules: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to save generated rules"})
+		return
+	}
+	if err := model.UpsertErrorInsightAIResult(c.Request.Context(), req.Signature, c.GetInt("id"), string(rulesValue), string(raw)); err != nil {
+		common.SysError("failed to persist error insight ai result: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to save generated rules"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"rules": rules, "raw": raw}})
+}
+
+func GetErrorInsightAIResult(c *gin.Context) {
+	signature := strings.TrimSpace(c.Param("signature"))
+	if !model.ValidateNormalizedSignature(signature) {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid signature"})
+		return
+	}
+	result, err := model.GetErrorInsightAIResult(c.Request.Context(), signature)
+	if err != nil {
+		common.SysError("failed to get error insight ai result: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to load generated rules"})
+		return
+	}
+	if result == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": nil})
+		return
+	}
+	var rules []ErrorInsightAIRuleSuggestion
+	if strings.TrimSpace(result.Rules) != "" {
+		if err := json.Unmarshal([]byte(result.Rules), &rules); err != nil {
+			common.SysError("failed to decode error insight ai rules: " + err.Error())
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to load generated rules"})
+			return
+		}
+	}
+	raw := json.RawMessage([]byte("null"))
+	if strings.TrimSpace(result.Raw) != "" && json.Valid([]byte(result.Raw)) {
+		raw = json.RawMessage(result.Raw)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": ErrorInsightAIResultResponse{Rules: rules, Raw: raw}})
 }
 
 func SaveErrorInsightCustomAIRule(c *gin.Context) {
@@ -280,6 +328,11 @@ func SaveErrorInsightCustomAIRule(c *gin.Context) {
 		common.SysError("failed to save error insight custom rule: " + err.Error())
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 		return
+	}
+	if signature := strings.TrimSpace(req.Signature); model.ValidateNormalizedSignature(signature) {
+		if err := model.MarkErrorInsightAIResultApproved(c.Request.Context(), signature); err != nil {
+			common.SysError("failed to mark error insight ai result approved: " + err.Error())
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": rule})
 }
@@ -450,26 +503,26 @@ func buildErrorInsightAIPrompt(cfg *system_setting.ErrorInsightAISetting, signat
 	samples := make([]map[string]any, 0, len(logs))
 	for _, log := range logs {
 		item := map[string]any{
-			"created_at":             log.CreatedAt,
-			"user_id":                log.UserId,
-			"channel_id":             log.ChannelId,
-			"model_name":             log.ModelName,
-			"request_path":           log.RequestPath,
-			"error_source":           log.ErrorSource,
-			"error_stage":            log.ErrorStage,
-			"client_status_code":     log.ClientStatusCode,
-			"upstream_status_code":   log.UpstreamStatusCode,
-			"safe_error_code":        log.SafeErrorCode,
-			"safe_error_type":        log.SafeErrorType,
-			"safe_error_message":     log.SafeErrorMessage,
-			"original_error_code":    redactErrorInsightAIText(log.OriginalErrorCode, cfg.RedactSensitive),
-			"original_error_type":    redactErrorInsightAIText(log.OriginalErrorType, cfg.RedactSensitive),
-			"normalized_signature":   log.NormalizedSignature,
-			"request_time":           log.RequestTime,
-			"retry_count":            log.RetryCount,
-			"unmatched_reason":       log.UnmatchedReason,
-			"current_rule_matched":   log.RuleMatched,
-			"current_rule_code":      log.RuleCode,
+			"created_at":           log.CreatedAt,
+			"user_id":              log.UserId,
+			"channel_id":           log.ChannelId,
+			"model_name":           log.ModelName,
+			"request_path":         log.RequestPath,
+			"error_source":         log.ErrorSource,
+			"error_stage":          log.ErrorStage,
+			"client_status_code":   log.ClientStatusCode,
+			"upstream_status_code": log.UpstreamStatusCode,
+			"safe_error_code":      log.SafeErrorCode,
+			"safe_error_type":      log.SafeErrorType,
+			"safe_error_message":   log.SafeErrorMessage,
+			"original_error_code":  redactErrorInsightAIText(log.OriginalErrorCode, cfg.RedactSensitive),
+			"original_error_type":  redactErrorInsightAIText(log.OriginalErrorType, cfg.RedactSensitive),
+			"normalized_signature": log.NormalizedSignature,
+			"request_time":         log.RequestTime,
+			"retry_count":          log.RetryCount,
+			"unmatched_reason":     log.UnmatchedReason,
+			"current_rule_matched": log.RuleMatched,
+			"current_rule_code":    log.RuleCode,
 		}
 		if cfg.IncludeOriginalError {
 			item["original_error_message"] = redactErrorInsightAIText(log.OriginalErrorMessage, cfg.RedactSensitive)

@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Aggregated error signatures table with per-row delete.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -47,6 +47,7 @@ import { formatTimestamp } from '@/lib/format'
 import {
   deleteErrorInsightSignature,
   generateErrorInsightAIRules,
+  getErrorInsightAIResult,
   getErrorInsightLogs,
   getErrorInsightSignatures,
   saveErrorInsightAIRule,
@@ -148,6 +149,11 @@ export function SignaturesTable(props: SignaturesTableProps) {
         ...current,
         [signature]: result.data.rules,
       }))
+      queryClient.setQueryData(
+        ['error-insight', 'ai-result', signature],
+        result.data
+      )
+      void queryClient.invalidateQueries({ queryKey: ['error-insight', 'signatures'] })
       if (result.data.rules.length > 0) {
         toast.success(t('Candidate rules generated. Click the AI result eye to review.'))
       } else {
@@ -170,7 +176,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
   }
 
   const saveRuleMutation = useMutation({
-    mutationFn: (rule: ErrorInsightAIRuleSuggestion) => saveErrorInsightAIRule(rule),
+    mutationFn: (rule: ErrorInsightAIRuleSuggestion) => saveErrorInsightAIRule(rule, aiPanelSignature || undefined),
     onSuccess: (result) => {
       if (!result.success) {
         toast.error(result.message || t('Failed to save candidate rule'))
@@ -201,6 +207,31 @@ export function SignaturesTable(props: SignaturesTableProps) {
   const items = signatures ?? []
   const selectedAIResult = aiPanelSignature ? aiResults[aiPanelSignature] : null
   const editableRules = aiPanelSignature ? editableRulesBySignature[aiPanelSignature] ?? [] : []
+
+  const aiResultQuery = useQuery({
+    queryKey: ['error-insight', 'ai-result', aiPanelSignature],
+    enabled: Boolean(aiPanelSignature) && !selectedAIResult,
+    queryFn: async () => {
+      const result = await getErrorInsightAIResult(aiPanelSignature || '')
+      if (!result.success) {
+        throw new Error(result.message || t('Failed to load generated rules'))
+      }
+      return result.data ?? null
+    },
+  })
+
+  useEffect(() => {
+    if (!aiPanelSignature || selectedAIResult || !aiResultQuery.data) return
+    const data = aiResultQuery.data
+    setAIResults((current) => ({
+      ...current,
+      [aiPanelSignature]: data,
+    }))
+    setEditableRulesBySignature((current) => ({
+      ...current,
+      [aiPanelSignature]: data.rules,
+    }))
+  }, [aiPanelSignature, aiResultQuery.data, selectedAIResult])
 
   const sampleQuery = useQuery({
     queryKey: [
@@ -300,7 +331,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
               {items.map((signature) => {
                 const isMatched = Boolean(signature.rule_code)
                 const aiResult = aiResults[signature.normalized_signature]
-                const hasAIResult = Boolean(aiResult)
+                const hasAIResult = Boolean(aiResult || signature.has_ai_result)
                 const isGeneratingAI = Boolean(generatingSignatures[signature.normalized_signature])
                 return (
                   <TableRow
@@ -527,7 +558,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
             </SheetTitle>
             <SheetDescription className='space-y-2'>
               <span className='block'>
-                {t('Generated results are stored on this row. Review them from this side panel before saving.')}
+                {t('Generated results are saved as drafts. Review them from this side panel before saving.')}
               </span>
               <code className='bg-muted block max-w-full truncate rounded px-2 py-1 font-mono text-xs'>
                 {aiPanelSignature || '-'}
@@ -536,6 +567,20 @@ export function SignaturesTable(props: SignaturesTableProps) {
           </SheetHeader>
 
           <div className='flex-1 overflow-y-auto px-6 py-5'>
+            {aiResultQuery.error ? (
+              <ErrorState
+                title={t('Failed to load generated rules')}
+                description={aiResultQuery.error.message}
+                onRetry={aiResultQuery.refetch}
+                className='mb-4 min-h-[180px]'
+              />
+            ) : aiResultQuery.isLoading ? (
+              <div className='mb-4 flex min-h-[180px] flex-col items-center justify-center gap-3'>
+                <Loader2 className='text-muted-foreground size-6 animate-spin' />
+                <p className='text-muted-foreground text-sm'>{t('Loading...')}</p>
+              </div>
+            ) : null}
+
             {selectedAIResult?.raw ? (
               <details className='border-border/70 bg-muted/30 mb-4 rounded-xl border p-3'>
                 <summary className='text-muted-foreground cursor-pointer text-sm font-semibold'>

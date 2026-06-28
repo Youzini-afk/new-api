@@ -87,6 +87,7 @@ export interface ErrorInsightSignature {
   affected_channels: number
   first_seen_at: number
   latest_at: number
+  has_ai_result?: boolean
 }
 
 // ============================================================================

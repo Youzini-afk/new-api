@@ -469,6 +469,7 @@ func SetApiRouter(router *gin.Engine) {
 			errorInsightRoute.GET("/logs", controller.GetErrorInsightLogs)
 			errorInsightRoute.GET("/ai/settings", controller.GetErrorInsightAISetting)
 			errorInsightRoute.PUT("/ai/settings", controller.SaveErrorInsightAISetting)
+			errorInsightRoute.GET("/ai/results/:signature", controller.GetErrorInsightAIResult)
 			errorInsightRoute.POST("/ai/generate", controller.GenerateErrorInsightAIRules)
 			errorInsightRoute.POST("/ai/rules", controller.SaveErrorInsightCustomAIRule)
 			errorInsightRoute.DELETE("/signatures/:signature", controller.DeleteErrorInsightSignature)

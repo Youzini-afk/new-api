@@ -344,6 +344,7 @@ type ErrorLogSignature struct {
 	AffectedChannels    int64  `json:"affected_channels" gorm:"column:affected_channels"`
 	FirstSeenAt         int64  `json:"first_seen_at" gorm:"column:first_seen_at"`
 	LatestAt            int64  `json:"latest_at" gorm:"column:latest_at"`
+	HasAIResult         bool   `json:"has_ai_result" gorm:"-"`
 }
 
 func GetErrorLogSignatures(params *ErrorLogsListParams) ([]*ErrorLogSignature, error) {
@@ -355,6 +356,24 @@ func GetErrorLogSignatures(params *ErrorLogsListParams) ([]*ErrorLogSignature, e
 		Order("count DESC, affected_users DESC, latest_at DESC").
 		Limit(200).
 		Scan(&sigs).Error
+	if err != nil || len(sigs) == 0 {
+		return sigs, err
+	}
+	signatures := make([]string, 0, len(sigs))
+	for _, sig := range sigs {
+		if sig != nil && sig.NormalizedSignature != "" {
+			signatures = append(signatures, sig.NormalizedSignature)
+		}
+	}
+	existing, aiErr := ExistingErrorInsightAIResultSignatures(context.Background(), signatures)
+	if aiErr != nil {
+		return sigs, aiErr
+	}
+	for _, sig := range sigs {
+		if sig != nil {
+			sig.HasAIResult = existing[sig.NormalizedSignature]
+		}
+	}
 	return sigs, err
 }
 

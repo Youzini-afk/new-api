@@ -27,6 +27,7 @@ import type {
   ErrorInsightFilterParams,
   ErrorInsightLogsData,
   ErrorInsightResponse,
+  ErrorInsightAIRuleSuggestion,
   ErrorInsightSignature,
   ErrorInsightSummary,
 } from './types'
@@ -106,10 +107,19 @@ export function generateErrorInsightAIRules(
     .then((res) => res.data)
 }
 
+export function getErrorInsightAIResult(
+  signature: string
+): Promise<ErrorInsightResponse<ErrorInsightAIGenerateResult | null>> {
+  return api
+    .get(`/api/error_insight/ai/results/${encodeURIComponent(signature)}`)
+    .then((res) => res.data)
+}
+
 export function saveErrorInsightAIRule(
-  rule: ErrorInsightAIRuleSuggestion
+  rule: ErrorInsightAIRuleSuggestion,
+  signature?: string
 ): Promise<ErrorInsightResponse<ErrorInsightAIRuleSuggestion>> {
   return api
-    .post('/api/error_insight/ai/rules', { rule })
+    .post('/api/error_insight/ai/rules', { rule, signature })
     .then((res) => res.data)
 }

@@ -56,6 +56,7 @@ func setupLogScreeningTestDB(t *testing.T) *gorm.DB {
 		&model.User{},
 		&model.Option{},
 		&model.Log{},
+		&model.ErrorInsightAIResult{},
 		&model.LogScreeningRecord{},
 		&model.PromptBlockLog{},
 		&model.UABlockLog{},
@@ -273,16 +274,16 @@ func TestLogScreeningRoutes_RegisteredUnderAdminAuth(t *testing.T) {
 
 	// 1) All expected routes exist.
 	expected := map[string]string{
-		"GET /api/log_screening/records":                   "GET",
-		"GET /api/log_screening/ua_block_logs":             "GET",
-		"GET /api/log_screening/ua_block_logs/:id":          "GET",
-		"GET /api/log_screening/prompt_block_logs":         "GET",
-		"GET /api/log_screening/prompt_block_logs/:id":     "GET",
-		"POST /api/log_screening/run":                      "POST",
-		"POST /api/log_screening/records/:id/remark":       "POST",
-		"POST /api/log_screening/ua_block_logs/:id/remark":  "POST",
+		"GET /api/log_screening/records":                       "GET",
+		"GET /api/log_screening/ua_block_logs":                 "GET",
+		"GET /api/log_screening/ua_block_logs/:id":             "GET",
+		"GET /api/log_screening/prompt_block_logs":             "GET",
+		"GET /api/log_screening/prompt_block_logs/:id":         "GET",
+		"POST /api/log_screening/run":                          "POST",
+		"POST /api/log_screening/records/:id/remark":           "POST",
+		"POST /api/log_screening/ua_block_logs/:id/remark":     "POST",
 		"POST /api/log_screening/prompt_block_logs/:id/remark": "POST",
-		"POST /api/log_screening/cleanup":                  "POST",
+		"POST /api/log_screening/cleanup":                      "POST",
 	}
 	registered := make(map[string]bool)
 	for _, ri := range r.Routes() {
