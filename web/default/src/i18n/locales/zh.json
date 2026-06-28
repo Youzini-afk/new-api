@@ -5506,6 +5506,10 @@
     "Category progress": "分类进度",
     "{{processed}} of {{total}} processed": "已处理 {{processed}} / {{total}}",
     "Deleted: {{count}}": "已删除：{{count}}",
-    "Cutoff": "截止时间"
+    "Cutoff": "截止时间",
+    "Candidate rules generated. Click the AI result eye to review.": "候选规则已生成，点击 AI 结果小眼睛进行审核。",
+    "Generated results are stored on this row. Review them from this side panel before saving.": "生成结果已保存在当前行，请在右侧面板审核后再保存。",
+    "View AI Result": "查看 AI 结果",
+    "Raw AI Output": "AI 原始输出"
   }
 }

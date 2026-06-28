@@ -5506,6 +5506,10 @@
     "Category progress": "Category progress",
     "{{processed}} of {{total}} processed": "{{processed}} of {{total}} processed",
     "Deleted: {{count}}": "Deleted: {{count}}",
-    "Cutoff": "Cutoff"
+    "Cutoff": "Cutoff",
+    "Candidate rules generated. Click the AI result eye to review.": "Candidate rules generated. Click the AI result eye to review.",
+    "Generated results are stored on this row. Review them from this side panel before saving.": "Generated results are stored on this row. Review them from this side panel before saving.",
+    "View AI Result": "View AI Result",
+    "Raw AI Output": "Raw AI Output"
   }
 }

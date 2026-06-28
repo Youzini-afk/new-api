@@ -65,6 +65,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 
 interface SignaturesTableProps {
   params: ErrorInsightFilterParams
@@ -76,8 +83,9 @@ export function SignaturesTable(props: SignaturesTableProps) {
   const queryClient = useQueryClient()
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [sampleSignature, setSampleSignature] = useState<string | null>(null)
-  const [aiResult, setAIResult] = useState<ErrorInsightAIGenerateResult | null>(null)
-  const [editableRules, setEditableRules] = useState<ErrorInsightAIRuleSuggestion[]>([])
+  const [aiPanelSignature, setAIPanelSignature] = useState<string | null>(null)
+  const [aiResults, setAIResults] = useState<Record<string, ErrorInsightAIGenerateResult>>({})
+  const [editableRulesBySignature, setEditableRulesBySignature] = useState<Record<string, ErrorInsightAIRuleSuggestion[]>>({})
 
   const queryKey = useMemo(
     () => ['error-insight', 'signatures', props.params] as const,
@@ -127,15 +135,18 @@ export function SignaturesTable(props: SignaturesTableProps) {
 
   const generateMutation = useMutation({
     mutationFn: (signature: string) => generateErrorInsightAIRules(signature),
-    onSuccess: (result) => {
+    onSuccess: (result, signature) => {
       if (!result.success || !result.data) {
         toast.error(result.message || t('Failed to generate rules'))
         return
       }
-      setAIResult(result.data)
-      setEditableRules(result.data.rules)
+      setAIResults((current) => ({ ...current, [signature]: result.data }))
+      setEditableRulesBySignature((current) => ({
+        ...current,
+        [signature]: result.data.rules,
+      }))
       if (result.data.rules.length > 0) {
-        toast.success(t('Candidate rules generated'))
+        toast.success(t('Candidate rules generated. Click the AI result eye to review.'))
       } else {
         toast.warning(t('AI did not return usable candidate rules.'))
       }
@@ -170,14 +181,18 @@ export function SignaturesTable(props: SignaturesTableProps) {
     index: number,
     patch: Partial<ErrorInsightAIRuleSuggestion>
   ) => {
-    setEditableRules((current) =>
-      current.map((rule, ruleIndex) =>
+    if (!aiPanelSignature) return
+    setEditableRulesBySignature((current) => ({
+      ...current,
+      [aiPanelSignature]: (current[aiPanelSignature] ?? []).map((rule, ruleIndex) =>
         ruleIndex === index ? { ...rule, ...patch } : rule
-      )
-    )
+      ),
+    }))
   }
 
   const items = signatures ?? []
+  const selectedAIResult = aiPanelSignature ? aiResults[aiPanelSignature] : null
+  const editableRules = aiPanelSignature ? editableRulesBySignature[aiPanelSignature] ?? [] : []
 
   const sampleQuery = useQuery({
     queryKey: [
@@ -276,6 +291,8 @@ export function SignaturesTable(props: SignaturesTableProps) {
             <TableBody>
               {items.map((signature) => {
                 const isMatched = Boolean(signature.rule_code)
+                const aiResult = aiResults[signature.normalized_signature]
+                const hasAIResult = Boolean(aiResult)
                 return (
                   <TableRow
                     key={signature.normalized_signature}
@@ -370,6 +387,22 @@ export function SignaturesTable(props: SignaturesTableProps) {
                         ) : (
                           <Sparkles className='size-4' />
                         )}
+                      </Button>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className={
+                          hasAIResult
+                            ? 'text-cyan-500 hover:text-cyan-400 size-8'
+                            : 'text-muted-foreground/40 size-8'
+                        }
+                        aria-label={t('View AI Result')}
+                        disabled={!hasAIResult}
+                        onClick={() =>
+                          setAIPanelSignature(signature.normalized_signature)
+                        }
+                      >
+                        <Eye className='size-4' />
                       </Button>
                       <Tooltip>
                         <TooltipTrigger
@@ -475,88 +508,111 @@ export function SignaturesTable(props: SignaturesTableProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={aiResult !== null} onOpenChange={(open) => !open && setAIResult(null)}>
-        <DialogContent className='max-h-[88vh] overflow-y-auto p-6 sm:max-w-5xl'>
-          <DialogHeader className='gap-3'>
-            <DialogTitle className='text-2xl font-bold'>
+      <Sheet
+        open={aiPanelSignature !== null}
+        onOpenChange={(open) => {
+          if (!open) setAIPanelSignature(null)
+        }}
+      >
+        <SheetContent className='w-[92vw] p-0 sm:max-w-3xl' side='right'>
+          <SheetHeader className='border-border/70 border-b px-6 py-5'>
+            <SheetTitle className='text-2xl font-bold'>
               {t('AI Candidate Rules')}
-            </DialogTitle>
-            <DialogDescription>
-              {t('Review and edit these candidate rules before adding them to governance rules.')}
-            </DialogDescription>
-          </DialogHeader>
+            </SheetTitle>
+            <SheetDescription className='space-y-2'>
+              <span className='block'>
+                {t('Generated results are stored on this row. Review them from this side panel before saving.')}
+              </span>
+              <code className='bg-muted block max-w-full truncate rounded px-2 py-1 font-mono text-xs'>
+                {aiPanelSignature || '-'}
+              </code>
+            </SheetDescription>
+          </SheetHeader>
 
-          <div className='space-y-4'>
-            {editableRules.length ? (
-              editableRules.map((rule, index) => (
-                <div key={`${rule.rule_code}-${index}`} className='bg-muted/40 rounded-2xl p-5'>
-                  <div className='flex flex-wrap items-center gap-2'>
-                    <Badge variant='secondary'>{t('Candidate')} #{index + 1}</Badge>
-                    <Badge variant='outline'>{rule.category || '-'}</Badge>
-                    <Badge className='bg-cyan-500/20 text-cyan-500 hover:bg-cyan-500/20'>
-                      {rule.match_type || '-'}
-                    </Badge>
-                    <Badge className='bg-amber-500/20 text-amber-500 hover:bg-amber-500/20'>
-                      {t('Confidence')} {Math.round((rule.confidence || 0) * 100)}%
-                    </Badge>
+          <div className='flex-1 overflow-y-auto px-6 py-5'>
+            {selectedAIResult?.raw ? (
+              <details className='border-border/70 bg-muted/30 mb-4 rounded-xl border p-3'>
+                <summary className='text-muted-foreground cursor-pointer text-sm font-semibold'>
+                  {t('Raw AI Output')}
+                </summary>
+                <pre className='mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs'>
+                  {JSON.stringify(selectedAIResult.raw, null, 2)}
+                </pre>
+              </details>
+            ) : null}
+
+            <div className='space-y-4'>
+              {editableRules.length ? (
+                editableRules.map((rule, index) => (
+                  <div key={`${rule.rule_code}-${index}`} className='bg-muted/40 rounded-2xl p-5'>
+                    <div className='flex flex-wrap items-center gap-2'>
+                      <Badge variant='secondary'>{t('Candidate')} #{index + 1}</Badge>
+                      <Badge variant='outline'>{rule.category || '-'}</Badge>
+                      <Badge className='bg-cyan-500/20 text-cyan-500 hover:bg-cyan-500/20'>
+                        {rule.match_type || '-'}
+                      </Badge>
+                      <Badge className='bg-amber-500/20 text-amber-500 hover:bg-amber-500/20'>
+                        {t('Confidence')} {Math.round((rule.confidence || 0) * 100)}%
+                      </Badge>
+                    </div>
+                    <div className='mt-4 grid gap-4 md:grid-cols-2'>
+                      <RuleInput
+                        label={t('Rule Code')}
+                        value={rule.rule_code}
+                        onChange={(value) => updateEditableRule(index, { rule_code: value })}
+                      />
+                      <RuleSelect
+                        label={t('Match Type')}
+                        value={rule.match_type}
+                        onChange={(value) => updateEditableRule(index, { match_type: value })}
+                      />
+                      <RuleTextarea
+                        label={t('Match Pattern')}
+                        value={rule.match_pattern}
+                        onChange={(value) => updateEditableRule(index, { match_pattern: value })}
+                      />
+                      <RuleInput
+                        label={t('Safe Error Code')}
+                        value={rule.safe_error_code}
+                        onChange={(value) => updateEditableRule(index, { safe_error_code: value })}
+                      />
+                      <RuleInput
+                        label={t('Safe Error Type')}
+                        value={rule.safe_error_type}
+                        onChange={(value) => updateEditableRule(index, { safe_error_type: value })}
+                      />
+                      <RuleTextarea
+                        label={t('Safe Error Message')}
+                        value={rule.safe_error_message}
+                        onChange={(value) => updateEditableRule(index, { safe_error_message: value })}
+                      />
+                    </div>
+                    <div className='mt-4'>
+                      <p className='text-muted-foreground text-xs font-semibold'>{t('Reason')}</p>
+                      <p className='mt-1 text-sm whitespace-pre-wrap'>{rule.reason || '-'}</p>
+                    </div>
+                    <div className='mt-5 flex justify-end'>
+                      <Button
+                        disabled={saveRuleMutation.isPending}
+                        onClick={() => saveRuleMutation.mutate(rule)}
+                      >
+                        {saveRuleMutation.isPending && <Loader2 className='size-4 animate-spin' />}
+                        {t('Approve and Save Rule')}
+                      </Button>
+                    </div>
                   </div>
-                  <div className='mt-4 grid gap-4 md:grid-cols-2'>
-                    <RuleInput
-                      label={t('Rule Code')}
-                      value={rule.rule_code}
-                      onChange={(value) => updateEditableRule(index, { rule_code: value })}
-                    />
-                    <RuleSelect
-                      label={t('Match Type')}
-                      value={rule.match_type}
-                      onChange={(value) => updateEditableRule(index, { match_type: value })}
-                    />
-                    <RuleTextarea
-                      label={t('Match Pattern')}
-                      value={rule.match_pattern}
-                      onChange={(value) => updateEditableRule(index, { match_pattern: value })}
-                    />
-                    <RuleInput
-                      label={t('Safe Error Code')}
-                      value={rule.safe_error_code}
-                      onChange={(value) => updateEditableRule(index, { safe_error_code: value })}
-                    />
-                    <RuleInput
-                      label={t('Safe Error Type')}
-                      value={rule.safe_error_type}
-                      onChange={(value) => updateEditableRule(index, { safe_error_type: value })}
-                    />
-                    <RuleTextarea
-                      label={t('Safe Error Message')}
-                      value={rule.safe_error_message}
-                      onChange={(value) => updateEditableRule(index, { safe_error_message: value })}
-                    />
-                  </div>
-                  <div className='mt-4'>
-                    <p className='text-muted-foreground text-xs font-semibold'>{t('Reason')}</p>
-                    <p className='mt-1 text-sm whitespace-pre-wrap'>{rule.reason || '-'}</p>
-                  </div>
-                  <div className='mt-5 flex justify-end'>
-                    <Button
-                      disabled={saveRuleMutation.isPending}
-                      onClick={() => saveRuleMutation.mutate(rule)}
-                    >
-                      {saveRuleMutation.isPending && <Loader2 className='size-4 animate-spin' />}
-                      {t('Approve and Save Rule')}
-                    </Button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <EmptyState
-                title={t('No candidate rules')}
-                description={t('AI did not return usable candidate rules.')}
-                className='min-h-[200px]'
-              />
-            )}
+                ))
+              ) : (
+                <EmptyState
+                  title={t('No candidate rules')}
+                  description={t('AI did not return usable candidate rules.')}
+                  className='min-h-[260px]'
+                />
+              )}
+            </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
