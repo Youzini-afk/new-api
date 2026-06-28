@@ -5582,6 +5582,14 @@
     "Skipped": "已跳过",
     "Circuit breaker tripped: too many transient errors. Try again later.": "熔断触发：瞬时错误过多，请稍后再试。",
     "Failed to start patrol batch": "启动巡检批量失败",
-    "Patrol batch started.": "巡检批量已启动。"
+    "Patrol batch started.": "巡检批量已启动。",
+    "Click Run patrol batch now to start a manual check.": "点击“立即执行巡检批量”开始一次手动检查。",
+    "Current patrol status": "当前巡检状态",
+    "Login Gate uses the same Discord Gate config as Register Gate. OAuth login only passes on a confirmed Discord Gate match; temporary Discord API errors require retrying later.": "登录门禁使用与注册门禁相同的 Discord 门禁配置。OAuth 登录只有在确认通过 Discord 门禁时才放行；Discord API 临时错误需要稍后重试。",
+    "Manual patrol": "手动巡检",
+    "No patrol has run yet": "还没有执行过巡检",
+    "Periodically rechecks existing Discord users against the configured gate: banned guilds and required guild/role conditions. Users missing the guilds scope only need to reauthorize — their API tokens are not disabled.": "按配置的门禁定期复查现有 Discord 用户：禁止服务器、必需服务器和身份组条件。缺少 guilds 权限的用户只需要重新授权，API token 不会被禁用。",
+    "Scheduled patrol": "定时巡检",
+    "Unknown mode": "未知模式"
   }
 }

@@ -5582,6 +5582,14 @@
     "Skipped": "Skipped",
     "Circuit breaker tripped: too many transient errors. Try again later.": "Circuit breaker tripped: too many transient errors. Try again later.",
     "Failed to start patrol batch": "Failed to start patrol batch",
-    "Patrol batch started.": "Patrol batch started."
+    "Patrol batch started.": "Patrol batch started.",
+    "Click Run patrol batch now to start a manual check.": "Click Run patrol batch now to start a manual check.",
+    "Current patrol status": "Current patrol status",
+    "Login Gate uses the same Discord Gate config as Register Gate. OAuth login only passes on a confirmed Discord Gate match; temporary Discord API errors require retrying later.": "Login Gate uses the same Discord Gate config as Register Gate. OAuth login only passes on a confirmed Discord Gate match; temporary Discord API errors require retrying later.",
+    "Manual patrol": "Manual patrol",
+    "No patrol has run yet": "No patrol has run yet",
+    "Periodically rechecks existing Discord users against the configured gate: banned guilds and required guild/role conditions. Users missing the guilds scope only need to reauthorize — their API tokens are not disabled.": "Periodically rechecks existing Discord users against the configured gate: banned guilds and required guild/role conditions. Users missing the guilds scope only need to reauthorize — their API tokens are not disabled.",
+    "Scheduled patrol": "Scheduled patrol",
+    "Unknown mode": "Unknown mode"
   }
 }

@@ -344,6 +344,7 @@ func SetApiRouter(router *gin.Engine) {
 			systemTaskRoute.POST("/discord-gate-patrol", controller.CreateDiscordGatePatrolSystemTask)
 			systemTaskRoute.GET("/list", controller.ListSystemTasks)
 			systemTaskRoute.GET("/current", controller.GetCurrentSystemTask)
+			systemTaskRoute.GET("/latest", controller.GetLatestSystemTask)
 			systemTaskRoute.GET("/:task_id", controller.GetSystemTask)
 		}
 		systemInfoRoute := apiRouter.Group("/system-info")

@@ -102,6 +102,37 @@ func GetCurrentSystemTask(c *gin.Context) {
 	})
 }
 
+func GetLatestSystemTask(c *gin.Context) {
+	taskType := c.Query("type")
+	if taskType == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "type is required",
+		})
+		return
+	}
+
+	task, err := model.GetLatestSystemTask(taskType)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if task == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    task.ToResponse(),
+	})
+}
+
 func ListSystemTasks(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))
 

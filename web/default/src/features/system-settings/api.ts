@@ -96,6 +96,16 @@ export async function getCurrentDiscordGatePatrolTask() {
   return res.data
 }
 
+export async function getLatestDiscordGatePatrolTask() {
+  const res = await api.get<SystemTaskResponse<DiscordGatePatrolTask | null>>(
+    '/api/system-task/latest',
+    {
+      params: { type: 'discord_gate_patrol' },
+    }
+  )
+  return res.data
+}
+
 export async function getSystemTask(taskId: string) {
   const res = await api.get<SystemTaskResponse<LogCleanupTask>>(
     `/api/system-task/${taskId}`

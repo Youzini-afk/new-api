@@ -39,9 +39,10 @@ import { Progress } from '@/components/ui/progress'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { formatTimestampToDate } from '@/lib/format'
 
 import {
-  getCurrentDiscordGatePatrolTask,
+  getLatestDiscordGatePatrolTask,
   startDiscordGatePatrolTask,
 } from '../api'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
@@ -1275,6 +1276,25 @@ function patrolStatusLabelKey(status: string): string {
   return 'Failed'
 }
 
+function patrolModeLabelKey(mode?: string): string {
+  if (mode === 'manual_batch') return 'Manual patrol'
+  if (mode === 'scheduled') return 'Scheduled patrol'
+  return 'Unknown mode'
+}
+
+function patrolStatusTone(status?: string): string {
+  if (status === 'pending' || status === 'running') {
+    return 'border-blue-500/30 bg-blue-500/10 text-blue-500'
+  }
+  if (status === 'succeeded') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500'
+  }
+  if (status === 'failed') {
+    return 'border-destructive/30 bg-destructive/10 text-destructive'
+  }
+  return 'border-muted-foreground/30 bg-muted text-muted-foreground'
+}
+
 function DiscordGatePatrolControls() {
   const { t } = useTranslation()
   const [task, setTask] = useState<DiscordGatePatrolTask | null>(null)
@@ -1285,7 +1305,7 @@ function DiscordGatePatrolControls() {
   const fetchTask = useCallback(async () => {
     setIsLoading(true)
     try {
-      const res = await getCurrentDiscordGatePatrolTask()
+      const res = await getLatestDiscordGatePatrolTask()
       if (res.success && res.data) {
         setTask(res.data)
       } else {
@@ -1346,6 +1366,7 @@ function DiscordGatePatrolControls() {
   const total = task?.state?.total ?? 0
   const counts = task?.result?.counts ?? {}
   const hasCounts = Object.keys(counts).length > 0
+  const mode = task?.payload?.mode
 
   return (
     <div className='space-y-3 border-t pt-3'>
@@ -1382,49 +1403,85 @@ function DiscordGatePatrolControls() {
         </Button>
       </div>
 
-      {task && (
-        <div className='rounded-md border p-3'>
-          <div className='mb-2 flex items-center justify-between gap-3 text-sm'>
-            <span className='font-medium'>{t('Patrol status')}</span>
-            <span className='text-muted-foreground tabular-nums'>
+      <div className='rounded-md border p-3'>
+        <div className='mb-2 flex items-center justify-between gap-3 text-sm'>
+          <span className='font-medium'>{t('Current patrol status')}</span>
+          {task ? (
+            <span
+              className={`rounded-full border px-2 py-0.5 text-xs font-medium ${patrolStatusTone(task.status)}`}
+            >
               {t(patrolStatusLabelKey(task.status))}
             </span>
-          </div>
-          {(active || progress > 0) && (
-            <>
-              <Progress value={progress} />
-              <div className='text-muted-foreground mt-2 text-xs'>
-                {t('{{processed}} of {{total}} users checked.', {
-                  processed,
-                  total,
-                })}
-              </div>
-            </>
-          )}
-          {task.status === 'failed' && task.error && (
-            <div className='text-destructive mt-2 text-xs'>{task.error}</div>
-          )}
-          {hasCounts && (
-            <div className='mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
-              {Object.entries(counts).map(([key, count]) => (
-                <span key={key} className='text-muted-foreground'>
-                  <span className='text-foreground font-medium'>
-                    {t(DISCORD_PATROL_OUTCOME_LABELS[key] ?? key)}:
-                  </span>{' '}
-                  {count}
-                </span>
-              ))}
-            </div>
-          )}
-          {task.result?.circuit_breaker && (
-            <div className='text-destructive mt-2 text-xs'>
-              {t(
-                'Circuit breaker tripped: too many transient errors. Try again later.'
-              )}
-            </div>
+          ) : (
+            <span className='text-muted-foreground text-xs'>
+              {t('No patrol has run yet')}
+            </span>
           )}
         </div>
-      )}
+
+        {!task ? (
+          <div className='text-muted-foreground text-xs'>
+            {t('Click Run patrol batch now to start a manual check.')}
+          </div>
+        ) : (
+          <>
+            <div className='text-muted-foreground mb-2 grid gap-1 text-xs sm:grid-cols-3'>
+              <div>
+                <span className='text-foreground font-medium'>
+                  {t('Mode')}:{' '}
+                </span>
+                {t(patrolModeLabelKey(mode))}
+              </div>
+              <div>
+                <span className='text-foreground font-medium'>
+                  {t('Updated')}:{' '}
+                </span>
+                {formatTimestampToDate(task.updated_at)}
+              </div>
+              <div className='truncate'>
+                <span className='text-foreground font-medium'>
+                  {t('Task ID')}:{' '}
+                </span>
+                <span title={task.task_id}>{task.task_id}</span>
+              </div>
+            </div>
+
+            {(active || progress > 0 || total > 0) && (
+              <>
+                <Progress value={progress} />
+                <div className='text-muted-foreground mt-2 text-xs'>
+                  {t('{{processed}} of {{total}} users checked.', {
+                    processed,
+                    total,
+                  })}
+                </div>
+              </>
+            )}
+            {task.status === 'failed' && task.error && (
+              <div className='text-destructive mt-2 text-xs'>{task.error}</div>
+            )}
+            {hasCounts && (
+              <div className='mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+                {Object.entries(counts).map(([key, count]) => (
+                  <span key={key} className='text-muted-foreground'>
+                    <span className='text-foreground font-medium'>
+                      {t(DISCORD_PATROL_OUTCOME_LABELS[key] ?? key)}:
+                    </span>{' '}
+                    {count}
+                  </span>
+                ))}
+              </div>
+            )}
+            {task.result?.circuit_breaker && (
+              <div className='text-destructive mt-2 text-xs'>
+                {t(
+                  'Circuit breaker tripped: too many transient errors. Try again later.'
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }
