@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -51,6 +53,59 @@ func jsonQuote(s string) string {
 	}
 	b.WriteByte('"')
 	return b.String()
+}
+
+func TestGetOptions_IncludesRelayErrorGovernanceWhenFullKeyMissing(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+
+	cfg := system_setting.GetRelayErrorGovernanceSetting()
+	originalEnabled := cfg.Enabled
+	originalRules := cfg.Rules
+	originalCustomRules := append([]system_setting.RelayErrorGovernanceCustomRuleConfig(nil), cfg.CustomRules...)
+	t.Cleanup(func() {
+		cfg.Enabled = originalEnabled
+		cfg.Rules = originalRules
+		cfg.CustomRules = originalCustomRules
+	})
+
+	cfg.Enabled = true
+	cfg.CustomRules = []system_setting.RelayErrorGovernanceCustomRuleConfig{
+		{
+			Enabled:          true,
+			RuleCode:         "ai_test_rule",
+			MatchType:        "contains",
+			MatchPattern:     "upstream overloaded",
+			SafeErrorCode:    "upstream_overloaded",
+			SafeErrorType:    "upstream_error",
+			SafeErrorMessage: "Upstream is overloaded.",
+		},
+	}
+	common.OptionMapRWMutex.Lock()
+	delete(common.OptionMap, "relay_error_governance")
+	common.OptionMapRWMutex.Unlock()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/option/", nil)
+	GetOptions(ctx)
+
+	resp := decodeLogScreeningResponse(t, recorder)
+	require.True(t, resp.Success, resp.Message)
+	var options []model.Option
+	require.NoError(t, json.Unmarshal(resp.Data, &options))
+	found := false
+	for _, option := range options {
+		if option.Key != "relay_error_governance" {
+			continue
+		}
+		found = true
+		var parsed system_setting.RelayErrorGovernanceSetting
+		require.NoError(t, json.Unmarshal([]byte(option.Value), &parsed))
+		require.Len(t, parsed.CustomRules, 1)
+		assert.Equal(t, "ai_test_rule", parsed.CustomRules[0].RuleCode)
+	}
+	assert.True(t, found)
 }
 
 // TestUpdateOption_SensitiveRegexValidation verifies the controller wires

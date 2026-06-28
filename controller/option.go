@@ -79,10 +79,12 @@ func buildCompletionRatioMetaValue(optionValues map[string]string) string {
 func GetOptions(c *gin.Context) {
 	var options []*model.Option
 	optionValues := make(map[string]string)
+	hasRelayErrorGovernance := false
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
 		value := common.Interface2String(v)
 		if k == "relay_error_governance" {
+			hasRelayErrorGovernance = true
 			if data, err := common.Marshal(system_setting.GetRelayErrorGovernanceSetting()); err == nil {
 				value = string(data)
 			}
@@ -107,6 +109,14 @@ func GetOptions(c *gin.Context) {
 		}
 	}
 	common.OptionMapRWMutex.Unlock()
+	if !hasRelayErrorGovernance {
+		if data, err := common.Marshal(system_setting.GetRelayErrorGovernanceSetting()); err == nil {
+			options = append(options, &model.Option{
+				Key:   "relay_error_governance",
+				Value: string(data),
+			})
+		}
+	}
 	options = append(options, &model.Option{
 		Key:   "CompletionRatioMeta",
 		Value: buildCompletionRatioMetaValue(optionValues),
