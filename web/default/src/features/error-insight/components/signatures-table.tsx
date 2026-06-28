@@ -86,6 +86,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
   const [aiPanelSignature, setAIPanelSignature] = useState<string | null>(null)
   const [aiResults, setAIResults] = useState<Record<string, ErrorInsightAIGenerateResult>>({})
   const [editableRulesBySignature, setEditableRulesBySignature] = useState<Record<string, ErrorInsightAIRuleSuggestion[]>>({})
+  const [generatingSignatures, setGeneratingSignatures] = useState<Record<string, boolean>>({})
 
   const queryKey = useMemo(
     () => ['error-insight', 'signatures', props.params] as const,
@@ -133,9 +134,11 @@ export function SignaturesTable(props: SignaturesTableProps) {
     },
   })
 
-  const generateMutation = useMutation({
-    mutationFn: (signature: string) => generateErrorInsightAIRules(signature),
-    onSuccess: (result, signature) => {
+  const handleGenerateAI = async (signature: string) => {
+    if (generatingSignatures[signature]) return
+    setGeneratingSignatures((current) => ({ ...current, [signature]: true }))
+    try {
+      const result = await generateErrorInsightAIRules(signature)
       if (!result.success || !result.data) {
         toast.error(result.message || t('Failed to generate rules'))
         return
@@ -150,11 +153,16 @@ export function SignaturesTable(props: SignaturesTableProps) {
       } else {
         toast.warning(t('AI did not return usable candidate rules.'))
       }
-    },
-    onError: (error) => {
+    } catch (error) {
       toast.error(error.message || t('Failed to generate rules'))
-    },
-  })
+    } finally {
+      setGeneratingSignatures((current) => {
+        const next = { ...current }
+        delete next[signature]
+        return next
+      })
+    }
+  }
 
   const handleConfirmDelete = () => {
     if (!pendingDelete) return
@@ -293,6 +301,7 @@ export function SignaturesTable(props: SignaturesTableProps) {
                 const isMatched = Boolean(signature.rule_code)
                 const aiResult = aiResults[signature.normalized_signature]
                 const hasAIResult = Boolean(aiResult)
+                const isGeneratingAI = Boolean(generatingSignatures[signature.normalized_signature])
                 return (
                   <TableRow
                     key={signature.normalized_signature}
@@ -376,13 +385,10 @@ export function SignaturesTable(props: SignaturesTableProps) {
                         size='icon'
                         className='text-muted-foreground hover:text-amber-500 size-8'
                         aria-label={t('AI Generate Rules')}
-                        disabled={generateMutation.isPending}
-                        onClick={() =>
-                          generateMutation.mutate(signature.normalized_signature)
-                        }
+                        disabled={isGeneratingAI}
+                        onClick={() => handleGenerateAI(signature.normalized_signature)}
                       >
-                        {generateMutation.isPending &&
-                        generateMutation.variables === signature.normalized_signature ? (
+                        {isGeneratingAI ? (
                           <Loader2 className='size-4 animate-spin' />
                         ) : (
                           <Sparkles className='size-4' />
