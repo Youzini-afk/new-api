@@ -270,6 +270,10 @@ func formatUserLogs(logs []*Log, startIdx int, showIp bool) {
 			delete(otherMap, "request_params")
 			delete(otherMap, "response_text")
 			delete(otherMap, "response_text_truncated")
+			// Hide routed/upstream model details from regular users. Admin logs keep
+			// these fields so admins can compare requested vs actual upstream model.
+			delete(otherMap, "is_model_mapped")
+			delete(otherMap, "upstream_model_name")
 			// Remove governance/error-insight private fields so users never see
 			// upstream error details, rule classification, or analytics
 			// fingerprints in their logs. These are admin-only diagnostic fields

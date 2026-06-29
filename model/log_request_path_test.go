@@ -366,6 +366,8 @@ func TestFormatUserLogsStripsSensitiveAuditFields(t *testing.T) {
 				"response_text_truncated": true,
 				"admin_info":              map[string]interface{}{"use_channel": []interface{}{1}},
 				"stream_status":           map[string]interface{}{"status": "ok"},
+				"is_model_mapped":         true,
+				"upstream_model_name":     "provider-secret-model",
 				"safe_user_visible_field": "keep-me",
 			}),
 		},
@@ -384,6 +386,31 @@ func TestFormatUserLogsStripsSensitiveAuditFields(t *testing.T) {
 	assert.NotContains(t, otherMap, "response_text_truncated")
 	assert.NotContains(t, otherMap, "admin_info")
 	assert.NotContains(t, otherMap, "stream_status")
+	assert.NotContains(t, otherMap, "is_model_mapped")
+	assert.NotContains(t, otherMap, "upstream_model_name")
+	assert.Equal(t, "keep-me", otherMap["safe_user_visible_field"])
+}
+
+func TestFormatUserLogsStripsModelMappingDetailsWithIPVisible(t *testing.T) {
+	logs := []*Log{
+		{
+			Id: 99,
+			Ip: "203.0.113.10",
+			Other: common.MapToJsonStr(map[string]interface{}{
+				"is_model_mapped":         true,
+				"upstream_model_name":     "provider-secret-model",
+				"safe_user_visible_field": "keep-me",
+			}),
+		},
+	}
+
+	formatUserLogs(logs, 0, true)
+
+	assert.Equal(t, "203.0.113.10", logs[0].Ip)
+	otherMap, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	assert.NotContains(t, otherMap, "is_model_mapped")
+	assert.NotContains(t, otherMap, "upstream_model_name")
 	assert.Equal(t, "keep-me", otherMap["safe_user_visible_field"])
 }
 
