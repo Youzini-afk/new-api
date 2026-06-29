@@ -76,6 +76,37 @@ func TestGetDiscordGatePatrolEligibilitySummaryIgnoresSoftDeletedUsers(t *testin
 	assert.Equal(t, DiscordGatePatrolEligibilitySummary{}, summary)
 }
 
+func TestDiscordGatePatrolEligibleTreatsNullRetryAsReady(t *testing.T) {
+	truncateTables(t)
+	user := User{
+		Username:               "null_retry_full_patrol",
+		Status:                 common.UserStatusEnabled,
+		Role:                   common.RoleCommonUser,
+		AffCode:                "full-patrol-null-retry-aff",
+		DiscordId:              "discord-null-retry",
+		DiscordRefreshToken:    "rt",
+		DiscordGatePassed:      true,
+		DiscordGateScopeStatus: DiscordGateScopeStatusOK,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+	nullRetryUpdate := DB.Model(&User{}).Where("id = ?", user.Id).Update("discord_patrol_retry_at", nil)
+	require.NoError(t, nullRetryUpdate.Error)
+	require.Equal(t, int64(1), nullRetryUpdate.RowsAffected)
+
+	count, err := CountDiscordGatePatrolEligibleUsers(context.Background())
+	require.NoError(t, err)
+	candidates, err := FindDiscordGatePatrolEligibleUsers(context.Background(), 10)
+	require.NoError(t, err)
+	summary, err := GetDiscordGatePatrolEligibilitySummary(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, int64(1), count)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "null_retry_full_patrol", candidates[0].Username)
+	assert.Equal(t, count, summary.Eligible)
+	assert.Equal(t, int64(0), summary.RetryWaiting)
+}
+
 func TestDiscordGatePatrolEligibilitySummaryJSONContract(t *testing.T) {
 	summary := DiscordGatePatrolEligibilitySummary{
 		TotalUsers:                    1,
