@@ -53,3 +53,28 @@ func TestDiscordBanPatrolCandidates(t *testing.T) {
 	assert.NotContains(t, names, "missing_discord")
 	assert.NotContains(t, names, "retry_waiting")
 }
+
+func TestDiscordBanPatrolCandidatesTreatNullRetryAsReady(t *testing.T) {
+	truncateTables(t)
+	user := User{
+		Username:            "null_retry",
+		Status:              common.UserStatusEnabled,
+		Role:                common.RoleCommonUser,
+		AffCode:             "ban-null-retry-aff",
+		DiscordId:           "discord-null-retry",
+		DiscordRefreshToken: "rt",
+	}
+	require.NoError(t, DB.Create(&user).Error)
+	nullRetryUpdate := DB.Model(&User{}).Where("id = ?", user.Id).Update("discord_ban_patrol_retry_at", nil)
+	require.NoError(t, nullRetryUpdate.Error)
+	require.Equal(t, int64(1), nullRetryUpdate.RowsAffected)
+
+	count, err := CountDiscordBanPatrolCandidateUsers(context.Background())
+	require.NoError(t, err)
+	candidates, err := FindDiscordBanPatrolCandidateUsers(context.Background(), 10)
+	require.NoError(t, err)
+
+	require.Equal(t, int64(1), count)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "null_retry", candidates[0].Username)
+}
