@@ -27,6 +27,7 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
 	service.RegisterSystemTaskHandler(discordGatePatrolHandler{})
+	service.RegisterSystemTaskHandler(discordBanPatrolHandler{})
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
@@ -213,6 +214,32 @@ func (discordGatePatrolHandler) Run(ctx context.Context, task *model.SystemTask,
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, result, nil)
 }
 
+type discordBanPatrolHandler struct{}
+
+func (discordBanPatrolHandler) Type() string { return model.SystemTaskTypeDiscordBanPatrol }
+
+func (discordBanPatrolHandler) Enabled() bool { return false }
+
+func (discordBanPatrolHandler) Interval() time.Duration { return time.Hour }
+
+func (discordBanPatrolHandler) NewPayload() any {
+	return discordGatePatrolPayload{Mode: discordGatePatrolModeScheduled, BatchSize: 1}
+}
+
+func (discordBanPatrolHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := discordGatePatrolPayload{}
+	if err := task.DecodePayload(&payload); err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	result, err := runDiscordBanPatrolTask(ctx, task, runnerID, payload)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, result, nil)
+}
+
 func discordGatePatrolBatchSize(eligibleCount int64, intervalMinutes, targetSweepHours, maxBatchSize int) int {
 	if maxBatchSize <= 0 {
 		maxBatchSize = 50000
@@ -352,6 +379,100 @@ func runDiscordGatePatrolTask(ctx context.Context, task *model.SystemTask, runne
 	return result, nil
 }
 
+func runDiscordBanPatrolTask(ctx context.Context, task *model.SystemTask, runnerID string, payload discordGatePatrolPayload) (discordGatePatrolResult, error) {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	settings := system_setting.GetDiscordSettings()
+	if payload.Mode == "" {
+		payload.Mode = discordGatePatrolModeManualBatch
+	}
+	if payload.Mode != discordGatePatrolModeManualBatch {
+		return discordGatePatrolResult{}, fmt.Errorf("unsupported discord ban patrol mode: %s", payload.Mode)
+	}
+	count, err := model.CountDiscordBanPatrolCandidateUsers(runCtx)
+	if err != nil {
+		return discordGatePatrolResult{}, err
+	}
+	batchSize := discordGatePatrolEffectiveBatchSize(payload.Mode, payload.BatchSize, count, settings)
+	users, err := model.FindDiscordBanPatrolCandidateUsers(runCtx, batchSize)
+	if err != nil {
+		return discordGatePatrolResult{}, err
+	}
+	result := discordGatePatrolResult{Total: len(users), Counts: map[string]int{}}
+	if len(users) == 0 {
+		return result, nil
+	}
+	reporter := service.NewSystemTaskProgressReporter(task, runnerID)
+	jobs := make(chan *model.User)
+	results := make(chan oauth.DiscordPatrolOutcome)
+	workers := settings.LoginGatePatrolWorkerCount
+	if workers > len(users) {
+		workers = len(users)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	rps := settings.LoginGatePatrolMaxRPS
+	if rps < 1 {
+		rps = 1
+	}
+	runCtx = oauth.ContextWithDiscordPatrolLimiter(runCtx, oauth.NewDiscordPatrolLimiter(rps))
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for user := range jobs {
+				if runCtx.Err() != nil {
+					results <- oauth.DiscordPatrolOutcome{UserID: user.Id, Result: oauth.DiscordPatrolOutcomeTransient, Reason: "context_cancelled"}
+					continue
+				}
+				results <- runDiscordBanPatrolWithRetries(runCtx, user, settings.LoginGatePatrolMaxRetries)
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for _, user := range users {
+			select {
+			case <-runCtx.Done():
+				return
+			case jobs <- user:
+			}
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+	circuitErrors := 0
+	rateLimitedErrors := 0
+	circuitThreshold := max(10, len(users)/10)
+	if circuitThreshold < 1 {
+		circuitThreshold = 1
+	}
+	for outcome := range results {
+		result.Processed++
+		result.Counts[outcome.Result]++
+		if outcome.Result == oauth.DiscordPatrolOutcomeTransient {
+			circuitErrors++
+			if outcome.Reason == "rate_limited" {
+				rateLimitedErrors++
+			}
+		}
+		reporter(result.Processed, result.Total)
+		if (circuitErrors >= circuitThreshold || rateLimitedErrors >= 5) && result.Processed < result.Total {
+			result.CircuitBreaker = true
+			cancel()
+		}
+	}
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
+	return result, nil
+}
+
 func runDiscordPatrolWithRetries(ctx context.Context, user *model.User, maxRetries int) oauth.DiscordPatrolOutcome {
 	var outcome oauth.DiscordPatrolOutcome
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -366,6 +487,36 @@ func runDiscordPatrolWithRetries(ctx context.Context, user *model.User, maxRetri
 		}
 		if outcome.RetryAfter >= time.Minute || attempt == maxRetries {
 			persistDiscordPatrolRetry(user.Id, attempt+1, outcome)
+			return outcome
+		}
+		backoff := time.Duration(attempt+1) * time.Second
+		if outcome.RetryAfter > backoff {
+			backoff = outcome.RetryAfter
+		}
+		select {
+		case <-ctx.Done():
+			outcome.Reason = "context_cancelled"
+			return outcome
+		case <-time.After(backoff):
+		}
+	}
+	return outcome
+}
+
+func runDiscordBanPatrolWithRetries(ctx context.Context, user *model.User, maxRetries int) oauth.DiscordPatrolOutcome {
+	var outcome oauth.DiscordPatrolOutcome
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		var err error
+		outcome, err = oauth.PatrolDiscordBanOnly(ctx, user)
+		if err != nil {
+			outcome = oauth.DiscordPatrolOutcome{UserID: user.Id, Result: oauth.DiscordPatrolOutcomeTransient, Reason: "ban_patrol_error"}
+		}
+		if outcome.Result != oauth.DiscordPatrolOutcomeTransient {
+			clearDiscordBanPatrolRetry(user.Id)
+			return outcome
+		}
+		if outcome.RetryAfter >= time.Minute || attempt == maxRetries {
+			persistDiscordBanPatrolRetry(user.Id, attempt+1, outcome)
 			return outcome
 		}
 		backoff := time.Duration(attempt+1) * time.Second
@@ -403,6 +554,30 @@ func clearDiscordPatrolRetry(userID int) {
 		"discord_patrol_last_error":  "",
 	}).Error; err != nil {
 		common.SysLog(fmt.Sprintf("discord patrol retry clear failed for user %d: %v", userID, err))
+	}
+}
+
+func persistDiscordBanPatrolRetry(userID int, retryCount int, outcome oauth.DiscordPatrolOutcome) {
+	retryAt := common.GetTimestamp() + int64(time.Duration(retryCount+1)*time.Minute/time.Second)
+	if outcome.RetryAfter > 0 {
+		retryAt = common.GetTimestamp() + int64(outcome.RetryAfter/time.Second)
+	}
+	if err := model.DB.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"discord_ban_patrol_retry_at":    retryAt,
+		"discord_ban_patrol_retry_count": retryCount,
+		"discord_ban_patrol_last_error":  outcome.Reason,
+	}).Error; err != nil {
+		common.SysLog(fmt.Sprintf("discord ban patrol retry persist failed for user %d: %v", userID, err))
+	}
+}
+
+func clearDiscordBanPatrolRetry(userID int) {
+	if err := model.DB.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"discord_ban_patrol_retry_at":    0,
+		"discord_ban_patrol_retry_count": 0,
+		"discord_ban_patrol_last_error":  "",
+	}).Error; err != nil {
+		common.SysLog(fmt.Sprintf("discord ban patrol retry clear failed for user %d: %v", userID, err))
 	}
 }
 

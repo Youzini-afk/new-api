@@ -50,7 +50,9 @@ import { formatTimestampToDate } from '@/lib/format'
 
 import {
   getDiscordGatePatrolEligibility,
+  getLatestDiscordBanPatrolTask,
   getLatestDiscordGatePatrolTask,
+  startDiscordBanPatrolTask,
   startDiscordGatePatrolTask,
 } from '../api'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
@@ -1323,6 +1325,7 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
   const [isLoadingEligibility, setIsLoadingEligibility] = useState(false)
   const [isStarting, setIsStarting] = useState(false)
   const [batchSizeInput, setBatchSizeInput] = useState('')
+  const banPatrolRefreshRef = useRef<(() => void) | null>(null)
 
   const fetchTask = useCallback(async () => {
     setIsLoading(true)
@@ -1359,6 +1362,7 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
   const refreshAll = useCallback(() => {
     void fetchTask()
     void fetchEligibility()
+    banPatrolRefreshRef.current?.()
   }, [fetchEligibility, fetchTask])
 
   useEffect(() => {
@@ -1546,6 +1550,8 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
           scopeIssueTotal={scopeIssueTotal}
           isLoading={isLoadingEligibility}
         />
+
+        <DiscordBanPatrolPanel refreshRef={banPatrolRefreshRef} />
       </div>
     </div>
   )
@@ -1685,4 +1691,223 @@ function eligibilityStatTone(
     return 'border-destructive/30 bg-destructive/5'
   }
   return 'border-muted-foreground/20 bg-muted/40'
+}
+
+type DiscordBanPatrolPanelProps = {
+  refreshRef: { current: (() => void) | null }
+}
+
+function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
+  const { t } = useTranslation()
+  const [task, setTask] = useState<DiscordGatePatrolTask | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isStarting, setIsStarting] = useState(false)
+  const [batchSizeInput, setBatchSizeInput] = useState('')
+
+  const fetchTask = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const res = await getLatestDiscordBanPatrolTask()
+      if (res.success && res.data) {
+        setTask(res.data)
+      } else {
+        setTask(null)
+      }
+    } catch {
+      /* ignore — refetch button is available */
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    props.refreshRef.current = fetchTask
+  }, [fetchTask, props.refreshRef])
+
+  useEffect(() => {
+    void fetchTask()
+  }, [fetchTask])
+
+  const taskStatus = task?.status
+  useEffect(() => {
+    if (taskStatus !== 'pending' && taskStatus !== 'running') return
+    const interval = window.setInterval(() => {
+      void fetchTask()
+    }, DISCORD_PATROL_POLL_INTERVAL_MS)
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [taskStatus, fetchTask])
+
+  const handleRun = async () => {
+    setIsStarting(true)
+    try {
+      const trimmed = batchSizeInput.trim()
+      const parsed = trimmed === '' ? Number.NaN : Number(trimmed)
+      const request =
+        Number.isFinite(parsed) && parsed > 0
+          ? { batch_size: parsed }
+          : undefined
+      const res = await startDiscordBanPatrolTask(request)
+      if (!res.success || !res.data) {
+        throw new Error(res.message || t('Failed to start ban patrol batch'))
+      }
+      setTask(res.data)
+      setBatchSizeInput('')
+      toast.success(t('Ban patrol batch started.'))
+      void fetchTask()
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : t('Failed to start ban patrol batch')
+      toast.error(message)
+    } finally {
+      setIsStarting(false)
+    }
+  }
+
+  const active = isPatrolActive(task)
+  const progress = Math.min(100, Math.max(0, task?.state?.progress ?? 0))
+  const processed = task?.state?.processed ?? 0
+  const total = task?.state?.total ?? 0
+  const counts = task?.result?.counts ?? {}
+  const hasCounts = Object.keys(counts).length > 0
+  const mode = task?.payload?.mode
+
+  return (
+    <div className='rounded-md border border-rose-500/30 bg-rose-500/[0.03] p-3'>
+      <div className='mb-2 flex items-center justify-between gap-3 text-sm'>
+        <span className='flex items-center gap-2 font-medium'>
+          <span className='inline-flex items-center rounded-sm bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400'>
+            {t('Ban')}
+          </span>
+          {t('Banned-server patrol')}
+        </span>
+        {task ? (
+          <span
+            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${patrolStatusTone(task.status)}`}
+          >
+            {t(patrolStatusLabelKey(task.status))}
+          </span>
+        ) : (
+          <span className='text-muted-foreground text-xs'>
+            {t('No ban patrol has run yet')}
+          </span>
+        )}
+      </div>
+
+      <ul className='text-muted-foreground mb-3 list-disc space-y-1 pl-4 text-xs'>
+        <li>
+          {t(
+            'Checks only the configured `ban_groups`. Users are banned only on confirmed membership in a banned server.'
+          )}
+        </li>
+        <li>
+          {t(
+            'Supports users with the older Discord authorization (no guilds scope) by checking specific banned servers directly.'
+          )}
+        </li>
+        <li>{t('Does not enforce allow groups.')}</li>
+      </ul>
+
+      <div className='flex flex-wrap items-end gap-3'>
+        <div className='grid gap-1.5'>
+          <FormLabel className='text-xs'>
+            {t('Ban patrol batch size (optional)')}
+          </FormLabel>
+          <Input
+            type='number'
+            min={50}
+            max={100000}
+            step={1}
+            placeholder={t('Uses saved max batch size if empty')}
+            value={batchSizeInput}
+            onChange={(event) => setBatchSizeInput(event.target.value)}
+            className='w-[200px]'
+          />
+        </div>
+        <Button
+          type='button'
+          variant='outline'
+          onClick={handleRun}
+          disabled={isStarting || active}
+          className='border-rose-500/40 text-rose-600 hover:bg-rose-500/10 hover:text-rose-600 dark:text-rose-400'
+        >
+          {isStarting || active
+            ? t('Running...')
+            : t('Run banned-server patrol now')}
+        </Button>
+      </div>
+
+      {!task ? (
+        <div className='text-muted-foreground mt-3 text-xs'>
+          {t('Click Run banned-server patrol now to start a manual check.')}
+        </div>
+      ) : (
+        <>
+          <div className='text-muted-foreground mb-2 mt-3 grid gap-1 text-xs sm:grid-cols-3'>
+            <div>
+              <span className='text-foreground font-medium'>
+                {t('Mode')}:{' '}
+              </span>
+              {t(patrolModeLabelKey(mode))}
+            </div>
+            <div>
+              <span className='text-foreground font-medium'>
+                {t('Updated')}:{' '}
+              </span>
+              {formatTimestampToDate(task.updated_at)}
+            </div>
+            <div className='truncate'>
+              <span className='text-foreground font-medium'>
+                {t('Task ID')}:{' '}
+              </span>
+              <span title={task.task_id}>{task.task_id}</span>
+            </div>
+          </div>
+
+          {(active || progress > 0 || total > 0) && (
+            <>
+              <Progress value={progress} />
+              <div className='text-muted-foreground mt-2 text-xs'>
+                {t('{{processed}} of {{total}} users checked.', {
+                  processed,
+                  total,
+                })}
+              </div>
+            </>
+          )}
+          {task.status === 'failed' && task.error && (
+            <div className='text-destructive mt-2 text-xs'>{task.error}</div>
+          )}
+          {hasCounts && (
+            <div className='mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+              {Object.entries(counts).map(([key, count]) => (
+                <span key={key} className='text-muted-foreground'>
+                  <span className='text-foreground font-medium'>
+                    {t(DISCORD_PATROL_OUTCOME_LABELS[key] ?? key)}:
+                  </span>{' '}
+                  {count}
+                </span>
+              ))}
+            </div>
+          )}
+          {task.result?.circuit_breaker && (
+            <div className='text-destructive mt-2 text-xs'>
+              {t(
+                'Circuit breaker tripped: too many transient errors. Try again later.'
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {isLoading && (
+        <div className='text-muted-foreground mt-2 text-xs'>
+          {t('Refreshing...')}
+        </div>
+      )}
+    </div>
+  )
 }

@@ -342,6 +342,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			systemTaskRoute.POST("/log-cleanup", controller.CreateLogCleanupSystemTask)
 			systemTaskRoute.POST("/discord-gate-patrol", controller.CreateDiscordGatePatrolSystemTask)
+			systemTaskRoute.POST("/discord-ban-patrol", controller.CreateDiscordBanPatrolSystemTask)
 			systemTaskRoute.GET("/discord-gate-patrol/eligibility-summary", controller.GetDiscordGatePatrolEligibilitySummary)
 			systemTaskRoute.GET("/list", controller.ListSystemTasks)
 			systemTaskRoute.GET("/current", controller.GetCurrentSystemTask)

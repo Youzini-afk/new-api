@@ -309,6 +309,19 @@ export const STATIC_I18N_KEYS = [
   'Not loaded',
   'Eligibility data unavailable. Click Refresh status to load.',
   'Only eligible users are checked. The rest are skipped for the reasons above.',
+  // Discord Banned-server patrol — panel labels.
+  'Ban',
+  'Banned-server patrol',
+  'Ban patrol batch size (optional)',
+  'Run banned-server patrol now',
+  'Ban patrol batch started.',
+  'Failed to start ban patrol batch',
+  'Current ban patrol status',
+  'No ban patrol has run yet',
+  'Click Run banned-server patrol now to start a manual check.',
+  'Checks only the configured `ban_groups`. Users are banned only on confirmed membership in a banned server.',
+  'Supports users with the older Discord authorization (no guilds scope) by checking specific banned servers directly.',
+  'Does not enforce allow groups.',
 
   // Games (Phase 7)
   'Lottery',

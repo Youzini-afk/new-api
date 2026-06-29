@@ -5607,6 +5607,18 @@
     "Patrol eligibility": "巡检资格",
     "Not loaded": "未加载",
     "Eligibility data unavailable. Click Refresh status to load.": "资格数据不可用。点击“刷新状态”加载。",
-    "Only eligible users are checked. The rest are skipped for the reasons above.": "仅检查符合资格的用户，其余用户因上述原因被跳过。"
+    "Only eligible users are checked. The rest are skipped for the reasons above.": "仅检查符合资格的用户，其余用户因上述原因被跳过。",
+    "Ban": "禁令",
+    "Banned-server patrol": "禁止服务器巡检",
+    "Ban patrol batch size (optional)": "禁止服务器巡检批量大小（可选）",
+    "Run banned-server patrol now": "立即执行禁止服务器巡检",
+    "Ban patrol batch started.": "禁止服务器巡检批量已启动。",
+    "Failed to start ban patrol batch": "启动禁止服务器巡检批量失败",
+    "Current ban patrol status": "当前禁止服务器巡检状态",
+    "No ban patrol has run yet": "还没有执行过禁止服务器巡检",
+    "Click Run banned-server patrol now to start a manual check.": "点击“立即执行禁止服务器巡检”开始一次手动检查。",
+    "Checks only the configured `ban_groups`. Users are banned only on confirmed membership in a banned server.": "仅检查已配置的 `ban_groups`。只有在确认用户属于禁止服务器时才会封禁。",
+    "Supports users with the older Discord authorization (no guilds scope) by checking specific banned servers directly.": "支持使用旧版 Discord 授权（无 guilds scope）的用户，通过直接检查特定禁止服务器。",
+    "Does not enforce allow groups.": "不强制执行允许的服务器组。"
   }
 }

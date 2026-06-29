@@ -71,6 +71,37 @@ func CreateDiscordGatePatrolSystemTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": task.ToResponse()})
 }
 
+// CreateDiscordBanPatrolSystemTask enqueues a root-only Discord ban-only patrol
+// batch task at POST /api/system-task/discord-ban-patrol.
+func CreateDiscordBanPatrolSystemTask(c *gin.Context) {
+	req := discordGatePatrolTaskRequest{Mode: discordGatePatrolModeManualBatch}
+	if c.Request.Body != nil {
+		if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+			common.ApiErrorMsg(c, "invalid request body")
+			return
+		}
+	}
+	req.Mode = strings.TrimSpace(req.Mode)
+	if req.Mode == "" {
+		req.Mode = discordGatePatrolModeManualBatch
+	}
+	if req.Mode != discordGatePatrolModeManualBatch {
+		common.ApiErrorMsg(c, "mode must be manual_batch")
+		return
+	}
+	if req.BatchSize != 0 && (req.BatchSize < 50 || req.BatchSize > 100000) {
+		common.ApiErrorMsg(c, "batch_size must be between 50 and 100000")
+		return
+	}
+	payload := discordGatePatrolPayload{Mode: req.Mode, BatchSize: req.BatchSize}
+	task, _, err := service.EnqueueSystemTask(model.SystemTaskTypeDiscordBanPatrol, payload)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": task.ToResponse()})
+}
+
 // GetDiscordGatePatrolEligibilitySummary returns root-only counts explaining
 // which users are eligible for Discord gate patrol and why others are skipped.
 func GetDiscordGatePatrolEligibilitySummary(c *gin.Context) {

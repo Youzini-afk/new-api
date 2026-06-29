@@ -78,6 +78,13 @@ type User struct {
 	DiscordPatrolRetryAt       int64  `json:"discord_patrol_retry_at" gorm:"column:discord_patrol_retry_at;index"`
 	DiscordPatrolRetryCount    int    `json:"discord_patrol_retry_count" gorm:"column:discord_patrol_retry_count"`
 	DiscordPatrolLastError     string `json:"discord_patrol_last_error" gorm:"column:discord_patrol_last_error;type:varchar(128)"`
+
+	DiscordBanPatrolLastCheckAt     int64  `json:"discord_ban_patrol_last_check_at" gorm:"column:discord_ban_patrol_last_check_at;index"`
+	DiscordBanPatrolLastCheckResult string `json:"discord_ban_patrol_last_check_result" gorm:"column:discord_ban_patrol_last_check_result;type:varchar(32)"`
+	DiscordBanPatrolLastCheckReason string `json:"discord_ban_patrol_last_check_reason" gorm:"column:discord_ban_patrol_last_check_reason;type:varchar(128)"`
+	DiscordBanPatrolRetryAt         int64  `json:"discord_ban_patrol_retry_at" gorm:"column:discord_ban_patrol_retry_at;index"`
+	DiscordBanPatrolRetryCount      int    `json:"discord_ban_patrol_retry_count" gorm:"column:discord_ban_patrol_retry_count"`
+	DiscordBanPatrolLastError       string `json:"discord_ban_patrol_last_error" gorm:"column:discord_ban_patrol_last_error;type:varchar(128)"`
 }
 
 const (

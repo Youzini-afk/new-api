@@ -172,6 +172,103 @@ func BanUserForDiscordPatrolAndDisableTokens(user *model.User, banReason, gateRe
 	return nil
 }
 
+// BanUserForDiscordBanPatrolAndDisableTokens atomically records a confirmed
+// ban-only Discord patrol hit, disables the user, and revokes all API tokens.
+// The transaction rechecks that the user is still enabled, non-admin, not
+// Discord-gate exempt, still bound to the evaluated Discord account, and still
+// has a refresh token before applying the ban.
+func BanUserForDiscordBanPatrolAndDisableTokens(user *model.User, evaluatedDiscordID, banReason, patrolReason string, checkedAt int64) error {
+	if user == nil || user.Id <= 0 {
+		return fmt.Errorf("invalid user")
+	}
+	evaluatedDiscordID = strings.TrimSpace(evaluatedDiscordID)
+	if evaluatedDiscordID == "" {
+		return fmt.Errorf("discord id is required")
+	}
+	if user.Role >= common.RoleAdminUser {
+		return fmt.Errorf("cannot ban admin/root user")
+	}
+	if checkedAt <= 0 {
+		checkedAt = common.GetTimestamp()
+	}
+	banReason = strings.TrimSpace(banReason)
+
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var current model.User
+		if err := tx.Select("id", "role", "status", "remark", "discord_gate_exempt", "discord_id", "discord_refresh_token").First(&current, user.Id).Error; err != nil {
+			return err
+		}
+		if current.Role >= common.RoleAdminUser {
+			return fmt.Errorf("cannot ban admin/root user")
+		}
+		if current.Status != common.UserStatusEnabled {
+			return fmt.Errorf("cannot ban disabled user")
+		}
+		if current.DiscordGateExempt {
+			return fmt.Errorf("cannot ban discord gate exempt user")
+		}
+		if strings.TrimSpace(current.DiscordId) != evaluatedDiscordID {
+			return fmt.Errorf("discord binding changed")
+		}
+		if strings.TrimSpace(current.DiscordRefreshToken) == "" {
+			return fmt.Errorf("discord refresh token missing")
+		}
+		remark := strings.TrimSpace(current.Remark)
+		if banReason != "" {
+			if remark == "" {
+				remark = banReason
+			} else {
+				exists := false
+				for _, item := range strings.Split(remark, "\n") {
+					if strings.TrimSpace(item) == banReason {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					remark += "\n" + banReason
+				}
+			}
+		}
+		if len([]rune(remark)) > 255 {
+			remark = string([]rune(remark)[:255])
+		}
+		userUpdate := tx.Model(&model.User{}).
+			Where("id = ? AND status = ? AND role < ? AND discord_gate_exempt = ? AND discord_id = ? AND discord_refresh_token <> ?", user.Id, common.UserStatusEnabled, common.RoleAdminUser, false, evaluatedDiscordID, "").
+			Updates(map[string]interface{}{
+				"status":                               common.UserStatusDisabled,
+				"remark":                               remark,
+				"discord_gate_passed":                  false,
+				"discord_ban_patrol_last_check_at":     checkedAt,
+				"discord_ban_patrol_last_check_result": "ban_matched",
+				"discord_ban_patrol_last_check_reason": patrolReason,
+				"discord_ban_patrol_retry_at":          0,
+				"discord_ban_patrol_retry_count":       0,
+				"discord_ban_patrol_last_error":        "",
+			})
+		if userUpdate.Error != nil {
+			return userUpdate.Error
+		}
+		if userUpdate.RowsAffected == 0 {
+			return fmt.Errorf("cannot ban user")
+		}
+		if err := tx.Model(&model.Token{}).Where("user_id = ?", user.Id).Update("status", common.TokenStatusDisabled).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := model.InvalidateUserCache(user.Id); err != nil {
+		common.SysLog("discord ban patrol cache invalidate failed: " + err.Error())
+	}
+	if err := model.InvalidateUserTokensCache(user.Id); err != nil {
+		common.SysLog("discord ban patrol token cache invalidate failed: " + err.Error())
+	}
+	return nil
+}
+
 // MarkDiscordGateFailedAndDisableTokens revokes a non-admin user's API tokens
 // because they no longer satisfy the Discord allow gate, but it does not disable
 // the user account. This is intentionally separate from BanUserAndDisableTokens:

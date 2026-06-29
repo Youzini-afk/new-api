@@ -114,6 +114,40 @@ export async function getDiscordGatePatrolEligibility() {
   return res.data
 }
 
+export async function startDiscordBanPatrolTask(request?: {
+  mode?: 'manual_batch'
+  batch_size?: number
+}) {
+  const res = await api.post<SystemTaskResponse<DiscordGatePatrolTask>>(
+    '/api/system-task/discord-ban-patrol',
+    {
+      mode: 'manual_batch',
+      ...(request?.batch_size ? { batch_size: request.batch_size } : {}),
+    }
+  )
+  return res.data
+}
+
+export async function getCurrentDiscordBanPatrolTask() {
+  const res = await api.get<SystemTaskResponse<DiscordGatePatrolTask | null>>(
+    '/api/system-task/current',
+    {
+      params: { type: 'discord_ban_patrol' },
+    }
+  )
+  return res.data
+}
+
+export async function getLatestDiscordBanPatrolTask() {
+  const res = await api.get<SystemTaskResponse<DiscordGatePatrolTask | null>>(
+    '/api/system-task/latest',
+    {
+      params: { type: 'discord_ban_patrol' },
+    }
+  )
+  return res.data
+}
+
 export async function getSystemTask(taskId: string) {
   const res = await api.get<SystemTaskResponse<LogCleanupTask>>(
     `/api/system-task/${taskId}`

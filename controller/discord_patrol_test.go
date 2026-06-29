@@ -27,3 +27,11 @@ func TestDiscordGatePatrolEffectiveBatchSize(t *testing.T) {
 	assert.Equal(t, 1, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeScheduled, 0, 100, settings))
 	assert.Equal(t, 139, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeScheduled, 0, 50000, settings))
 }
+
+func TestDiscordBanPatrolHandlerTypeAndManualBatchSize(t *testing.T) {
+	assert.Equal(t, "discord_ban_patrol", discordBanPatrolHandler{}.Type())
+	assert.False(t, discordBanPatrolHandler{}.Enabled())
+	settings := &system_setting.DiscordSettings{LoginGatePatrolMaxBatchSize: 50000}
+	assert.Equal(t, 50000, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeManualBatch, 0, 100, settings))
+	assert.Equal(t, 200, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeManualBatch, 200, 100, settings))
+}

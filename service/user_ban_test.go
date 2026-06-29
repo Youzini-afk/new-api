@@ -36,7 +36,7 @@ func seedBanTestToken(t *testing.T, userId int, name string) *model.Token {
 	tok := &model.Token{
 		UserId:      userId,
 		Name:        name,
-		Key:          name + "-key-" + strings.Repeat("x", 20),
+		Key:         name + "-key-" + strings.Repeat("x", 20),
 		Status:      common.TokenStatusEnabled,
 		Group:       "default",
 		ExpiredTime: -1,
@@ -130,6 +130,29 @@ func TestBanUserAndDisableTokens_RemarkDeDupesAndTruncates(t *testing.T) {
 	require.NoError(t, BanUserAndDisableTokens(u, longReason))
 	require.NoError(t, model.DB.First(&refreshed, u.Id).Error)
 	assert.Equal(t, storedReason, refreshed.Remark, "identical reason line must not be duplicated")
+}
+
+func TestBanUserForDiscordBanPatrolAndDisableTokensRejectsChangedBinding(t *testing.T) {
+	truncateUserBanTables(t)
+	u := seedBanTestUser(t, "discordban", common.RoleCommonUser)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{
+		"discord_id":            "current-discord",
+		"discord_refresh_token": "encrypted-refresh",
+		"discord_gate_passed":   true,
+	}).Error)
+	tok := seedBanTestToken(t, u.Id, "discordbantok")
+
+	err := BanUserForDiscordBanPatrolAndDisableTokens(u, "old-discord", "Discord ban patrol: banned guild matched", "ban_group_matched", common.GetTimestamp())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "discord binding changed")
+
+	var refreshed model.User
+	require.NoError(t, model.DB.First(&refreshed, u.Id).Error)
+	assert.Equal(t, common.UserStatusEnabled, refreshed.Status)
+	assert.True(t, refreshed.DiscordGatePassed)
+	var refreshedToken model.Token
+	require.NoError(t, model.DB.First(&refreshedToken, tok.Id).Error)
+	assert.Equal(t, common.TokenStatusEnabled, refreshedToken.Status)
 }
 
 // TestAppendUserRemarkLine_DeDupes verifies the helper de-duplicates identical
@@ -452,11 +475,11 @@ type fakePromptBlockRecordContext struct {
 
 func (f *fakePromptBlockRecordContext) RequestContext() context.Context { return context.Background() }
 func (f *fakePromptBlockRecordContext) UserID() int                     { return f.userId }
-func (f *fakePromptBlockRecordContext) Username() string                 { return f.username }
-func (f *fakePromptBlockRecordContext) ClientIP() string                  { return f.ip }
-func (f *fakePromptBlockRecordContext) RequestPath() string              { return f.path }
-func (f *fakePromptBlockRecordContext) RequestHeadersRaw() string         { return f.headers }
-func (f *fakePromptBlockRecordContext) RequestParamsRaw() string          { return f.params }
+func (f *fakePromptBlockRecordContext) Username() string                { return f.username }
+func (f *fakePromptBlockRecordContext) ClientIP() string                { return f.ip }
+func (f *fakePromptBlockRecordContext) RequestPath() string             { return f.path }
+func (f *fakePromptBlockRecordContext) RequestHeadersRaw() string       { return f.headers }
+func (f *fakePromptBlockRecordContext) RequestParamsRaw() string        { return f.params }
 
 // fakeUABlockRecordContext is a test fake implementing
 // service.UABlockRecordContext.
@@ -471,10 +494,10 @@ type fakeUABlockRecordContext struct {
 }
 
 func (f *fakeUABlockRecordContext) RequestContext() context.Context { return context.Background() }
-func (f *fakeUABlockRecordContext) UserID() int                      { return f.userId }
-func (f *fakeUABlockRecordContext) Username() string                 { return f.username }
-func (f *fakeUABlockRecordContext) ClientIP() string                  { return f.ip }
-func (f *fakeUABlockRecordContext) RequestPath() string              { return f.path }
-func (f *fakeUABlockRecordContext) UserAgent() string                 { return f.ua }
-func (f *fakeUABlockRecordContext) RequestHeadersRaw() string         { return f.headers }
-func (f *fakeUABlockRecordContext) RequestParamsRaw() string          { return f.params }
+func (f *fakeUABlockRecordContext) UserID() int                     { return f.userId }
+func (f *fakeUABlockRecordContext) Username() string                { return f.username }
+func (f *fakeUABlockRecordContext) ClientIP() string                { return f.ip }
+func (f *fakeUABlockRecordContext) RequestPath() string             { return f.path }
+func (f *fakeUABlockRecordContext) UserAgent() string               { return f.ua }
+func (f *fakeUABlockRecordContext) RequestHeadersRaw() string       { return f.headers }
+func (f *fakeUABlockRecordContext) RequestParamsRaw() string        { return f.params }
