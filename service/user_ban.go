@@ -291,6 +291,98 @@ func BanUserForDiscordBanPatrolAndDisableTokens(user *model.User, evaluatedDisco
 	return nil
 }
 
+// MarkDiscordPatrolInvalidGrantAndDisableTokens records that Discord rejected
+// the stored refresh token, clears that exact token, marks reauthorization
+// required, and disables API tokens without disabling the user account. The
+// mutation is CAS-guarded on both the evaluated Discord binding and encrypted
+// refresh token so a newer OAuth state is never cleared by a stale patrol.
+func MarkDiscordPatrolInvalidGrantAndDisableTokens(user *model.User, evaluatedDiscordID, evaluatedEncryptedRefreshToken string, includeBanPatrol bool, checkedAt int64) error {
+	if user == nil || user.Id <= 0 {
+		return fmt.Errorf("invalid user")
+	}
+	evaluatedDiscordID = strings.TrimSpace(evaluatedDiscordID)
+	if evaluatedDiscordID == "" {
+		return fmt.Errorf("discord id is required")
+	}
+	evaluatedEncryptedRefreshToken = strings.TrimSpace(evaluatedEncryptedRefreshToken)
+	if evaluatedEncryptedRefreshToken == "" {
+		return fmt.Errorf("discord refresh token is required")
+	}
+	if user.Role >= common.RoleAdminUser {
+		return fmt.Errorf("cannot disable admin/root tokens")
+	}
+	if checkedAt <= 0 {
+		checkedAt = common.GetTimestamp()
+	}
+
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var current model.User
+		if err := tx.Select("id", "role", "status", "discord_gate_exempt", "discord_id", "discord_refresh_token").First(&current, user.Id).Error; err != nil {
+			return err
+		}
+		if current.Role >= common.RoleAdminUser {
+			return fmt.Errorf("cannot disable admin/root tokens")
+		}
+		if current.Status != common.UserStatusEnabled {
+			return fmt.Errorf("cannot disable tokens for disabled user")
+		}
+		if current.DiscordGateExempt {
+			return fmt.Errorf("cannot disable tokens for discord gate exempt user")
+		}
+		if strings.TrimSpace(current.DiscordId) != evaluatedDiscordID {
+			return fmt.Errorf("discord binding changed")
+		}
+		if strings.TrimSpace(current.DiscordRefreshToken) != evaluatedEncryptedRefreshToken {
+			return fmt.Errorf("discord refresh token changed")
+		}
+
+		updates := map[string]interface{}{
+			"discord_refresh_token":      "",
+			"discord_gate_passed":        false,
+			"discord_gate_scope_status":  model.DiscordGateScopeStatusUnknown,
+			"discord_last_check_at":      checkedAt,
+			"discord_last_check_result":  "reauth_required",
+			"discord_last_check_reason":  "invalid_grant",
+			"discord_gate_message":       "Please reconnect Discord OAuth authorization to refresh verification.",
+			"discord_patrol_retry_at":    0,
+			"discord_patrol_retry_count": 0,
+			"discord_patrol_last_error":  "",
+		}
+		if includeBanPatrol {
+			updates["discord_ban_patrol_last_check_at"] = checkedAt
+			updates["discord_ban_patrol_last_check_result"] = "reauth_required"
+			updates["discord_ban_patrol_last_check_reason"] = "invalid_grant"
+			updates["discord_ban_patrol_retry_at"] = 0
+			updates["discord_ban_patrol_retry_count"] = 0
+			updates["discord_ban_patrol_last_error"] = ""
+		}
+
+		userUpdate := tx.Model(&model.User{}).
+			Where("id = ? AND status = ? AND role < ? AND (discord_gate_exempt IS NULL OR discord_gate_exempt = ?) AND discord_id = ? AND discord_refresh_token = ?", user.Id, common.UserStatusEnabled, common.RoleAdminUser, false, evaluatedDiscordID, evaluatedEncryptedRefreshToken).
+			Updates(updates)
+		if userUpdate.Error != nil {
+			return userUpdate.Error
+		}
+		if userUpdate.RowsAffected == 0 {
+			return fmt.Errorf("cannot mark discord reauth required")
+		}
+		if err := tx.Model(&model.Token{}).Where("user_id = ?", user.Id).Update("status", common.TokenStatusDisabled).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := model.InvalidateUserCache(user.Id); err != nil {
+		common.SysLog("discord invalid grant cache invalidate failed: " + err.Error())
+	}
+	if err := model.InvalidateUserTokensCache(user.Id); err != nil {
+		common.SysLog("discord invalid grant token cache invalidate failed: " + err.Error())
+	}
+	return nil
+}
+
 // MarkDiscordGateFailedAndDisableTokens revokes a non-admin user's API tokens
 // because they no longer satisfy the Discord allow gate, but it does not disable
 // the user account. This is intentionally separate from BanUserAndDisableTokens:

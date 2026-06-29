@@ -35,7 +35,14 @@ func PatrolDiscordBanOnly(ctx context.Context, user *model.User) (DiscordPatrolO
 	if invalidGrant {
 		outcome.Result = DiscordPatrolOutcomeReauthRequired
 		outcome.Reason = "invalid_grant"
-		return persistDiscordBanPatrolCheck(ctx, user.Id, outcome)
+		outcome.Message = discordGateReauthMessage
+		if err := service.MarkDiscordPatrolInvalidGrantAndDisableTokens(user, evaluatedDiscordID, originalEncryptedRefreshToken, true, common.GetTimestamp()); err != nil {
+			if strings.Contains(err.Error(), "changed") {
+				return discordPatrolStateChangedOutcome(user.Id), nil
+			}
+			return outcome, err
+		}
+		return outcome, nil
 	}
 	if err != nil || token == nil || strings.TrimSpace(token.AccessToken) == "" {
 		outcome.Result = DiscordPatrolOutcomeTransient

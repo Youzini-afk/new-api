@@ -95,6 +95,69 @@ func TestPatrolDiscordGateStaleRefreshTokenCASSkipsMutation(t *testing.T) {
 	assert.Equal(t, newerEncrypted, stored.DiscordRefreshToken)
 }
 
+func TestPatrolDiscordGateInvalidGrantDisablesTokensOnly(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	user := createDiscordGateUser(t, model.User{
+		Role:                common.RoleCommonUser,
+		Status:              common.UserStatusEnabled,
+		DiscordId:           "discord-invalid-grant",
+		DiscordRefreshToken: encryptedDiscordRefreshToken(t, "old-refresh"),
+		DiscordGatePassed:   true,
+	})
+	token := model.Token{UserId: user.Id, Key: "patrol-invalid-grant-token", Status: common.TokenStatusEnabled, Name: "invalid grant"}
+	require.NoError(t, model.DB.Create(&token).Error)
+	withDiscordMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/oauth2/token", r.URL.Path)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+	})
+
+	outcome, err := PatrolDiscordGate(context.Background(), user)
+	require.NoError(t, err)
+	assert.Equal(t, DiscordPatrolOutcomeReauthRequired, outcome.Result)
+	assert.Equal(t, "invalid_grant", outcome.Reason)
+	var stored model.User
+	require.NoError(t, model.DB.First(&stored, user.Id).Error)
+	assert.Equal(t, common.UserStatusEnabled, stored.Status)
+	assert.False(t, stored.DiscordGatePassed)
+	assert.Empty(t, stored.DiscordRefreshToken)
+	var storedToken model.Token
+	require.NoError(t, model.DB.First(&storedToken, token.Id).Error)
+	assert.Equal(t, common.TokenStatusDisabled, storedToken.Status)
+}
+
+func TestPatrolDiscordGateInvalidGrantStaleRefreshTokenSkipsMutation(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	originalEncrypted := encryptedDiscordRefreshToken(t, "old-refresh")
+	newerEncrypted := encryptedDiscordRefreshToken(t, "new-refresh")
+	user := createDiscordGateUser(t, model.User{
+		Role:                common.RoleCommonUser,
+		Status:              common.UserStatusEnabled,
+		DiscordId:           "discord-invalid-grant-cas",
+		DiscordRefreshToken: originalEncrypted,
+		DiscordGatePassed:   true,
+	})
+	token := model.Token{UserId: user.Id, Key: "patrol-invalid-grant-cas-token", Status: common.TokenStatusEnabled, Name: "invalid grant cas"}
+	require.NoError(t, model.DB.Create(&token).Error)
+	withDiscordMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/oauth2/token", r.URL.Path)
+		require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("discord_refresh_token", newerEncrypted).Error)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+	})
+
+	outcome, err := PatrolDiscordGate(context.Background(), user)
+	require.NoError(t, err)
+	assert.Equal(t, DiscordPatrolOutcomeSkipped, outcome.Result)
+	assert.Equal(t, "discord_oauth_state_changed", outcome.Reason)
+	var stored model.User
+	require.NoError(t, model.DB.First(&stored, user.Id).Error)
+	assert.Equal(t, common.UserStatusEnabled, stored.Status)
+	assert.True(t, stored.DiscordGatePassed)
+	assert.Equal(t, newerEncrypted, stored.DiscordRefreshToken)
+	var storedToken model.Token
+	require.NoError(t, model.DB.First(&storedToken, token.Id).Error)
+	assert.Equal(t, common.TokenStatusEnabled, storedToken.Status)
+}
+
 func TestPatrolDiscordGateScopeGapReauthOnly(t *testing.T) {
 	withDiscordGateRecheckDB(t)
 	encrypted, err := common.EncryptWithCryptoSecret("refresh-token")

@@ -61,7 +61,14 @@ func PatrolDiscordGate(ctx context.Context, user *model.User) (DiscordPatrolOutc
 	}
 	token, invalidGrant, err := refreshDiscordAccessToken(ctx, refreshToken)
 	if invalidGrant {
-		return markDiscordPatrolReauth(ctx, user, evaluatedDiscordID, originalEncryptedRefreshToken, "invalid_grant")
+		outcome := DiscordPatrolOutcome{UserID: user.Id, Result: DiscordPatrolOutcomeReauthRequired, Reason: "invalid_grant", Message: discordGateReauthMessage}
+		if err := service.MarkDiscordPatrolInvalidGrantAndDisableTokens(user, evaluatedDiscordID, originalEncryptedRefreshToken, false, common.GetTimestamp()); err != nil {
+			if strings.Contains(err.Error(), "changed") {
+				return discordPatrolStateChangedOutcome(user.Id), nil
+			}
+			return outcome, err
+		}
+		return outcome, nil
 	}
 	if err != nil || token == nil || strings.TrimSpace(token.AccessToken) == "" {
 		return DiscordPatrolOutcome{UserID: user.Id, Result: DiscordPatrolOutcomeTransient, Reason: "refresh_failed", RetryAfter: retryAfterFromError(err)}, nil
