@@ -48,17 +48,20 @@ func PatrolDiscordGate(ctx context.Context, user *model.User) (DiscordPatrolOutc
 		return outcome, fmt.Errorf("user is required")
 	}
 	outcome.UserID = user.Id
-	if user.Role >= common.RoleAdminUser || user.DiscordGateExempt || !user.DiscordGatePassed {
+	evaluatedDiscordID := strings.TrimSpace(user.DiscordId)
+	originalEncryptedRefreshToken := user.DiscordRefreshToken
+	currentEncryptedRefreshToken := originalEncryptedRefreshToken
+	if user.Status != common.UserStatusEnabled || user.Role >= common.RoleAdminUser || user.DiscordGateExempt || !user.DiscordGatePassed || evaluatedDiscordID == "" {
 		outcome.Reason = "not_eligible"
 		return outcome, nil
 	}
 	refreshToken, err := common.DecryptWithCryptoSecret(user.DiscordRefreshToken)
 	if err != nil || strings.TrimSpace(refreshToken) == "" {
-		return markDiscordPatrolReauth(user, "refresh_token_decrypt_failed")
+		return markDiscordPatrolReauth(ctx, user, evaluatedDiscordID, originalEncryptedRefreshToken, "refresh_token_decrypt_failed")
 	}
 	token, invalidGrant, err := refreshDiscordAccessToken(ctx, refreshToken)
 	if invalidGrant {
-		return markDiscordPatrolReauth(user, "invalid_grant")
+		return markDiscordPatrolReauth(ctx, user, evaluatedDiscordID, originalEncryptedRefreshToken, "invalid_grant")
 	}
 	if err != nil || token == nil || strings.TrimSpace(token.AccessToken) == "" {
 		return DiscordPatrolOutcome{UserID: user.Id, Result: DiscordPatrolOutcomeTransient, Reason: "refresh_failed", RetryAfter: retryAfterFromError(err)}, nil
@@ -67,14 +70,19 @@ func PatrolDiscordGate(ctx context.Context, user *model.User) (DiscordPatrolOutc
 	if strings.TrimSpace(token.RefreshToken) != "" && strings.TrimSpace(token.RefreshToken) != refreshToken {
 		encrypted, err := common.EncryptWithCryptoSecret(token.RefreshToken)
 		if err != nil {
-			return markDiscordPatrolReauth(user, "refresh_token_encrypt_failed")
+			return markDiscordPatrolReauth(ctx, user, evaluatedDiscordID, originalEncryptedRefreshToken, "refresh_token_encrypt_failed")
 		}
 		updates["discord_refresh_token"] = encrypted
+		currentEncryptedRefreshToken = encrypted
 	}
 	addDiscordScopeUpdates(token, updates)
 	if len(updates) > 0 {
-		if err := model.DB.WithContext(ctx).Model(&model.User{}).Where("id = ?", user.Id).Updates(updates).Error; err != nil {
+		updated, err := discordPatrolGuardedUserUpdate(ctx, user.Id, evaluatedDiscordID, originalEncryptedRefreshToken, updates)
+		if err != nil {
 			return DiscordPatrolOutcome{UserID: user.Id, Result: DiscordPatrolOutcomeTransient, Reason: "token_update_failed"}, err
+		}
+		if !updated {
+			return discordPatrolStateChangedOutcome(user.Id), nil
 		}
 		_ = model.InvalidateUserCache(user.Id)
 	}
@@ -84,14 +92,14 @@ func PatrolDiscordGate(ctx context.Context, user *model.User) (DiscordPatrolOutc
 	}
 	scopeStatus := model.DiscordGateScopeStatusForScopes(scopeSource)
 	if scopeStatus != model.DiscordGateScopeStatusOK {
-		return markDiscordPatrolReauth(user, scopeStatus, scopeStatus)
+		return markDiscordPatrolReauth(ctx, user, evaluatedDiscordID, currentEncryptedRefreshToken, scopeStatus, scopeStatus)
 	}
 	cfg, err := normalizedDiscordGateConfig()
 	if err != nil {
 		return DiscordPatrolOutcome{UserID: user.Id, Result: DiscordPatrolOutcomeSkipped, Reason: "invalid_config", Message: discordGateInvalidConfigMessage}, nil
 	}
 	result := evaluateDiscordGateForPatrol(ctx, strings.TrimSpace(token.AccessToken), cfg)
-	return persistDiscordPatrolOutcome(ctx, user, cfg, result)
+	return persistDiscordPatrolOutcome(ctx, user, evaluatedDiscordID, currentEncryptedRefreshToken, cfg, result)
 }
 
 func evaluateDiscordGateForPatrol(ctx context.Context, accessToken string, cfg system_setting.DiscordRegisterGateConfig) DiscordPatrolOutcome {
@@ -103,11 +111,18 @@ func evaluateDiscordGateForPatrol(ctx context.Context, accessToken string, cfg s
 		return DiscordPatrolOutcome{Result: DiscordPatrolOutcomeTransient, Reason: string(guilds.Diagnostic.Category), RetryAfter: guilds.Diagnostic.RetryAfter}
 	}
 	cache := map[string]discordMemberFetchResult{}
+	banTransient := DiscordPatrolOutcome{}
 	for _, group := range cfg.BanGroups {
 		outcome := evaluateDiscordPatrolGroup(ctx, accessToken, group, true, guilds.GuildIDs, cache)
-		if outcome.Result == DiscordPatrolOutcomeBanMatched || outcome.Result == DiscordPatrolOutcomeTransient {
+		if outcome.Result == DiscordPatrolOutcomeBanMatched {
 			return outcome
 		}
+		if outcome.Result == DiscordPatrolOutcomeTransient && banTransient.Result == "" {
+			banTransient = outcome
+		}
+	}
+	if banTransient.Result != "" {
+		return banTransient
 	}
 	if len(cfg.Groups) == 0 {
 		return DiscordPatrolOutcome{Result: DiscordPatrolOutcomeAllowFailed, Reason: "allow_groups_empty"}
@@ -208,7 +223,7 @@ func fetchDiscordGuildList(ctx context.Context, accessToken string) discordGuild
 	return discordGuildListResult{GuildIDs: ids}
 }
 
-func persistDiscordPatrolOutcome(ctx context.Context, user *model.User, cfg system_setting.DiscordRegisterGateConfig, outcome DiscordPatrolOutcome) (DiscordPatrolOutcome, error) {
+func persistDiscordPatrolOutcome(ctx context.Context, user *model.User, evaluatedDiscordID, currentEncryptedRefreshToken string, cfg system_setting.DiscordRegisterGateConfig, outcome DiscordPatrolOutcome) (DiscordPatrolOutcome, error) {
 	outcome.UserID = user.Id
 	now := common.GetTimestamp()
 	updates := map[string]interface{}{
@@ -226,6 +241,8 @@ func persistDiscordPatrolOutcome(ctx context.Context, user *model.User, cfg syst
 		message := discordGateUserMessage(discordGateResult{Decision: discordGateDecisionBan, Reason: outcome.Reason}, cfg)
 		if err := service.BanUserForDiscordPatrolAndDisableTokens(
 			user,
+			evaluatedDiscordID,
+			currentEncryptedRefreshToken,
 			"Discord gate patrol: banned guild matched",
 			truncateRunes(outcome.Reason, discordGateReasonMaxRunes),
 			truncateRunes(message, discordGateMessageMaxRunes),
@@ -236,7 +253,7 @@ func persistDiscordPatrolOutcome(ctx context.Context, user *model.User, cfg syst
 		return outcome, nil
 	case DiscordPatrolOutcomeAllowFailed:
 		message := discordGateUserMessage(discordGateResult{Decision: discordGateDecisionDeny, Reason: outcome.Reason}, cfg)
-		if err := service.MarkDiscordGateFailedAndDisableTokens(user, truncateRunes(outcome.Reason, discordGateReasonMaxRunes), truncateRunes(message, discordGateMessageMaxRunes), now); err != nil {
+		if err := service.MarkDiscordGateFailedAndDisableTokens(user, evaluatedDiscordID, currentEncryptedRefreshToken, truncateRunes(outcome.Reason, discordGateReasonMaxRunes), truncateRunes(message, discordGateMessageMaxRunes), now); err != nil {
 			return outcome, err
 		}
 		return outcome, nil
@@ -251,14 +268,18 @@ func persistDiscordPatrolOutcome(ctx context.Context, user *model.User, cfg syst
 	case DiscordPatrolOutcomeTransient:
 		return outcome, nil
 	}
-	if err := model.DB.WithContext(ctx).Model(&model.User{}).Where("id = ? AND role < ?", user.Id, common.RoleAdminUser).Updates(updates).Error; err != nil {
+	updated, err := discordPatrolGuardedUserUpdate(ctx, user.Id, evaluatedDiscordID, currentEncryptedRefreshToken, updates)
+	if err != nil {
 		return outcome, err
+	}
+	if !updated {
+		return discordPatrolStateChangedOutcome(user.Id), nil
 	}
 	_ = model.InvalidateUserCache(user.Id)
 	return outcome, nil
 }
 
-func markDiscordPatrolReauth(user *model.User, reason string, scopeStatusOverride ...string) (DiscordPatrolOutcome, error) {
+func markDiscordPatrolReauth(ctx context.Context, user *model.User, evaluatedDiscordID, currentEncryptedRefreshToken, reason string, scopeStatusOverride ...string) (DiscordPatrolOutcome, error) {
 	outcome := DiscordPatrolOutcome{UserID: user.Id, Result: DiscordPatrolOutcomeReauthRequired, Reason: reason, Message: discordGateReauthMessage}
 	scopeStatus := model.DiscordGateScopeStatusForScopes(user.DiscordOAuthScopes)
 	if len(scopeStatusOverride) > 0 && strings.TrimSpace(scopeStatusOverride[0]) != "" {
@@ -279,12 +300,35 @@ func markDiscordPatrolReauth(user *model.User, reason string, scopeStatusOverrid
 		updates["discord_gate_scope_status"] = model.DiscordGateScopeStatusUnknown
 		updates["discord_refresh_token"] = ""
 	}
-	err := model.DB.Model(&model.User{}).Where("id = ? AND role < ?", user.Id, common.RoleAdminUser).Updates(updates).Error
+	updated, err := discordPatrolGuardedUserUpdate(ctx, user.Id, evaluatedDiscordID, currentEncryptedRefreshToken, updates)
 	if err != nil {
 		return outcome, err
 	}
+	if !updated {
+		return discordPatrolStateChangedOutcome(user.Id), nil
+	}
 	_ = model.InvalidateUserCache(user.Id)
 	return outcome, nil
+}
+
+func discordPatrolGuardedUserUpdate(ctx context.Context, userID int, evaluatedDiscordID, encryptedRefreshToken string, updates map[string]interface{}) (bool, error) {
+	result := model.DB.WithContext(ctx).Model(&model.User{}).Where(
+		"id = ? AND status = ? AND role < ? AND (discord_gate_exempt IS NULL OR discord_gate_exempt = ?) AND discord_id = ? AND discord_refresh_token = ?",
+		userID,
+		common.UserStatusEnabled,
+		common.RoleAdminUser,
+		false,
+		evaluatedDiscordID,
+		encryptedRefreshToken,
+	).Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func discordPatrolStateChangedOutcome(userID int) DiscordPatrolOutcome {
+	return DiscordPatrolOutcome{UserID: userID, Result: DiscordPatrolOutcomeSkipped, Reason: "discord_oauth_state_changed"}
 }
 
 func retryAfterFromError(err error) time.Duration {

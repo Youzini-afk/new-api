@@ -9,7 +9,7 @@ import (
 
 func discordBanPatrolCandidateQuery(ctx context.Context, now int64) *gorm.DB {
 	return DB.WithContext(ctx).Model(&User{}).Where(
-		"status = ? AND role < ? AND discord_gate_exempt = ? AND discord_id <> ? AND discord_refresh_token <> ? AND (discord_ban_patrol_retry_at IS NULL OR discord_ban_patrol_retry_at = 0 OR discord_ban_patrol_retry_at <= ?)",
+		"status = ? AND role < ? AND (discord_gate_exempt IS NULL OR discord_gate_exempt = ?) AND discord_id IS NOT NULL AND discord_id <> ? AND discord_refresh_token IS NOT NULL AND discord_refresh_token <> ? AND (discord_ban_patrol_retry_at IS NULL OR discord_ban_patrol_retry_at = 0 OR discord_ban_patrol_retry_at <= ?)",
 		common.UserStatusEnabled,
 		common.RoleAdminUser,
 		false,
@@ -31,7 +31,7 @@ func FindDiscordBanPatrolCandidateUsers(ctx context.Context, limit int) ([]*User
 	}
 	var users []*User
 	err := discordBanPatrolCandidateQuery(ctx, common.GetTimestamp()).
-		Order("CASE WHEN discord_ban_patrol_retry_at > 0 THEN 0 ELSE 1 END asc, CASE WHEN discord_ban_patrol_retry_at IS NULL THEN 0 ELSE discord_ban_patrol_retry_at END asc, discord_ban_patrol_last_check_at asc, id asc").
+		Order("CASE WHEN discord_ban_patrol_retry_at > 0 THEN 0 ELSE 1 END asc, CASE WHEN discord_ban_patrol_retry_at IS NULL THEN 0 ELSE discord_ban_patrol_retry_at END asc, CASE WHEN discord_ban_patrol_last_check_at IS NULL THEN 0 ELSE discord_ban_patrol_last_check_at END asc, id asc").
 		Limit(limit).
 		Find(&users).Error
 	return users, err

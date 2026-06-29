@@ -5592,7 +5592,6 @@
     "Concurrent Discord API workers. (1–64)": "并发 Discord API 工作线程数。（1–64）",
     "Discord API rate limit across workers. (1–100)": "所有工作线程共享的 Discord API 速率限制。（1–100）",
     "Eligible": "符合资格",
-    "Total users": "总用户数",
     "Missing refresh token": "缺少刷新令牌",
     "Need reauthorization": "需要重新授权",
     "Gate not passed": "未通过门禁",
@@ -5608,7 +5607,7 @@
     "Not loaded": "未加载",
     "Eligibility data unavailable. Click Refresh status to load.": "资格数据不可用。点击“刷新状态”加载。",
     "Only eligible users are checked. The rest are skipped for the reasons above.": "仅检查符合资格的用户，其余用户因上述原因被跳过。",
-    "Ban": "禁令",
+    "Ban": "封禁",
     "Banned-server patrol": "禁止服务器巡检",
     "Ban patrol batch size (optional)": "禁止服务器巡检批量大小（可选）",
     "Run banned-server patrol now": "立即执行禁止服务器巡检",
@@ -5619,6 +5618,15 @@
     "Click Run banned-server patrol now to start a manual check.": "点击“立即执行禁止服务器巡检”开始一次手动检查。",
     "Checks only the configured `ban_groups`. Users are banned only on confirmed membership in a banned server.": "仅检查已配置的 `ban_groups`。只有在确认用户属于禁止服务器时才会封禁。",
     "Supports users with the older Discord authorization (no guilds scope) by checking specific banned servers directly.": "支持使用旧版 Discord 授权（无 guilds scope）的用户，通过直接检查特定禁止服务器。",
-    "Does not enforce allow groups.": "不强制执行允许的服务器组。"
+    "Does not enforce allow groups.": "不强制执行允许的服务器组。",
+    "All users (system)": "全部用户（系统）",
+    "Eligible = users the full patrol can check. All users = every account in the system.": "符合资格 = 全量巡检可以检查的用户。全部用户 = 系统中的每个账户。",
+    "Users needing reauthorization or with missing scopes are excluded from full gate patrol. Run the Banned-server patrol below to check them by direct banned-server membership.": "需要重新授权或缺少 scope 的用户被排除在全量门禁巡检之外。运行下方的禁止服务器巡检，通过直接查询禁止服务器成员来检查这些用户。",
+    "Failed to load patrol status. Click Refresh status to retry.": "加载巡检状态失败。点击“刷新状态”重试。",
+    "Failed to load patrol eligibility. Click Refresh status to retry.": "加载巡检资格失败。点击“刷新状态”重试。",
+    "Failed to load ban patrol status. Click Refresh status to retry.": "加载禁止服务器巡检状态失败。点击“刷新状态”重试。",
+    "Eligibility updated": "资格已更新",
+    "Batch size must be an integer between 50 and 100000.": "批量大小必须是 50 到 100000 之间的整数。",
+    "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.": "与全量门禁巡检共享 Discord API 速率限制以及保存的最大批量大小 / 工作线程 / RPS 设置。"
   }
 }

@@ -223,7 +223,7 @@ func (discordBanPatrolHandler) Enabled() bool { return false }
 func (discordBanPatrolHandler) Interval() time.Duration { return time.Hour }
 
 func (discordBanPatrolHandler) NewPayload() any {
-	return discordGatePatrolPayload{Mode: discordGatePatrolModeScheduled, BatchSize: 1}
+	return discordGatePatrolPayload{Mode: discordGatePatrolModeManualBatch, BatchSize: 1}
 }
 
 func (discordBanPatrolHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {

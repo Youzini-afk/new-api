@@ -17,6 +17,7 @@ func TestDiscordBanPatrolCandidates(t *testing.T) {
 		{Username: "gate_failed", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d1", DiscordRefreshToken: "rt", DiscordGatePassed: false, DiscordGateScopeStatus: DiscordGateScopeStatusMissingGuilds},
 		{Username: "scope_missing_members", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d2", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusMissingGuildsMembersRead},
 		{Username: "scope_null", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d3", DiscordRefreshToken: "rt", DiscordGatePassed: true},
+		{Username: "exempt_null", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d9", DiscordRefreshToken: "rt"},
 		{Username: "disabled", Status: common.UserStatusDisabled, Role: common.RoleCommonUser, DiscordId: "d4", DiscordRefreshToken: "rt"},
 		{Username: "admin", Status: common.UserStatusEnabled, Role: common.RoleAdminUser, DiscordId: "d5", DiscordRefreshToken: "rt"},
 		{Username: "exempt", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d6", DiscordRefreshToken: "rt", DiscordGateExempt: true},
@@ -31,6 +32,9 @@ func TestDiscordBanPatrolCandidates(t *testing.T) {
 	nullScopeUpdate := DB.Model(&User{}).Where("username = ?", "scope_null").Update("discord_gate_scope_status", nil)
 	require.NoError(t, nullScopeUpdate.Error)
 	require.Equal(t, int64(1), nullScopeUpdate.RowsAffected)
+	nullExemptUpdate := DB.Model(&User{}).Where("username = ?", "exempt_null").Update("discord_gate_exempt", nil)
+	require.NoError(t, nullExemptUpdate.Error)
+	require.Equal(t, int64(1), nullExemptUpdate.RowsAffected)
 
 	count, err := CountDiscordBanPatrolCandidateUsers(context.Background())
 	require.NoError(t, err)
@@ -41,11 +45,12 @@ func TestDiscordBanPatrolCandidates(t *testing.T) {
 		names[candidate.Username] = struct{}{}
 	}
 
-	assert.Equal(t, int64(3), count)
-	assert.Len(t, candidates, 3)
+	assert.Equal(t, int64(4), count)
+	assert.Len(t, candidates, 4)
 	assert.Contains(t, names, "gate_failed")
 	assert.Contains(t, names, "scope_missing_members")
 	assert.Contains(t, names, "scope_null")
+	assert.Contains(t, names, "exempt_null")
 	assert.NotContains(t, names, "disabled")
 	assert.NotContains(t, names, "admin")
 	assert.NotContains(t, names, "exempt")

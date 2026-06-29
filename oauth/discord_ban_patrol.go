@@ -19,6 +19,8 @@ func PatrolDiscordBanOnly(ctx context.Context, user *model.User) (DiscordPatrolO
 	}
 	outcome.UserID = user.Id
 	evaluatedDiscordID := strings.TrimSpace(user.DiscordId)
+	originalEncryptedRefreshToken := user.DiscordRefreshToken
+	currentEncryptedRefreshToken := originalEncryptedRefreshToken
 	if user.Status != common.UserStatusEnabled || user.Role >= common.RoleAdminUser || user.DiscordGateExempt || evaluatedDiscordID == "" {
 		outcome.Reason = "not_eligible"
 		return persistDiscordBanPatrolCheck(ctx, user.Id, outcome)
@@ -50,13 +52,18 @@ func PatrolDiscordBanOnly(ctx context.Context, user *model.User) (DiscordPatrolO
 			return persistDiscordBanPatrolCheck(ctx, user.Id, outcome)
 		}
 		updates["discord_refresh_token"] = encrypted
+		currentEncryptedRefreshToken = encrypted
 	}
 	addDiscordScopeUpdates(token, updates)
 	if len(updates) > 0 {
-		if err := model.DB.WithContext(ctx).Model(&model.User{}).Where("id = ?", user.Id).Updates(updates).Error; err != nil {
+		updated, err := discordPatrolGuardedUserUpdate(ctx, user.Id, evaluatedDiscordID, originalEncryptedRefreshToken, updates)
+		if err != nil {
 			outcome.Result = DiscordPatrolOutcomeTransient
 			outcome.Reason = "token_update_failed"
 			return persistDiscordBanPatrolCheck(ctx, user.Id, outcome)
+		}
+		if !updated {
+			return discordPatrolStateChangedOutcome(user.Id), nil
 		}
 		_ = model.InvalidateUserCache(user.Id)
 	}
@@ -73,7 +80,7 @@ func PatrolDiscordBanOnly(ctx context.Context, user *model.User) (DiscordPatrolO
 	outcome = evaluateDiscordBanPatrol(ctx, strings.TrimSpace(token.AccessToken), scopeSource, cfg)
 	outcome.UserID = user.Id
 	if outcome.Result == DiscordPatrolOutcomeBanMatched {
-		if err := service.BanUserForDiscordBanPatrolAndDisableTokens(user, evaluatedDiscordID, "Discord ban patrol: banned guild matched", truncateRunes(outcome.Reason, discordGateReasonMaxRunes), common.GetTimestamp()); err != nil {
+		if err := service.BanUserForDiscordBanPatrolAndDisableTokens(user, evaluatedDiscordID, currentEncryptedRefreshToken, "Discord ban patrol: banned guild matched", truncateRunes(outcome.Reason, discordGateReasonMaxRunes), common.GetTimestamp()); err != nil {
 			return outcome, err
 		}
 		return outcome, nil

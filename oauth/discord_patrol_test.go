@@ -28,6 +28,30 @@ func TestEvaluateDiscordGateForPatrolBanGuildOnlyUsesGuildList(t *testing.T) {
 	assert.Equal(t, DiscordPatrolOutcomeBanMatched, outcome.Result)
 }
 
+func TestEvaluateDiscordGateForPatrolBanGroupsContinueAfterTransient(t *testing.T) {
+	withDiscordMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/users/@me/guilds":
+			_, _ = w.Write([]byte(`[{"id":"transient-guild"},{"id":"banned-guild"}]`))
+		case "/users/@me/guilds/transient-guild/member":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	cfg := system_setting.DiscordRegisterGateConfig{
+		Groups: []system_setting.DiscordGateGroup{{Rules: []system_setting.DiscordGateRule{{GuildID: "allowed-guild"}}}},
+		BanGroups: []system_setting.DiscordGateGroup{
+			{Rules: []system_setting.DiscordGateRule{{GuildID: "transient-guild", RoleIDs: []string{"ban-role"}}}},
+			{Rules: []system_setting.DiscordGateRule{{GuildID: "banned-guild"}}},
+		},
+	}
+	system_setting.NormalizeDiscordRegisterGate(&cfg)
+
+	outcome := evaluateDiscordGateForPatrol(context.Background(), "access-token", cfg)
+	assert.Equal(t, DiscordPatrolOutcomeBanMatched, outcome.Result)
+}
+
 func TestEvaluateDiscordGateForPatrolAllowAbsentFailsWithoutBan(t *testing.T) {
 	withDiscordMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/users/@me/guilds", r.URL.Path)
@@ -38,6 +62,37 @@ func TestEvaluateDiscordGateForPatrolAllowAbsentFailsWithoutBan(t *testing.T) {
 
 	outcome := evaluateDiscordGateForPatrol(context.Background(), "access-token", cfg)
 	assert.Equal(t, DiscordPatrolOutcomeAllowFailed, outcome.Result)
+}
+
+func TestPatrolDiscordGateStaleRefreshTokenCASSkipsMutation(t *testing.T) {
+	withDiscordGateRecheckDB(t)
+	originalEncrypted := encryptedDiscordRefreshToken(t, "old-refresh")
+	newerEncrypted := encryptedDiscordRefreshToken(t, "new-refresh")
+	user := createDiscordGateUser(t, model.User{
+		Role:                   common.RoleCommonUser,
+		Status:                 common.UserStatusEnabled,
+		DiscordId:              "discord-cas",
+		DiscordRefreshToken:    originalEncrypted,
+		DiscordGatePassed:      true,
+		DiscordOAuthScopes:     "identify guilds guilds.members.read",
+		DiscordGateScopeStatus: model.DiscordGateScopeStatusOK,
+	})
+	withDiscordMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/oauth2/token" {
+			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("discord_refresh_token", newerEncrypted).Error)
+			_, _ = w.Write([]byte(`{"access_token":"access-token","refresh_token":"rotated-refresh","scope":"identify guilds guilds.members.read"}`))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	outcome, err := PatrolDiscordGate(context.Background(), user)
+	require.NoError(t, err)
+	assert.Equal(t, DiscordPatrolOutcomeSkipped, outcome.Result)
+	assert.Equal(t, "discord_oauth_state_changed", outcome.Reason)
+	var stored model.User
+	require.NoError(t, model.DB.First(&stored, user.Id).Error)
+	assert.Equal(t, newerEncrypted, stored.DiscordRefreshToken)
 }
 
 func TestPatrolDiscordGateScopeGapReauthOnly(t *testing.T) {

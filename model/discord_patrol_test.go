@@ -17,6 +17,7 @@ func TestGetDiscordGatePatrolEligibilitySummary(t *testing.T) {
 		{Username: "eligible_scope_ok", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d1", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK},
 		{Username: "eligible_scope_empty", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d2", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: ""},
 		{Username: "eligible_scope_null", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d13", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: ""},
+		{Username: "eligible_exempt_null", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d14", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK},
 		{Username: "retry_waiting", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d3", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK, DiscordPatrolRetryAt: now + 3600},
 		{Username: "disabled", Status: common.UserStatusDisabled, Role: common.RoleCommonUser, DiscordId: "d4", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK},
 		{Username: "admin", Status: common.UserStatusEnabled, Role: common.RoleAdminUser, DiscordId: "d5", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK},
@@ -36,6 +37,9 @@ func TestGetDiscordGatePatrolEligibilitySummary(t *testing.T) {
 	nullScopeUpdate := DB.Model(&User{}).Where("username = ?", "eligible_scope_null").Update("discord_gate_scope_status", nil)
 	require.NoError(t, nullScopeUpdate.Error)
 	require.Equal(t, int64(1), nullScopeUpdate.RowsAffected)
+	nullExemptUpdate := DB.Model(&User{}).Where("username = ?", "eligible_exempt_null").Update("discord_gate_exempt", nil)
+	require.NoError(t, nullExemptUpdate.Error)
+	require.Equal(t, int64(1), nullExemptUpdate.RowsAffected)
 
 	summary, err := GetDiscordGatePatrolEligibilitySummary(context.Background())
 	require.NoError(t, err)
@@ -50,19 +54,45 @@ func TestGetDiscordGatePatrolEligibilitySummary(t *testing.T) {
 
 	assert.Equal(t, int64(len(users)), summary.TotalUsers)
 	assert.Equal(t, eligible, summary.Eligible)
-	assert.Equal(t, int64(3), summary.Eligible)
+	assert.Equal(t, int64(4), summary.Eligible)
 	assert.Contains(t, candidateNames, "eligible_scope_null")
+	assert.Contains(t, candidateNames, "eligible_exempt_null")
 	assert.Equal(t, int64(1), summary.Disabled)
 	assert.Equal(t, int64(2), summary.AdminOrRoot)
 	assert.Equal(t, int64(1), summary.Exempt)
 	assert.Equal(t, int64(1), summary.MissingDiscordBinding)
 	assert.Equal(t, int64(1), summary.MissingRefreshToken)
 	assert.Equal(t, int64(1), summary.GateNotPassed)
-	assert.Equal(t, int64(7), summary.ScopeOK)
+	assert.Equal(t, int64(8), summary.ScopeOK)
 	assert.Equal(t, int64(3), summary.ScopeUnknown)
 	assert.Equal(t, int64(1), summary.ScopeMissingGuilds)
 	assert.Equal(t, int64(1), summary.ScopeMissingGuildsMembersRead)
 	assert.Equal(t, int64(1), summary.RetryWaiting)
+}
+
+func TestDiscordGatePatrolEligibilitySummaryClassifiesNullBuckets(t *testing.T) {
+	truncateTables(t)
+	users := []User{
+		{Username: "null_status", Role: common.RoleCommonUser, AffCode: "null-status-aff", DiscordId: "d1", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK},
+		{Username: "null_discord", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, AffCode: "null-discord-aff", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK},
+		{Username: "null_refresh", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, AffCode: "null-refresh-aff", DiscordId: "d2", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK},
+		{Username: "null_gate_passed", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, AffCode: "null-gate-aff", DiscordId: "d3", DiscordRefreshToken: "rt", DiscordGateScopeStatus: DiscordGateScopeStatusOK},
+	}
+	for i := range users {
+		require.NoError(t, DB.Create(&users[i]).Error)
+	}
+	require.NoError(t, DB.Model(&User{}).Where("username = ?", "null_status").Update("status", nil).Error)
+	require.NoError(t, DB.Model(&User{}).Where("username = ?", "null_discord").Update("discord_id", nil).Error)
+	require.NoError(t, DB.Model(&User{}).Where("username = ?", "null_refresh").Update("discord_refresh_token", nil).Error)
+	require.NoError(t, DB.Model(&User{}).Where("username = ?", "null_gate_passed").Update("discord_gate_passed", nil).Error)
+
+	summary, err := GetDiscordGatePatrolEligibilitySummary(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), summary.Disabled)
+	assert.Equal(t, int64(1), summary.MissingDiscordBinding)
+	assert.Equal(t, int64(1), summary.MissingRefreshToken)
+	assert.Equal(t, int64(1), summary.GateNotPassed)
+	assert.Equal(t, int64(2), summary.ScopeOK)
 }
 
 func TestGetDiscordGatePatrolEligibilitySummaryIgnoresSoftDeletedUsers(t *testing.T) {

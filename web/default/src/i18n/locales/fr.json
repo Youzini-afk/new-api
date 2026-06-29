@@ -5592,7 +5592,6 @@
     "Concurrent Discord API workers. (1–64)": "Concurrent Discord API workers. (1–64)",
     "Discord API rate limit across workers. (1–100)": "Discord API rate limit across workers. (1–100)",
     "Eligible": "Eligible",
-    "Total users": "Total users",
     "Missing refresh token": "Missing refresh token",
     "Need reauthorization": "Need reauthorization",
     "Gate not passed": "Gate not passed",
@@ -5619,6 +5618,15 @@
     "Click Run banned-server patrol now to start a manual check.": "Click Run banned-server patrol now to start a manual check.",
     "Checks only the configured `ban_groups`. Users are banned only on confirmed membership in a banned server.": "Checks only the configured `ban_groups`. Users are banned only on confirmed membership in a banned server.",
     "Supports users with the older Discord authorization (no guilds scope) by checking specific banned servers directly.": "Supports users with the older Discord authorization (no guilds scope) by checking specific banned servers directly.",
-    "Does not enforce allow groups.": "Does not enforce allow groups."
+    "Does not enforce allow groups.": "Does not enforce allow groups.",
+    "All users (system)": "All users (system)",
+    "Eligible = users the full patrol can check. All users = every account in the system.": "Eligible = users the full patrol can check. All users = every account in the system.",
+    "Users needing reauthorization or with missing scopes are excluded from full gate patrol. Run the Banned-server patrol below to check them by direct banned-server membership.": "Users needing reauthorization or with missing scopes are excluded from full gate patrol. Run the Banned-server patrol below to check them by direct banned-server membership.",
+    "Failed to load patrol status. Click Refresh status to retry.": "Failed to load patrol status. Click Refresh status to retry.",
+    "Failed to load patrol eligibility. Click Refresh status to retry.": "Failed to load patrol eligibility. Click Refresh status to retry.",
+    "Failed to load ban patrol status. Click Refresh status to retry.": "Failed to load ban patrol status. Click Refresh status to retry.",
+    "Eligibility updated": "Eligibility updated",
+    "Batch size must be an integer between 50 and 100000.": "Batch size must be an integer between 50 and 100000.",
+    "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.": "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol."
   }
 }

@@ -292,8 +292,9 @@ export const STATIC_I18N_KEYS = [
   'Workers',
   '{{processed}} of {{total}} users checked.',
   // Discord Gate Patrol — eligibility summary card labels.
+  'All users (system)',
+  'Eligible = users the full patrol can check. All users = every account in the system.',
   'Eligible',
-  'Total users',
   'Missing refresh token',
   'Need reauthorization',
   'Gate not passed',
@@ -308,7 +309,13 @@ export const STATIC_I18N_KEYS = [
   'Patrol eligibility',
   'Not loaded',
   'Eligibility data unavailable. Click Refresh status to load.',
+  'Failed to load patrol eligibility. Click Refresh status to retry.',
+  'Eligibility updated',
+  'Users needing reauthorization or with missing scopes are excluded from full gate patrol. Run the Banned-server patrol below to check them by direct banned-server membership.',
   'Only eligible users are checked. The rest are skipped for the reasons above.',
+  // Discord Gate Patrol — status panel load-error.
+  'Failed to load patrol status. Click Refresh status to retry.',
+  'Failed to load',
   // Discord Banned-server patrol — panel labels.
   'Ban',
   'Banned-server patrol',
@@ -322,6 +329,9 @@ export const STATIC_I18N_KEYS = [
   'Checks only the configured `ban_groups`. Users are banned only on confirmed membership in a banned server.',
   'Supports users with the older Discord authorization (no guilds scope) by checking specific banned servers directly.',
   'Does not enforce allow groups.',
+  'Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.',
+  'Failed to load ban patrol status. Click Refresh status to retry.',
+  'Batch size must be an integer between 50 and 100000.',
 
   // Games (Phase 7)
   'Lottery',

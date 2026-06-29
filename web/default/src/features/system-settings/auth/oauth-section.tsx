@@ -1285,6 +1285,28 @@ const DISCORD_PATROL_OUTCOME_LABELS: Record<string, string> = {
 }
 
 const DISCORD_PATROL_POLL_INTERVAL_MS = 3000
+const DISCORD_PATROL_BATCH_MIN = 50
+const DISCORD_PATROL_BATCH_MAX = 100000
+
+/**
+ * Parses the manual batch-size override input.
+ * Returns `undefined` when the operator left the field empty (meaning
+ * "use the saved max batch size"), a valid integer in [50, 100000] when
+ * the input is acceptable, or `null` to signal an *invalid* entry that
+ * must not be submitted. Callers distinguish the three states.
+ */
+function parseBatchSizeInput(raw: string): number | undefined | null {
+  const trimmed = raw.trim()
+  if (trimmed === '') return undefined
+  // Reject anything that isn't a base-10 integer (no decimals, no exponents).
+  if (!/^\d+$/.test(trimmed)) return null
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed)) return null
+  if (parsed < DISCORD_PATROL_BATCH_MIN || parsed > DISCORD_PATROL_BATCH_MAX) {
+    return null
+  }
+  return parsed
+}
 
 function isPatrolActive(task: DiscordGatePatrolTask | null) {
   return task?.status === 'pending' || task?.status === 'running'
@@ -1319,8 +1341,13 @@ function patrolStatusTone(status?: string): string {
 function DiscordGatePatrolControls(props: { children: ReactNode }) {
   const { t } = useTranslation()
   const [task, setTask] = useState<DiscordGatePatrolTask | null>(null)
+  const [taskLoadError, setTaskLoadError] = useState(false)
   const [eligibility, setEligibility] =
     useState<DiscordGatePatrolEligibility | null>(null)
+  const [eligibilityLoadError, setEligibilityLoadError] = useState(false)
+  const [eligibilityUpdatedAt, setEligibilityUpdatedAt] = useState<number | null>(
+    null
+  )
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingEligibility, setIsLoadingEligibility] = useState(false)
   const [isStarting, setIsStarting] = useState(false)
@@ -1336,8 +1363,9 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
       } else {
         setTask(null)
       }
+      setTaskLoadError(false)
     } catch {
-      /* ignore — refetch button is available */
+      setTaskLoadError(true)
     } finally {
       setIsLoading(false)
     }
@@ -1349,11 +1377,15 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
       const res = await getDiscordGatePatrolEligibility()
       if (res.success && res.data) {
         setEligibility(res.data)
+        setEligibilityLoadError(false)
+        setEligibilityUpdatedAt(Date.now())
       } else {
         setEligibility(null)
+        setEligibilityLoadError(false)
+        setEligibilityUpdatedAt(Date.now())
       }
     } catch {
-      /* ignore — refetch button is available */
+      setEligibilityLoadError(true)
     } finally {
       setIsLoadingEligibility(false)
     }
@@ -1369,7 +1401,20 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
     refreshAll()
   }, [refreshAll])
 
+  // When a patrol transitions out of running/pending into a terminal state,
+  // eligibility has shifted (users moved into retry_waiting, gate_not_passed,
+  // etc.), so refetch it once.
   const taskStatus = task?.status
+  const prevTaskStatusRef = useRef(taskStatus)
+  useEffect(() => {
+    const prev = prevTaskStatusRef.current
+    prevTaskStatusRef.current = taskStatus
+    if (prev === undefined) return
+    if (prev !== 'pending' && prev !== 'running') return
+    if (taskStatus === 'pending' || taskStatus === 'running') return
+    void fetchEligibility()
+  }, [taskStatus, fetchEligibility])
+
   useEffect(() => {
     if (taskStatus !== 'pending' && taskStatus !== 'running') return
     const interval = window.setInterval(() => {
@@ -1381,14 +1426,15 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
   }, [taskStatus, fetchTask])
 
   const handleRun = async () => {
+    const parsed = parseBatchSizeInput(batchSizeInput)
+    if (parsed === null) {
+      toast.error(t('Batch size must be an integer between 50 and 100000.'))
+      return
+    }
     setIsStarting(true)
     try {
-      const trimmed = batchSizeInput.trim()
-      const parsed = trimmed === '' ? Number.NaN : Number(trimmed)
       const request =
-        Number.isFinite(parsed) && parsed > 0
-          ? { batch_size: parsed }
-          : undefined
+        parsed === undefined ? undefined : { batch_size: parsed }
       const res = await startDiscordGatePatrolTask(request)
       if (!res.success || !res.data) {
         throw new Error(res.message || t('Failed to start patrol batch'))
@@ -1420,6 +1466,91 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
     (eligibility?.scope_unknown ?? 0) +
     (eligibility?.scope_missing_guilds ?? 0) +
     (eligibility?.scope_missing_guilds_members_read ?? 0)
+
+  let statusBadgeLabel: string
+  if (task) {
+    statusBadgeLabel = t(patrolStatusLabelKey(task.status))
+  } else if (taskLoadError) {
+    statusBadgeLabel = t('Failed to load')
+  } else {
+    statusBadgeLabel = t('No patrol has run yet')
+  }
+
+  const statusBadgeTone = task ? patrolStatusTone(task.status) : ''
+
+  let statusBody: ReactNode
+  if (taskLoadError && !task) {
+    statusBody = (
+      <div className='text-destructive text-xs'>
+        {t('Failed to load patrol status. Click Refresh status to retry.')}
+      </div>
+    )
+  } else if (!task) {
+    statusBody = (
+      <div className='text-muted-foreground text-xs'>
+        {t('Click Run patrol batch now to start a manual check.')}
+      </div>
+    )
+  } else {
+    statusBody = (
+      <>
+        <div className='text-muted-foreground mb-2 grid gap-1 text-xs sm:grid-cols-3'>
+          <div>
+            <span className='text-foreground font-medium'>
+              {t('Mode')}:{' '}
+            </span>
+            {t(patrolModeLabelKey(mode))}
+          </div>
+          <div>
+            <span className='text-foreground font-medium'>
+              {t('Updated')}:{' '}
+            </span>
+            {formatTimestampToDate(task.updated_at)}
+          </div>
+          <div className='truncate'>
+            <span className='text-foreground font-medium'>
+              {t('Task ID')}:{' '}
+            </span>
+            <span title={task.task_id}>{task.task_id}</span>
+          </div>
+        </div>
+
+        {(active || progress > 0 || total > 0) && (
+          <>
+            <Progress value={progress} />
+            <div className='text-muted-foreground mt-2 text-xs'>
+              {t('{{processed}} of {{total}} users checked.', {
+                processed,
+                total,
+              })}
+            </div>
+          </>
+        )}
+        {task.status === 'failed' && task.error && (
+          <div className='text-destructive mt-2 text-xs'>{task.error}</div>
+        )}
+        {hasCounts && (
+          <div className='mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+            {Object.entries(counts).map(([key, count]) => (
+              <span key={key} className='text-muted-foreground'>
+                <span className='text-foreground font-medium'>
+                  {t(DISCORD_PATROL_OUTCOME_LABELS[key] ?? key)}:
+                </span>{' '}
+                {count}
+              </span>
+            ))}
+          </div>
+        )}
+        {task.result?.circuit_breaker && (
+          <div className='text-destructive mt-2 text-xs'>
+            {t(
+              'Circuit breaker tripped: too many transient errors. Try again later.'
+            )}
+          </div>
+        )}
+      </>
+    )
+  }
 
   return (
     <div className='grid gap-x-6 gap-y-6 lg:grid-cols-2'>
@@ -1468,87 +1599,26 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
             <span className='font-medium'>{t('Current patrol status')}</span>
             {task ? (
               <span
-                className={`rounded-full border px-2 py-0.5 text-xs font-medium ${patrolStatusTone(task.status)}`}
+                className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusBadgeTone}`}
               >
-                {t(patrolStatusLabelKey(task.status))}
+                {statusBadgeLabel}
               </span>
             ) : (
               <span className='text-muted-foreground text-xs'>
-                {t('No patrol has run yet')}
+                {statusBadgeLabel}
               </span>
             )}
           </div>
 
-          {!task ? (
-            <div className='text-muted-foreground text-xs'>
-              {t('Click Run patrol batch now to start a manual check.')}
-            </div>
-          ) : (
-            <>
-              <div className='text-muted-foreground mb-2 grid gap-1 text-xs sm:grid-cols-3'>
-                <div>
-                  <span className='text-foreground font-medium'>
-                    {t('Mode')}:{' '}
-                  </span>
-                  {t(patrolModeLabelKey(mode))}
-                </div>
-                <div>
-                  <span className='text-foreground font-medium'>
-                    {t('Updated')}:{' '}
-                  </span>
-                  {formatTimestampToDate(task.updated_at)}
-                </div>
-                <div className='truncate'>
-                  <span className='text-foreground font-medium'>
-                    {t('Task ID')}:{' '}
-                  </span>
-                  <span title={task.task_id}>{task.task_id}</span>
-                </div>
-              </div>
-
-              {(active || progress > 0 || total > 0) && (
-                <>
-                  <Progress value={progress} />
-                  <div className='text-muted-foreground mt-2 text-xs'>
-                    {t('{{processed}} of {{total}} users checked.', {
-                      processed,
-                      total,
-                    })}
-                  </div>
-                </>
-              )}
-              {task.status === 'failed' && task.error && (
-                <div className='text-destructive mt-2 text-xs'>
-                  {task.error}
-                </div>
-              )}
-              {hasCounts && (
-                <div className='mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
-                  {Object.entries(counts).map(([key, count]) => (
-                    <span key={key} className='text-muted-foreground'>
-                      <span className='text-foreground font-medium'>
-                        {t(DISCORD_PATROL_OUTCOME_LABELS[key] ?? key)}:
-                      </span>{' '}
-                      {count}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {task.result?.circuit_breaker && (
-                <div className='text-destructive mt-2 text-xs'>
-                  {t(
-                    'Circuit breaker tripped: too many transient errors. Try again later.'
-                  )}
-                </div>
-              )}
-            </>
-          )}
+          {statusBody}
         </div>
 
         <DiscordGatePatrolEligibilityCard
           eligibility={eligibility}
           scopeIssueTotal={scopeIssueTotal}
           isLoading={isLoadingEligibility}
+          loadError={eligibilityLoadError}
+          updatedAt={eligibilityUpdatedAt}
         />
 
         <DiscordBanPatrolPanel refreshRef={banPatrolRefreshRef} />
@@ -1561,6 +1631,8 @@ type DiscordGatePatrolEligibilityCardProps = {
   eligibility: DiscordGatePatrolEligibility | null
   scopeIssueTotal: number
   isLoading: boolean
+  loadError: boolean
+  updatedAt: number | null
 }
 
 function DiscordGatePatrolEligibilityCard(
@@ -1569,18 +1641,35 @@ function DiscordGatePatrolEligibilityCard(
   const { t } = useTranslation()
   const e = props.eligibility
 
+  let rightSlot: string
+  if (props.loadError) {
+    rightSlot = t('Failed to load')
+  } else if (props.isLoading) {
+    rightSlot = t('Refreshing...')
+  } else if (props.updatedAt) {
+    rightSlot = `${t('Eligibility updated')}: ${formatTimestampToDate(props.updatedAt)}`
+  } else {
+    rightSlot = t('Not loaded')
+  }
+
   if (!e) {
     return (
       <div className='rounded-md border p-3'>
         <div className='mb-2 flex items-center justify-between gap-3 text-sm'>
           <span className='font-medium'>{t('Patrol eligibility')}</span>
-          <span className='text-muted-foreground text-xs'>
-            {props.isLoading ? t('Refreshing...') : t('Not loaded')}
-          </span>
+          <span className='text-muted-foreground text-xs'>{rightSlot}</span>
         </div>
-        <div className='text-muted-foreground text-xs'>
-          {t('Eligibility data unavailable. Click Refresh status to load.')}
-        </div>
+        {props.loadError ? (
+          <div className='text-destructive text-xs'>
+            {t(
+              'Failed to load patrol eligibility. Click Refresh status to retry.'
+            )}
+          </div>
+        ) : (
+          <div className='text-muted-foreground text-xs'>
+            {t('Eligibility data unavailable. Click Refresh status to load.')}
+          </div>
+        )}
       </div>
     )
   }
@@ -1591,7 +1680,7 @@ function DiscordGatePatrolEligibilityCard(
     tone: 'ok' | 'warn' | 'danger' | 'default'
   }> = [
     { label: t('Eligible'), value: e.eligible, tone: 'ok' },
-    { label: t('Total users'), value: e.total_users, tone: 'default' },
+    { label: t('All users (system)'), value: e.total_users, tone: 'default' },
     {
       label: t('Missing refresh token'),
       value: e.missing_refresh_token,
@@ -1633,9 +1722,7 @@ function DiscordGatePatrolEligibilityCard(
     <div className='rounded-md border p-3'>
       <div className='mb-2 flex items-center justify-between gap-3 text-sm'>
         <span className='font-medium'>{t('Patrol eligibility')}</span>
-        <span className='text-muted-foreground text-xs'>
-          {props.isLoading ? t('Refreshing...') : ''}
-        </span>
+        <span className='text-muted-foreground text-xs'>{rightSlot}</span>
       </div>
 
       <div className='grid grid-cols-2 gap-3 sm:grid-cols-3'>
@@ -1651,6 +1738,12 @@ function DiscordGatePatrolEligibilityCard(
           </div>
         ))}
       </div>
+
+      <p className='text-muted-foreground mt-2 text-xs'>
+        {t(
+          'Eligible = users the full patrol can check. All users = every account in the system.'
+        )}
+      </p>
 
       <div className='mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
         {secondaryStats.map((stat) => (
@@ -1668,6 +1761,14 @@ function DiscordGatePatrolEligibilityCard(
           </span>
         ))}
       </div>
+
+      {props.scopeIssueTotal > 0 && (
+        <p className='mt-2 border-t border-rose-500/20 pt-2 text-xs text-rose-600 dark:text-rose-400'>
+          {t(
+            'Users needing reauthorization or with missing scopes are excluded from full gate patrol. Run the Banned-server patrol below to check them by direct banned-server membership.'
+          )}
+        </p>
+      )}
 
       <p className='text-muted-foreground mt-2 text-xs'>
         {t(
@@ -1700,6 +1801,7 @@ type DiscordBanPatrolPanelProps = {
 function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
   const { t } = useTranslation()
   const [task, setTask] = useState<DiscordGatePatrolTask | null>(null)
+  const [taskLoadError, setTaskLoadError] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isStarting, setIsStarting] = useState(false)
   const [batchSizeInput, setBatchSizeInput] = useState('')
@@ -1713,8 +1815,9 @@ function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
       } else {
         setTask(null)
       }
+      setTaskLoadError(false)
     } catch {
-      /* ignore — refetch button is available */
+      setTaskLoadError(true)
     } finally {
       setIsLoading(false)
     }
@@ -1740,14 +1843,15 @@ function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
   }, [taskStatus, fetchTask])
 
   const handleRun = async () => {
+    const parsed = parseBatchSizeInput(batchSizeInput)
+    if (parsed === null) {
+      toast.error(t('Batch size must be an integer between 50 and 100000.'))
+      return
+    }
     setIsStarting(true)
     try {
-      const trimmed = batchSizeInput.trim()
-      const parsed = trimmed === '' ? Number.NaN : Number(trimmed)
       const request =
-        Number.isFinite(parsed) && parsed > 0
-          ? { batch_size: parsed }
-          : undefined
+        parsed === undefined ? undefined : { batch_size: parsed }
       const res = await startDiscordBanPatrolTask(request)
       if (!res.success || !res.data) {
         throw new Error(res.message || t('Failed to start ban patrol batch'))
@@ -1775,6 +1879,89 @@ function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
   const hasCounts = Object.keys(counts).length > 0
   const mode = task?.payload?.mode
 
+  let banStatusBadgeLabel: string
+  if (task) {
+    banStatusBadgeLabel = t(patrolStatusLabelKey(task.status))
+  } else if (taskLoadError) {
+    banStatusBadgeLabel = t('Failed to load')
+  } else {
+    banStatusBadgeLabel = t('No ban patrol has run yet')
+  }
+
+  let banStatusBody: ReactNode
+  if (taskLoadError && !task) {
+    banStatusBody = (
+      <div className='text-destructive mt-3 text-xs'>
+        {t('Failed to load ban patrol status. Click Refresh status to retry.')}
+      </div>
+    )
+  } else if (!task) {
+    banStatusBody = (
+      <div className='text-muted-foreground mt-3 text-xs'>
+        {t('Click Run banned-server patrol now to start a manual check.')}
+      </div>
+    )
+  } else {
+    banStatusBody = (
+      <>
+        <div className='text-muted-foreground mb-2 mt-3 grid gap-1 text-xs sm:grid-cols-3'>
+          <div>
+            <span className='text-foreground font-medium'>
+              {t('Mode')}:{' '}
+            </span>
+            {t(patrolModeLabelKey(mode))}
+          </div>
+          <div>
+            <span className='text-foreground font-medium'>
+              {t('Updated')}:{' '}
+            </span>
+            {formatTimestampToDate(task.updated_at)}
+          </div>
+          <div className='truncate'>
+            <span className='text-foreground font-medium'>
+              {t('Task ID')}:{' '}
+            </span>
+            <span title={task.task_id}>{task.task_id}</span>
+          </div>
+        </div>
+
+        {(active || progress > 0 || total > 0) && (
+          <>
+            <Progress value={progress} />
+            <div className='text-muted-foreground mt-2 text-xs'>
+              {t('{{processed}} of {{total}} users checked.', {
+                processed,
+                total,
+              })}
+            </div>
+          </>
+        )}
+        {task.status === 'failed' && task.error && (
+          <div className='text-destructive mt-2 text-xs'>{task.error}</div>
+        )}
+        {hasCounts && (
+          <div className='mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+            {Object.entries(counts).map(([key, count]) => (
+              <span key={key} className='text-muted-foreground'>
+                <span className='text-foreground font-medium'>
+                  {t(DISCORD_PATROL_OUTCOME_LABELS[key] ?? key)}:
+                </span>{' '}
+                {count}
+              </span>
+            ))}
+          </div>
+        )}
+        {task.result?.circuit_breaker && (
+          <div className='text-destructive mt-2 text-xs'>
+            {t(
+              'Circuit breaker tripped: too many transient errors. Try again later.'
+            )}
+          </div>
+        )}
+      </>
+    )
+  }
+
   return (
     <div className='rounded-md border border-rose-500/30 bg-rose-500/[0.03] p-3'>
       <div className='mb-2 flex items-center justify-between gap-3 text-sm'>
@@ -1788,11 +1975,11 @@ function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
           <span
             className={`rounded-full border px-2 py-0.5 text-xs font-medium ${patrolStatusTone(task.status)}`}
           >
-            {t(patrolStatusLabelKey(task.status))}
+            {banStatusBadgeLabel}
           </span>
         ) : (
           <span className='text-muted-foreground text-xs'>
-            {t('No ban patrol has run yet')}
+            {banStatusBadgeLabel}
           </span>
         )}
       </div>
@@ -1809,6 +1996,11 @@ function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
           )}
         </li>
         <li>{t('Does not enforce allow groups.')}</li>
+        <li>
+          {t(
+            'Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.'
+          )}
+        </li>
       </ul>
 
       <div className='flex flex-wrap items-end gap-3'>
@@ -1840,68 +2032,7 @@ function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
         </Button>
       </div>
 
-      {!task ? (
-        <div className='text-muted-foreground mt-3 text-xs'>
-          {t('Click Run banned-server patrol now to start a manual check.')}
-        </div>
-      ) : (
-        <>
-          <div className='text-muted-foreground mb-2 mt-3 grid gap-1 text-xs sm:grid-cols-3'>
-            <div>
-              <span className='text-foreground font-medium'>
-                {t('Mode')}:{' '}
-              </span>
-              {t(patrolModeLabelKey(mode))}
-            </div>
-            <div>
-              <span className='text-foreground font-medium'>
-                {t('Updated')}:{' '}
-              </span>
-              {formatTimestampToDate(task.updated_at)}
-            </div>
-            <div className='truncate'>
-              <span className='text-foreground font-medium'>
-                {t('Task ID')}:{' '}
-              </span>
-              <span title={task.task_id}>{task.task_id}</span>
-            </div>
-          </div>
-
-          {(active || progress > 0 || total > 0) && (
-            <>
-              <Progress value={progress} />
-              <div className='text-muted-foreground mt-2 text-xs'>
-                {t('{{processed}} of {{total}} users checked.', {
-                  processed,
-                  total,
-                })}
-              </div>
-            </>
-          )}
-          {task.status === 'failed' && task.error && (
-            <div className='text-destructive mt-2 text-xs'>{task.error}</div>
-          )}
-          {hasCounts && (
-            <div className='mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
-              {Object.entries(counts).map(([key, count]) => (
-                <span key={key} className='text-muted-foreground'>
-                  <span className='text-foreground font-medium'>
-                    {t(DISCORD_PATROL_OUTCOME_LABELS[key] ?? key)}:
-                  </span>{' '}
-                  {count}
-                </span>
-              ))}
-            </div>
-          )}
-          {task.result?.circuit_breaker && (
-            <div className='text-destructive mt-2 text-xs'>
-              {t(
-                'Circuit breaker tripped: too many transient errors. Try again later.'
-              )}
-            </div>
-          )}
-        </>
-      )}
+      {banStatusBody}
 
       {isLoading && (
         <div className='text-muted-foreground mt-2 text-xs'>

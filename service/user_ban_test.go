@@ -142,7 +142,7 @@ func TestBanUserForDiscordBanPatrolAndDisableTokensRejectsChangedBinding(t *test
 	}).Error)
 	tok := seedBanTestToken(t, u.Id, "discordbantok")
 
-	err := BanUserForDiscordBanPatrolAndDisableTokens(u, "old-discord", "Discord ban patrol: banned guild matched", "ban_group_matched", common.GetTimestamp())
+	err := BanUserForDiscordBanPatrolAndDisableTokens(u, "old-discord", "encrypted-refresh", "Discord ban patrol: banned guild matched", "ban_group_matched", common.GetTimestamp())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "discord binding changed")
 
@@ -153,6 +153,123 @@ func TestBanUserForDiscordBanPatrolAndDisableTokensRejectsChangedBinding(t *test
 	var refreshedToken model.Token
 	require.NoError(t, model.DB.First(&refreshedToken, tok.Id).Error)
 	assert.Equal(t, common.TokenStatusEnabled, refreshedToken.Status)
+}
+
+func TestBanUserForDiscordPatrolAndDisableTokensRejectsChangedBinding(t *testing.T) {
+	truncateUserBanTables(t)
+	u := seedBanTestUser(t, "discordgateban", common.RoleCommonUser)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{
+		"discord_id":            "current-discord",
+		"discord_refresh_token": "encrypted-refresh",
+		"discord_gate_passed":   true,
+	}).Error)
+	tok := seedBanTestToken(t, u.Id, "discordgatebantok")
+
+	err := BanUserForDiscordPatrolAndDisableTokens(u, "old-discord", "encrypted-refresh", "Discord gate patrol: banned guild matched", "ban_group_matched", "reauth", common.GetTimestamp())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "discord binding changed")
+
+	var refreshed model.User
+	require.NoError(t, model.DB.First(&refreshed, u.Id).Error)
+	assert.Equal(t, common.UserStatusEnabled, refreshed.Status)
+	assert.True(t, refreshed.DiscordGatePassed)
+	var refreshedToken model.Token
+	require.NoError(t, model.DB.First(&refreshedToken, tok.Id).Error)
+	assert.Equal(t, common.TokenStatusEnabled, refreshedToken.Status)
+}
+
+func TestDiscordGatePatrolMutationsRejectExemptChange(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*model.User) error
+	}{
+		{
+			name: "ban",
+			run: func(u *model.User) error {
+				return BanUserForDiscordPatrolAndDisableTokens(u, "discord-exempt", "encrypted-refresh", "Discord gate patrol: banned guild matched", "ban_group_matched", "reauth", common.GetTimestamp())
+			},
+		},
+		{
+			name: "allow_failed",
+			run: func(u *model.User) error {
+				return MarkDiscordGateFailedAndDisableTokens(u, "discord-exempt", "encrypted-refresh", "allow_group_not_matched", "reauth", common.GetTimestamp())
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truncateUserBanTables(t)
+			u := seedBanTestUser(t, "discordexempt"+tc.name, common.RoleCommonUser)
+			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{
+				"discord_id":            "discord-exempt",
+				"discord_refresh_token": "encrypted-refresh",
+				"discord_gate_passed":   true,
+				"discord_gate_exempt":   true,
+			}).Error)
+			tok := seedBanTestToken(t, u.Id, "discordexempttok"+tc.name)
+
+			err := tc.run(u)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "exempt")
+
+			var refreshed model.User
+			require.NoError(t, model.DB.First(&refreshed, u.Id).Error)
+			assert.Equal(t, common.UserStatusEnabled, refreshed.Status)
+			assert.True(t, refreshed.DiscordGatePassed)
+			var refreshedToken model.Token
+			require.NoError(t, model.DB.First(&refreshedToken, tok.Id).Error)
+			assert.Equal(t, common.TokenStatusEnabled, refreshedToken.Status)
+		})
+	}
+}
+
+func TestDiscordPatrolMutationsRejectChangedRefreshToken(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*model.User) error
+	}{
+		{
+			name: "full_gate_ban",
+			run: func(u *model.User) error {
+				return BanUserForDiscordPatrolAndDisableTokens(u, "discord-refresh", "old-encrypted-refresh", "Discord gate patrol: banned guild matched", "ban_group_matched", "reauth", common.GetTimestamp())
+			},
+		},
+		{
+			name: "full_gate_allow_failed",
+			run: func(u *model.User) error {
+				return MarkDiscordGateFailedAndDisableTokens(u, "discord-refresh", "old-encrypted-refresh", "allow_group_not_matched", "reauth", common.GetTimestamp())
+			},
+		},
+		{
+			name: "ban_only",
+			run: func(u *model.User) error {
+				return BanUserForDiscordBanPatrolAndDisableTokens(u, "discord-refresh", "old-encrypted-refresh", "Discord ban patrol: banned guild matched", "ban_group_matched", common.GetTimestamp())
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truncateUserBanTables(t)
+			u := seedBanTestUser(t, "discordrefresh"+tc.name, common.RoleCommonUser)
+			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{
+				"discord_id":            "discord-refresh",
+				"discord_refresh_token": "new-encrypted-refresh",
+				"discord_gate_passed":   true,
+			}).Error)
+			tok := seedBanTestToken(t, u.Id, "discordrefreshtok"+tc.name)
+
+			err := tc.run(u)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "discord refresh token changed")
+
+			var refreshed model.User
+			require.NoError(t, model.DB.First(&refreshed, u.Id).Error)
+			assert.Equal(t, common.UserStatusEnabled, refreshed.Status)
+			assert.True(t, refreshed.DiscordGatePassed)
+			assert.Equal(t, "new-encrypted-refresh", refreshed.DiscordRefreshToken)
+			var refreshedToken model.Token
+			require.NoError(t, model.DB.First(&refreshedToken, tok.Id).Error)
+			assert.Equal(t, common.TokenStatusEnabled, refreshedToken.Status)
+		})
+	}
 }
 
 // TestAppendUserRemarkLine_DeDupes verifies the helper de-duplicates identical
