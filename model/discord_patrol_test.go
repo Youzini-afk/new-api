@@ -16,6 +16,7 @@ func TestGetDiscordGatePatrolEligibilitySummary(t *testing.T) {
 	users := []User{
 		{Username: "eligible_scope_ok", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d1", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK},
 		{Username: "eligible_scope_empty", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d2", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: ""},
+		{Username: "eligible_scope_null", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d13", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: ""},
 		{Username: "retry_waiting", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, DiscordId: "d3", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK, DiscordPatrolRetryAt: now + 3600},
 		{Username: "disabled", Status: common.UserStatusDisabled, Role: common.RoleCommonUser, DiscordId: "d4", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK},
 		{Username: "admin", Status: common.UserStatusEnabled, Role: common.RoleAdminUser, DiscordId: "d5", DiscordRefreshToken: "rt", DiscordGatePassed: true, DiscordGateScopeStatus: DiscordGateScopeStatusOK},
@@ -32,15 +33,25 @@ func TestGetDiscordGatePatrolEligibilitySummary(t *testing.T) {
 		users[i].AffCode = fmt.Sprintf("patrol-aff-%d", i)
 		require.NoError(t, DB.Create(&users[i]).Error)
 	}
+	nullScopeUpdate := DB.Model(&User{}).Where("username = ?", "eligible_scope_null").Update("discord_gate_scope_status", nil)
+	require.NoError(t, nullScopeUpdate.Error)
+	require.Equal(t, int64(1), nullScopeUpdate.RowsAffected)
 
 	summary, err := GetDiscordGatePatrolEligibilitySummary(context.Background())
 	require.NoError(t, err)
 	eligible, err := CountDiscordGatePatrolEligibleUsers(context.Background())
 	require.NoError(t, err)
+	candidates, err := FindDiscordGatePatrolEligibleUsers(context.Background(), 10)
+	require.NoError(t, err)
+	candidateNames := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidateNames[candidate.Username] = struct{}{}
+	}
 
 	assert.Equal(t, int64(len(users)), summary.TotalUsers)
 	assert.Equal(t, eligible, summary.Eligible)
-	assert.Equal(t, int64(2), summary.Eligible)
+	assert.Equal(t, int64(3), summary.Eligible)
+	assert.Contains(t, candidateNames, "eligible_scope_null")
 	assert.Equal(t, int64(1), summary.Disabled)
 	assert.Equal(t, int64(2), summary.AdminOrRoot)
 	assert.Equal(t, int64(1), summary.Exempt)
@@ -48,7 +59,7 @@ func TestGetDiscordGatePatrolEligibilitySummary(t *testing.T) {
 	assert.Equal(t, int64(1), summary.MissingRefreshToken)
 	assert.Equal(t, int64(1), summary.GateNotPassed)
 	assert.Equal(t, int64(7), summary.ScopeOK)
-	assert.Equal(t, int64(2), summary.ScopeUnknown)
+	assert.Equal(t, int64(3), summary.ScopeUnknown)
 	assert.Equal(t, int64(1), summary.ScopeMissingGuilds)
 	assert.Equal(t, int64(1), summary.ScopeMissingGuildsMembersRead)
 	assert.Equal(t, int64(1), summary.RetryWaiting)

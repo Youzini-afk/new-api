@@ -25,7 +25,7 @@ type DiscordGatePatrolEligibilitySummary struct {
 
 func discordGatePatrolEligibleQuery(ctx context.Context, now int64) *gorm.DB {
 	return DB.WithContext(ctx).Model(&User{}).Where(
-		"status = ? AND role < ? AND discord_gate_exempt = ? AND discord_id <> ? AND discord_refresh_token <> ? AND discord_gate_passed = ? AND (discord_gate_scope_status = ? OR discord_gate_scope_status = ?) AND (discord_patrol_retry_at = 0 OR discord_patrol_retry_at <= ?)",
+		"status = ? AND role < ? AND discord_gate_exempt = ? AND discord_id <> ? AND discord_refresh_token <> ? AND discord_gate_passed = ? AND (discord_gate_scope_status IS NULL OR discord_gate_scope_status = ? OR discord_gate_scope_status = ?) AND (discord_patrol_retry_at = 0 OR discord_patrol_retry_at <= ?)",
 		common.UserStatusEnabled,
 		common.RoleAdminUser,
 		false,
@@ -60,11 +60,11 @@ func GetDiscordGatePatrolEligibilitySummary(ctx context.Context) (DiscordGatePat
 		{&summary.MissingRefreshToken, DB.WithContext(ctx).Model(&User{}).Where("discord_id <> ? AND discord_refresh_token = ?", "", "")},
 		{&summary.GateNotPassed, DB.WithContext(ctx).Model(&User{}).Where("discord_id <> ? AND discord_refresh_token <> ? AND discord_gate_passed = ?", "", "", false)},
 		{&summary.ScopeOK, DB.WithContext(ctx).Model(&User{}).Where("discord_id <> ? AND discord_refresh_token <> ? AND discord_gate_scope_status = ?", "", "", DiscordGateScopeStatusOK)},
-		{&summary.ScopeUnknown, DB.WithContext(ctx).Model(&User{}).Where("discord_id <> ? AND discord_refresh_token <> ? AND (discord_gate_scope_status = ? OR discord_gate_scope_status = ?)", "", "", DiscordGateScopeStatusUnknown, "")},
+		{&summary.ScopeUnknown, DB.WithContext(ctx).Model(&User{}).Where("discord_id <> ? AND discord_refresh_token <> ? AND (discord_gate_scope_status IS NULL OR discord_gate_scope_status = ? OR discord_gate_scope_status = ?)", "", "", DiscordGateScopeStatusUnknown, "")},
 		{&summary.ScopeMissingGuilds, DB.WithContext(ctx).Model(&User{}).Where("discord_id <> ? AND discord_refresh_token <> ? AND discord_gate_scope_status = ?", "", "", DiscordGateScopeStatusMissingGuilds)},
 		{&summary.ScopeMissingGuildsMembersRead, DB.WithContext(ctx).Model(&User{}).Where("discord_id <> ? AND discord_refresh_token <> ? AND discord_gate_scope_status = ?", "", "", DiscordGateScopeStatusMissingGuildsMembersRead)},
 		{&summary.RetryWaiting, DB.WithContext(ctx).Model(&User{}).Where(
-			"status = ? AND role < ? AND discord_gate_exempt = ? AND discord_id <> ? AND discord_refresh_token <> ? AND discord_gate_passed = ? AND (discord_gate_scope_status = ? OR discord_gate_scope_status = ?) AND discord_patrol_retry_at > ?",
+			"status = ? AND role < ? AND discord_gate_exempt = ? AND discord_id <> ? AND discord_refresh_token <> ? AND discord_gate_passed = ? AND (discord_gate_scope_status IS NULL OR discord_gate_scope_status = ? OR discord_gate_scope_status = ?) AND discord_patrol_retry_at > ?",
 			common.UserStatusEnabled,
 			common.RoleAdminUser,
 			false,
@@ -92,7 +92,7 @@ func FindDiscordGatePatrolEligibleUsers(ctx context.Context, limit int) ([]*User
 	now := common.GetTimestamp()
 	var users []*User
 	err := DB.WithContext(ctx).Where(
-		"status = ? AND role < ? AND discord_gate_exempt = ? AND discord_id <> ? AND discord_refresh_token <> ? AND discord_gate_passed = ? AND (discord_gate_scope_status = ? OR discord_gate_scope_status = ?) AND (discord_patrol_retry_at = 0 OR discord_patrol_retry_at <= ?)",
+		"status = ? AND role < ? AND discord_gate_exempt = ? AND discord_id <> ? AND discord_refresh_token <> ? AND discord_gate_passed = ? AND (discord_gate_scope_status IS NULL OR discord_gate_scope_status = ? OR discord_gate_scope_status = ?) AND (discord_patrol_retry_at = 0 OR discord_patrol_retry_at <= ?)",
 		common.UserStatusEnabled,
 		common.RoleAdminUser,
 		false,
