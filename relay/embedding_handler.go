@@ -89,6 +89,10 @@ func EmbeddingHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
 	}
-	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+	usageDto, ok := usage.(*dto.Usage)
+	if !ok || usageDto == nil {
+		return types.NewOpenAIError(fmt.Errorf("invalid embedding usage type: %T", usage), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	service.PostTextConsumeQuota(c, info, usageDto, nil)
 	return nil
 }
