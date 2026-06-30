@@ -510,6 +510,24 @@ function BlockLogRow(props: {
     return <>-</>
   }
 
+  const renderRuleCell = () => {
+    if (!item.rule_pattern) return <>-</>
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span className='block max-w-[min(42vw,640px)] truncate font-mono text-xs'>
+              {item.rule_pattern}
+            </span>
+          }
+        />
+        <TooltipContent className='max-w-[min(90vw,760px)] font-mono text-xs break-all'>
+          {item.rule_pattern}
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+
   return (
     <TableRow>
       <TableCell>
@@ -531,9 +549,7 @@ function BlockLogRow(props: {
           '-'
         )}
       </TableCell>
-      <TableCell className='text-sm'>
-        {item.rule_pattern || '-'}
-      </TableCell>
+      <TableCell className='max-w-0 text-sm'>{renderRuleCell()}</TableCell>
       <TableCell>
         <Badge variant='outline' className='font-mono'>
           {item.http_status_code || '-'}
