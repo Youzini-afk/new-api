@@ -18,8 +18,6 @@
     "Only manually selected channel IDs will use request batching. Channel names and Base URLs are never used for automatic matching.": "仅手动选择的渠道 ID 会启用请求分批。系统绝不会根据渠道名称或 Base URL 自动匹配。",
     "{{count}} channels selected": "已选择 {{count}} 个渠道",
     "Search by channel ID, name, type, or Base URL": "按渠道 ID、名称、类型或 Base URL 搜索",
-    "Explicit channel selection only": "仅按明确选择的渠道生效",
-    "This feature never detects channels from ai.gitee.com, channel names, or Base URLs. It runs only for the channel IDs selected below.": "本功能不会根据 ai.gitee.com、渠道名称或 Base URL 识别渠道，只对下方选择的渠道 ID 生效。",
     "Enable request batching": "启用请求分批",
     "Split oversized Embedding and Rerank requests before sending them to selected upstream channels.": "将超出单批阈值的 Embedding 和 Rerank 请求拆分后发送到所选上游渠道。",
     "Channels where batching applies": "分批生效渠道",

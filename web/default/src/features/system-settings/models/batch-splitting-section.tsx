@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
-import { Info, ListChecks, ShieldCheck, X } from 'lucide-react'
+import { ListChecks, ShieldCheck, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -279,16 +279,6 @@ export function BatchSplittingSection({
             isSaveDisabled={!isDirty}
             isResetDisabled={!isDirty}
           />
-
-          <Alert>
-            <Info />
-            <AlertTitle>{t('Explicit channel selection only')}</AlertTitle>
-            <AlertDescription>
-              {t(
-                'This feature never detects channels from ai.gitee.com, channel names, or Base URLs. It runs only for the channel IDs selected below.'
-              )}
-            </AlertDescription>
-          </Alert>
 
           <FormField
             control={form.control}

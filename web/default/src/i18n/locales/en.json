@@ -18,8 +18,6 @@
     "Only manually selected channel IDs will use request batching. Channel names and Base URLs are never used for automatic matching.": "Only manually selected channel IDs will use request batching. Channel names and Base URLs are never used for automatic matching.",
     "{{count}} channels selected": "{{count}} channels selected",
     "Search by channel ID, name, type, or Base URL": "Search by channel ID, name, type, or Base URL",
-    "Explicit channel selection only": "Explicit channel selection only",
-    "This feature never detects channels from ai.gitee.com, channel names, or Base URLs. It runs only for the channel IDs selected below.": "This feature never detects channels from ai.gitee.com, channel names, or Base URLs. It runs only for the channel IDs selected below.",
     "Enable request batching": "Enable request batching",
     "Split oversized Embedding and Rerank requests before sending them to selected upstream channels.": "Split oversized Embedding and Rerank requests before sending them to selected upstream channels.",
     "Channels where batching applies": "Channels where batching applies",
