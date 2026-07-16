@@ -273,6 +273,10 @@ func UpdateOption(key string, value string) error {
 	if err != nil {
 		return err
 	}
+	normalizedValue, err = system_setting.NormalizeRelayBatchSplitOption(key, normalizedValue)
+	if err != nil {
+		return err
+	}
 	value = normalizedValue
 	// Save to database first
 	option := Option{
@@ -318,6 +322,10 @@ func UpdateOptionsBulk(values map[string]string) error {
 		// the bulk path either. Substitute the normalized JSON string for
 		// the original so the persisted shape stays stable.
 		normalizedValue, err := operation_setting.NormalizeShortMsgExtraBillingOption(k, v)
+		if err != nil {
+			return err
+		}
+		normalizedValue, err = system_setting.NormalizeRelayBatchSplitOption(k, normalizedValue)
 		if err != nil {
 			return err
 		}
@@ -741,6 +749,8 @@ func handleConfigUpdate(key, value string) bool {
 		ratio_setting.InvalidateExposedDataCache()
 	} else if configName == "theme" {
 		system_setting.UpdateAndSyncTheme()
+	} else if configName == "relay_batch_split" {
+		system_setting.RebuildRelayBatchSplitRuntime()
 	}
 
 	return true // 已处理

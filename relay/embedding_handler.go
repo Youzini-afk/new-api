@@ -18,6 +18,7 @@ import (
 
 func EmbeddingHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
+	clearRelayBatchSplitInfo(c, info)
 
 	embeddingReq, ok := info.Request.(*dto.EmbeddingRequest)
 	if !ok {
@@ -55,6 +56,15 @@ func EmbeddingHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return newAPIErrorFromParamOverride(err)
 		}
+	}
+
+	if handled, usage, batchErr := maybeRelayEmbeddingInBatches(c, info, jsonData); handled {
+		if batchErr != nil {
+			service.ResetStatusCode(batchErr, c.GetString("status_code_mapping"))
+			return batchErr
+		}
+		service.PostTextConsumeQuota(c, info, usage, nil)
+		return nil
 	}
 
 	logger.LogDebug(c, "converted embedding request body: %s", jsonData)

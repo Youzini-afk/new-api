@@ -408,6 +408,16 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 		option.Value = normalized
+	case system_setting.RelayBatchSplitOptionKey:
+		_, normalized, err := system_setting.ParseAndValidateRelayBatchSplitConfig(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		option.Value = normalized
 	case "relay_error_governance":
 		var cfg system_setting.RelayErrorGovernanceSetting
 		if err := common.UnmarshalJsonStr(option.Value.(string), &cfg); err != nil {

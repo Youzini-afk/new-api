@@ -20,6 +20,7 @@ import { ChannelAffinitySection } from '../general/channel-affinity'
 import { IoNetDeploymentSettingsSection } from '../integrations/ionet-deployment-settings-section'
 import type { ModelSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { BatchSplittingSection } from './batch-splitting-section'
 import { ClaudeSettingsCard } from './claude-settings-card'
 import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
@@ -86,6 +87,18 @@ const MODELS_SECTIONS = [
           'monitor_setting.channel_test_mode':
             settings['monitor_setting.channel_test_mode'],
         }}
+      />
+    ),
+  },
+  {
+    id: 'batch-splitting',
+    titleKey: 'Embedding & Rerank Batching',
+    build: (settings: ModelSettings) => (
+      <BatchSplittingSection
+        defaultValue={
+          settings['relay_batch_split.config'] ??
+          '{"version":1,"enabled":false,"channel_ids":[],"embedding":{"enabled":true,"batch_size":25,"concurrency":2,"max_items":1000},"rerank":{"enabled":false,"batch_size":25,"concurrency":1,"max_items":200}}'
+        }
       />
     ),
   },

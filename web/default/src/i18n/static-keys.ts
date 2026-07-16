@@ -56,6 +56,7 @@ export const STATIC_I18N_KEYS = [
   'Integrations',
   'Models',
   'Routing Reliability',
+  'Embedding & Rerank Batching',
   'Maintenance',
   'Relay Governance',
   'Relay Error Governance',

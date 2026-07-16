@@ -50,6 +50,43 @@ type RerankerInfo struct {
 	ReturnDocuments bool
 }
 
+const ContextKeyBatchSplitInfo = "relay_batch_split_info"
+
+// BatchSplitInfo contains admin-only operational metadata. It deliberately
+// excludes request text, queries, and documents; content auditing continues to
+// use RelayInfo.Request, which always points at the original client request.
+type BatchSplitInfo struct {
+	Kind            string
+	ChannelID       int
+	ItemCount       int
+	BatchSize       int
+	ChunkCount      int
+	Concurrency     int
+	CompletedChunks int
+	FailedChunk     int
+	DurationMs      int64
+}
+
+func (info *BatchSplitInfo) AdminMap() map[string]interface{} {
+	if info == nil {
+		return nil
+	}
+	result := map[string]interface{}{
+		"kind":             info.Kind,
+		"channel_id":       info.ChannelID,
+		"item_count":       info.ItemCount,
+		"batch_size":       info.BatchSize,
+		"chunk_count":      info.ChunkCount,
+		"concurrency":      info.Concurrency,
+		"completed_chunks": info.CompletedChunks,
+		"duration_ms":      info.DurationMs,
+	}
+	if info.FailedChunk > 0 {
+		result["failed_chunk"] = info.FailedChunk
+	}
+	return result
+}
+
 type BuildInToolInfo struct {
 	ToolName          string
 	CallCount         int
@@ -168,6 +205,7 @@ type RelayInfo struct {
 	ParamOverrideAudit                    []string
 	ResponseText                          string
 	ResponseTextTruncated                 bool
+	BatchSplit                            *BatchSplitInfo
 
 	// UpstreamRequestBodySize is the byte size of the marshaled upstream request
 	// body. It is set when the body is wrapped in a BodyStorage (see

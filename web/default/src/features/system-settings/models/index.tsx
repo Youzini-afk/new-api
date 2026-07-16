@@ -73,6 +73,8 @@ const defaultModelSettings: ModelSettings = {
   'monitor_setting.auto_test_channel_enabled': false,
   'monitor_setting.auto_test_channel_minutes': 10,
   'monitor_setting.channel_test_mode': 'scheduled_all',
+  'relay_batch_split.config':
+    '{"version":1,"enabled":false,"channel_ids":[],"embedding":{"enabled":true,"batch_size":25,"concurrency":2,"max_items":1000},"rerank":{"enabled":false,"batch_size":25,"concurrency":1,"max_items":200}}',
   'channel_affinity_setting.enabled': false,
   'channel_affinity_setting.switch_on_success': true,
   'channel_affinity_setting.keep_on_channel_disabled': false,

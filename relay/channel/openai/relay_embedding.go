@@ -52,7 +52,7 @@ func OpenaiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	request, _ := info.Request.(*dto.EmbeddingRequest)
-	if err := validateOpenAIEmbeddingResponse(request, &embeddingResponse); err != nil {
+	if err := ValidateOpenAIEmbeddingResponse(request, &embeddingResponse); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
@@ -86,7 +86,7 @@ func OpenaiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	return &embeddingResponse.Usage, nil
 }
 
-func validateOpenAIEmbeddingResponse(request *dto.EmbeddingRequest, response *dto.FlexibleEmbeddingResponse) error {
+func ValidateOpenAIEmbeddingResponse(request *dto.EmbeddingRequest, response *dto.FlexibleEmbeddingResponse) error {
 	if response == nil || len(response.Data) == 0 {
 		return fmt.Errorf("embedding response data is empty")
 	}
