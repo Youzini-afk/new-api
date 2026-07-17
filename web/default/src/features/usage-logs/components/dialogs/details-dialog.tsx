@@ -629,6 +629,15 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showAdminIp =
     !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
+  const uaAutoBanAudit =
+    isManage && props.isAdmin ? adminInfo?.ua_auto_ban : undefined
+  let uaAutoBanUserAgent = t('N/A')
+  if (uaAutoBanAudit?.is_empty_ua) {
+    uaAutoBanUserAgent = t('Empty')
+  }
+  if (uaAutoBanAudit?.user_agent) {
+    uaAutoBanUserAgent = uaAutoBanAudit.user_agent
+  }
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
       ? ([
@@ -1099,6 +1108,69 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 mono
               />
             )}
+          </DetailSection>
+        )}
+
+        {/* UA auto-ban evidence (type=3, admin only) */}
+        {uaAutoBanAudit && (
+          <DetailSection
+            icon={<ShieldCheck className='size-3.5' aria-hidden='true' />}
+            label={t('UA Block Detail')}
+          >
+            {uaAutoBanAudit.rule_name && (
+              <DetailRow
+                label={t('Rule')}
+                value={uaAutoBanAudit.rule_name}
+                mono
+              />
+            )}
+            {uaAutoBanAudit.rule_pattern && (
+              <DetailRow
+                label={t('Rule pattern')}
+                value={uaAutoBanAudit.rule_pattern}
+                mono
+              />
+            )}
+            <DetailRow
+              label={t('User Agent')}
+              value={uaAutoBanUserAgent}
+              mono
+            />
+            {uaAutoBanAudit.client_ip && (
+              <DetailRow
+                label={t('IP Address')}
+                value={uaAutoBanAudit.client_ip}
+                mono
+              />
+            )}
+            {uaAutoBanAudit.request_path && (
+              <DetailRow
+                label={t('Request path')}
+                value={uaAutoBanAudit.request_path}
+                mono
+              />
+            )}
+            {uaAutoBanAudit.ua_block_log_id != null &&
+              uaAutoBanAudit.ua_block_log_id > 0 && (
+                <DetailRow
+                  label={t('ID')}
+                  value={String(uaAutoBanAudit.ua_block_log_id)}
+                  mono
+                />
+              )}
+            <DetailRow
+              label={t('Status')}
+              value={
+                <StatusBadge
+                  label={
+                    uaAutoBanAudit.ua_log_persisted ? t('Success') : t('Failed')
+                  }
+                  variant={uaAutoBanAudit.ua_log_persisted ? 'green' : 'red'}
+                  size='sm'
+                  copyable={false}
+                />
+              }
+            />
           </DetailSection>
         )}
 

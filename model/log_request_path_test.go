@@ -364,7 +364,13 @@ func TestFormatUserLogsStripsSensitiveAuditFields(t *testing.T) {
 				"request_params":          map[string]interface{}{"prompt": "secret prompt", "temperature": 0.5},
 				"response_text":           "secret model output",
 				"response_text_truncated": true,
-				"admin_info":              map[string]interface{}{"use_channel": []interface{}{1}},
+				"admin_info": map[string]interface{}{
+					"use_channel": []interface{}{1},
+					"ua_auto_ban": map[string]interface{}{
+						"user_agent": "blocked-client/1.0",
+						"client_ip":  "198.51.100.9",
+					},
+				},
 				"stream_status":           map[string]interface{}{"status": "ok"},
 				"is_model_mapped":         true,
 				"upstream_model_name":     "provider-secret-model",

@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/types"
 )
+
+const uaBlockAuditWriteTimeout = 2 * time.Second
 
 // UABlockLogCreateInput captures the data needed to persist a UA interception
 // record. The relay chain writes these records via BuildUABlockedErrorAndRecord,
@@ -34,8 +37,7 @@ type UABlockLogCreateInput struct {
 	MatchedAt         int64
 }
 
-// CreateUABlockLog persists a UA interception record. No auto-ban, no ban_sync.
-func CreateUABlockLog(ctx context.Context, input UABlockLogCreateInput) error {
+func createUABlockLogRecord(ctx context.Context, input UABlockLogCreateInput) (int, error) {
 	record := &model.UABlockLog{
 		UserId:            input.UserId,
 		Username:          input.Username,
@@ -54,7 +56,54 @@ func CreateUABlockLog(ctx context.Context, input UABlockLogCreateInput) error {
 		BanReason:         input.BanReason,
 		MatchedAt:         input.MatchedAt,
 	}
-	return model.CreateUABlockLog(ctx, record)
+	if err := model.CreateUABlockLog(ctx, record); err != nil {
+		return 0, err
+	}
+	return record.Id, nil
+}
+
+// CreateUABlockLog persists a UA interception record. No auto-ban, no ban_sync.
+func CreateUABlockLog(ctx context.Context, input UABlockLogCreateInput) error {
+	_, err := createUABlockLogRecord(ctx, input)
+	return err
+}
+
+type uaBlockLogPersistence struct {
+	LogId    int
+	Degraded bool
+	Err      error
+}
+
+func createUABlockLogWithTimeout(baseCtx context.Context, input UABlockLogCreateInput) (int, error) {
+	ctx, cancel := context.WithTimeout(baseCtx, uaBlockAuditWriteTimeout)
+	defer cancel()
+	return createUABlockLogRecord(ctx, input)
+}
+
+// persistUABlockLogForIntercept writes a UA audit independently from client
+// cancellation. If the full raw-request record fails, it retries once with the
+// core UA evidence only. Audit failure is reported to the caller but never
+// affects the blocking response or the durable user ban.
+func persistUABlockLogForIntercept(requestCtx context.Context, input UABlockLogCreateInput) uaBlockLogPersistence {
+	baseCtx := context.Background()
+	if requestCtx != nil {
+		baseCtx = context.WithoutCancel(requestCtx)
+	}
+
+	logId, err := createUABlockLogWithTimeout(baseCtx, input)
+	if err == nil {
+		return uaBlockLogPersistence{LogId: logId}
+	}
+
+	fullErr := err
+	input.RequestHeadersRaw = ""
+	input.RequestParamsRaw = ""
+	logId, err = createUABlockLogWithTimeout(baseCtx, input)
+	if err == nil {
+		return uaBlockLogPersistence{LogId: logId, Degraded: true, Err: fullErr}
+	}
+
+	return uaBlockLogPersistence{Err: errors.Join(fullErr, err)}
 }
 
 // UABlockLogListFilter captures the query parameters accepted by the admin
@@ -348,43 +397,51 @@ func AppendUABlockLogRemark(ctx context.Context, logId int, operatorUserId int, 
 	return model.InvalidateUserCache(user.Id)
 }
 
-// buildUAAutoBanReason builds a human-readable local ban reason for a UA hit.
-func buildUAAutoBanReason(ruleName string, pattern string) string {
-	trimmedName := strings.TrimSpace(ruleName)
-	trimmedPattern := strings.TrimSpace(pattern)
-	if trimmedName != "" {
-		if trimmedPattern != "" {
-			return fmt.Sprintf("UA 拦截自动封禁：%s（%s）", trimmedName, trimmedPattern)
-		}
-		return fmt.Sprintf("UA 拦截自动封禁：%s", trimmedName)
-	}
-	if trimmedPattern != "" {
-		return fmt.Sprintf("UA 拦截自动封禁：%s", trimmedPattern)
-	}
-	return "UA 拦截自动封禁"
+type UAAutoBanEvidence struct {
+	RuleName    string
+	RulePattern string
+	UserAgent   string
+	ClientIP    string
+	RequestPath string
 }
 
-// buildUAAutoBanRemark builds the single remark line appended to the user
-// when a UA hit triggers local auto-ban.
-func buildUAAutoBanRemark(ruleName string, pattern string) string {
-	trimmedName := strings.TrimSpace(ruleName)
-	trimmedPattern := strings.TrimSpace(pattern)
-	if trimmedName != "" {
-		if trimmedPattern != "" {
-			return fmt.Sprintf("[UA命中]%s(%s)", trimmedName, trimmedPattern)
-		}
-		return fmt.Sprintf("[UA命中]%s", trimmedName)
+func truncateUAAutoBanValue(value string, maxRunes int) string {
+	value = strings.TrimSpace(strings.ToValidUTF8(value, ""))
+	if maxRunes <= 0 {
+		return ""
 	}
-	if trimmedPattern != "" {
-		return fmt.Sprintf("[UA命中]%s", trimmedPattern)
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
 	}
-	return "[UA命中]"
+	return string(runes[:maxRunes]) + "…"
+}
+
+// buildUAAutoBanReason keeps the durable user remark concise while preserving
+// the most useful evidence: the rule identity and the exact incoming UA. The
+// full rule pattern remains available in the UA audit and admin-only log data.
+func buildUAAutoBanReason(evidence UAAutoBanEvidence) string {
+	rule := strings.TrimSpace(evidence.RuleName)
+	if rule == "" {
+		rule = strings.TrimSpace(evidence.RulePattern)
+	}
+	if rule == "" {
+		rule = "未命名规则"
+	}
+	rule = truncateUAAutoBanValue(rule, 64)
+
+	userAgent := truncateUAAutoBanValue(evidence.UserAgent, 140)
+	if userAgent == "" {
+		userAgent = "<空>"
+	}
+	return fmt.Sprintf("UA 拦截自动封禁：%s；原始 UA：%s", rule, userAgent)
 }
 
 // AutoBanUserForUABlockWithIP performs the LOCAL auto-ban for a UA regex /
-// empty-UA hit: bans user + disables tokens, appends remark, records manage log,
-// marks the client IP suspicious. Admin/root protected. No ban_sync.
-func AutoBanUserForUABlockWithIP(ctx context.Context, userId int, ruleName string, rulePattern string, clientIP string) (bool, string, error) {
+// empty-UA hit: bans user + disables tokens and marks the client IP suspicious.
+// Admin/root protected. The caller records the admin audit after the UA log
+// persistence attempt so it can include the resulting UA log ID/status.
+func AutoBanUserForUABlockWithIP(ctx context.Context, userId int, evidence UAAutoBanEvidence) (bool, string, error) {
 	if userId <= 0 {
 		return false, "", nil
 	}
@@ -398,33 +455,56 @@ func AutoBanUserForUABlockWithIP(ctx context.Context, userId int, ruleName strin
 	if user.Role >= common.RoleAdminUser {
 		return false, "", nil
 	}
-	reason := buildUAAutoBanReason(ruleName, rulePattern)
-	remarkLine := buildUAAutoBanRemark(ruleName, rulePattern)
-	trimmedIP := strings.TrimSpace(clientIP)
+	reason := buildUAAutoBanReason(evidence)
+	markCtx := context.Background()
+	if ctx != nil {
+		markCtx = context.WithoutCancel(ctx)
+	}
+	trimmedIP := strings.TrimSpace(evidence.ClientIP)
 	sourceLabel := "ua_auto_ban"
-	banContext := fmt.Sprintf("source=%s; rule=%s; pattern=%s", sourceLabel, strings.TrimSpace(ruleName), strings.TrimSpace(rulePattern))
-	markContext := fmt.Sprintf("UA 自动封禁命中：%s", strings.TrimSpace(rulePattern))
+	banContext := fmt.Sprintf(
+		"source=%s; rule=%s; pattern=%s; ua=%s; path=%s",
+		sourceLabel,
+		strings.TrimSpace(evidence.RuleName),
+		strings.TrimSpace(evidence.RulePattern),
+		strings.TrimSpace(evidence.UserAgent),
+		strings.TrimSpace(evidence.RequestPath),
+	)
+	markContext := reason
 	if user.Status == common.UserStatusDisabled {
 		reason = reason + "（已处于封禁状态）"
-		if _, appendErr := AppendUserRemarkLine(userId, remarkLine); appendErr != nil {
+		if _, appendErr := AppendUserRemarkLine(userId, reason); appendErr != nil {
 			common.SysLog("append ua autoban remark failed: " + appendErr.Error())
 		}
 		if err := model.DisableAllUserTokens(userId); err != nil {
 			return false, reason, err
 		}
-		// Already-disabled users still get a suspicious-IP mark + manage log.
-		markSuspiciousIP(ctx, user.Id, user.Username, trimmedIP, sourceLabel, markContext, banContext, reason)
+		// Already-disabled users still get a suspicious-IP mark.
+		markSuspiciousIP(markCtx, user.Id, user.Username, trimmedIP, sourceLabel, markContext, banContext, reason)
 		return false, reason, nil
 	}
 	if err := BanUserAndDisableTokens(user, reason); err != nil {
 		return false, "", err
 	}
-	if _, appendErr := AppendUserRemarkLine(userId, remarkLine); appendErr != nil {
-		common.SysLog("append ua autoban remark failed: " + appendErr.Error())
-	}
-	markSuspiciousIP(ctx, user.Id, user.Username, trimmedIP, sourceLabel, markContext, banContext, reason)
-	model.RecordLog(userId, model.LogTypeManage, reason)
+	markSuspiciousIP(markCtx, user.Id, user.Username, trimmedIP, sourceLabel, markContext, banContext, reason)
 	return true, reason, nil
+}
+
+func recordUAAutoBanManageLog(userId int, reason string, evidence UAAutoBanEvidence, persistence uaBlockLogPersistence) {
+	adminInfo := map[string]interface{}{
+		"ua_auto_ban": map[string]interface{}{
+			"rule_name":        strings.TrimSpace(evidence.RuleName),
+			"rule_pattern":     strings.TrimSpace(evidence.RulePattern),
+			"user_agent":       strings.TrimSpace(strings.ToValidUTF8(evidence.UserAgent, "")),
+			"client_ip":        strings.TrimSpace(evidence.ClientIP),
+			"request_path":     strings.TrimSpace(evidence.RequestPath),
+			"is_empty_ua":      strings.TrimSpace(evidence.UserAgent) == "",
+			"ua_block_log_id":  persistence.LogId,
+			"ua_log_persisted": persistence.LogId > 0,
+			"ua_log_degraded":  persistence.Degraded,
+		},
+	}
+	model.RecordLogWithAdminInfo(userId, model.LogTypeManage, reason, adminInfo)
 }
 
 // UABlockRecordContext is the minimal interface the relay controller exposes so
@@ -443,7 +523,8 @@ type UABlockRecordContext interface {
 
 // BuildUABlockedErrorAndRecord derives the (status, code, message) triple for
 // a blocked UA, runs local auto-ban when configured, and persists a UABlockLog
-// (with raw headers/params + the masked UA). No ban_sync / AutoBanSync.
+// (with masked raw headers/params + the normalized incoming UA). No ban_sync /
+// AutoBanSync.
 func BuildUABlockedErrorAndRecord(c UABlockRecordContext, hit *SensitiveRuleHit) (status int, code types.ErrorCode, errMsg error) {
 	fallbackMessage := setting.SensitiveUABlockedMessage
 	statusCode, errorCode, messageErr := BuildSensitiveBlockedError(hit, fallbackMessage)
@@ -461,6 +542,18 @@ func BuildUABlockedErrorAndRecord(c UABlockRecordContext, hit *SensitiveRuleHit)
 			ruleMessage = strings.TrimSpace(hit.Message)
 		}
 	}
+	userAgent := strings.TrimSpace(strings.ToValidUTF8(c.UserAgent(), ""))
+	evidence := UAAutoBanEvidence{
+		RuleName:    ruleName,
+		RulePattern: pattern,
+		UserAgent:   userAgent,
+		ClientIP:    c.ClientIP(),
+		RequestPath: c.RequestPath(),
+	}
+	requestHeadersRaw := c.RequestHeadersRaw()
+	requestParamsRaw := c.RequestParamsRaw()
+	matchedAt := common.GetTimestamp()
+
 	// Local auto-ban: for UA regex-rule hits, AutoBan on the hit; for empty-UA
 	// synthetic hits, the global CheckSensitiveOnEmptyUAAutoBanEnabled flag.
 	autoBanConfigured := false
@@ -474,7 +567,7 @@ func BuildUABlockedErrorAndRecord(c UABlockRecordContext, hit *SensitiveRuleHit)
 	autoBanned := false
 	banReason := ""
 	if autoBanConfigured {
-		banned, reason, err := AutoBanUserForUABlockWithIP(c.RequestContext(), c.UserID(), ruleName, pattern, c.ClientIP())
+		banned, reason, err := AutoBanUserForUABlockWithIP(c.RequestContext(), c.UserID(), evidence)
 		if err != nil {
 			common.SysLog("ua auto ban failed: " + err.Error())
 		} else {
@@ -483,29 +576,33 @@ func BuildUABlockedErrorAndRecord(c UABlockRecordContext, hit *SensitiveRuleHit)
 		}
 	}
 
-	userAgent := ""
-	if c != nil {
-		userAgent = c.UserAgent()
-	}
-	if err := CreateUABlockLog(c.RequestContext(), UABlockLogCreateInput{
+	persistence := persistUABlockLogForIntercept(c.RequestContext(), UABlockLogCreateInput{
 		UserId:            c.UserID(),
 		Username:          c.Username(),
-		IP:                c.ClientIP(),
+		IP:                evidence.ClientIP,
 		UserAgent:         userAgent,
-		RequestHeadersRaw: c.RequestHeadersRaw(),
-		RequestParamsRaw:  c.RequestParamsRaw(),
+		RequestHeadersRaw: requestHeadersRaw,
+		RequestParamsRaw:  requestParamsRaw,
 		RulePattern:       pattern,
 		RuleMessage:       ruleMessage,
 		ErrorCode:         string(errorCode),
 		HTTPStatusCode:    statusCode,
-		RequestPath:       c.RequestPath(),
+		RequestPath:       evidence.RequestPath,
 		IsEmptyUA:         strings.TrimSpace(userAgent) == "",
 		AutoBanConfigured: autoBanConfigured,
 		AutoBanned:        autoBanned,
 		BanReason:         banReason,
-		MatchedAt:         common.GetTimestamp(),
-	}); err != nil {
-		common.SysLog("create ua block log failed: " + err.Error())
+		MatchedAt:         matchedAt,
+	})
+	if persistence.Err != nil {
+		if persistence.LogId > 0 {
+			common.SysLog("create full ua block log failed; stored core evidence only: " + persistence.Err.Error())
+		} else {
+			common.SysLog("create ua block log failed after fallback: " + persistence.Err.Error())
+		}
+	}
+	if autoBanned {
+		recordUAAutoBanManageLog(c.UserID(), banReason, evidence, persistence)
 	}
 
 	return statusCode, errorCode, messageErr

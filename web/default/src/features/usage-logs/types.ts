@@ -111,6 +111,18 @@ export interface LogOtherData {
     admin_id?: number | string
     admin_role?: number
     auth_method?: 'session' | 'access_token' | string
+    // Local UA auto-ban evidence (type=3, admin only)
+    ua_auto_ban?: {
+      rule_name?: string
+      rule_pattern?: string
+      user_agent?: string
+      client_ip?: string
+      request_path?: string
+      is_empty_ua?: boolean
+      ua_block_log_id?: number
+      ua_log_persisted?: boolean
+      ua_log_degraded?: boolean
+    }
   }
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.

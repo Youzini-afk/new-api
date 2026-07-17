@@ -499,12 +499,109 @@ func TestBuildUABlockedErrorAndRecord_RuleAutoBan(t *testing.T) {
 	assert.False(t, log.IsEmptyUA)
 	assert.True(t, log.AutoBanConfigured)
 	assert.True(t, log.AutoBanned)
+	assert.Contains(t, log.BanReason, "原始 UA：curl/8.0")
+	assert.Contains(t, refreshed.Remark, "原始 UA：curl/8.0")
+
+	// The management log keeps structured evidence for admins, including a
+	// reference to the dedicated UA audit record.
+	var manageLog model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", u.Id, model.LogTypeManage).Order("id desc").First(&manageLog).Error)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(manageLog.Other, &other))
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	uaAudit, ok := adminInfo["ua_auto_ban"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "curl/8.0", uaAudit["user_agent"])
+	assert.Equal(t, "2.2.2.2", uaAudit["client_ip"])
+	assert.Equal(t, "/v1/chat/completions", uaAudit["request_path"])
+	assert.EqualValues(t, log.Id, uaAudit["ua_block_log_id"])
+	assert.Equal(t, true, uaAudit["ua_log_persisted"])
 
 	// Suspicious IP marked.
 	var marks []model.SuspiciousIPMark
 	require.NoError(t, model.DB.Find(&marks, "user_id = ?", u.Id).Error)
 	require.Len(t, marks, 1)
 	assert.Equal(t, "ua_auto_ban", marks[0].Source)
+}
+
+// TestBuildUABlockedErrorAndRecord_CancelledRequestStillPersistsAudit verifies
+// that a client disconnect cannot erase the UA evidence after the request has
+// already reached the local blocking path.
+func TestBuildUABlockedErrorAndRecord_CancelledRequestStillPersistsAudit(t *testing.T) {
+	truncateUserBanTables(t)
+	u := seedBanTestUser(t, "uacancel", common.RoleCommonUser)
+	seedBanTestToken(t, u.Id, "tok")
+
+	requestCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rctx := &fakeUABlockRecordContext{
+		ctx: requestCtx, userId: u.Id, username: u.Username,
+		ip: "5.5.5.5", path: "/v1/chat/completions", ua: "Tavo/0.92.0",
+		headers: "{}", params: "{}",
+	}
+	hit := &SensitiveRuleHit{
+		Pattern: "tavo/.*", RuleName: "ua-tavo", Message: "blocked",
+		ErrorCode: types.ErrorCode("ua_blocked"), HTTPStatusCode: 403,
+		AutoBan: true, MatchMode: "rule",
+	}
+
+	_, _, _ = BuildUABlockedErrorAndRecord(rctx, hit)
+
+	var refreshed model.User
+	require.NoError(t, model.DB.First(&refreshed, u.Id).Error)
+	assert.Equal(t, common.UserStatusDisabled, refreshed.Status)
+	var log model.UABlockLog
+	require.NoError(t, model.DB.First(&log, "user_id = ?", u.Id).Error)
+	assert.Equal(t, "Tavo/0.92.0", log.UserAgent)
+	assert.True(t, log.AutoBanned)
+}
+
+// TestBuildUABlockedErrorAndRecord_AuditFailureStillBans verifies the explicit
+// product rule: a UA audit-table failure must never roll back or suppress the
+// user/token ban. The admin management log remains as the fallback evidence.
+func TestBuildUABlockedErrorAndRecord_AuditFailureStillBans(t *testing.T) {
+	truncateUserBanTables(t)
+	u := seedBanTestUser(t, "uafallback", common.RoleCommonUser)
+	tok := seedBanTestToken(t, u.Id, "tok")
+
+	require.NoError(t, model.DB.Migrator().DropTable(&model.UABlockLog{}))
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.AutoMigrate(&model.UABlockLog{}))
+	})
+
+	rctx := &fakeUABlockRecordContext{
+		userId: u.Id, username: u.Username, ip: "6.6.6.6",
+		path: "/v1/chat/completions", ua: "Tavo/0.91.0",
+		headers: "{}", params: "{}",
+	}
+	hit := &SensitiveRuleHit{
+		Pattern: "tavo/.*", RuleName: "ua-tavo", Message: "blocked",
+		ErrorCode: types.ErrorCode("ua_blocked"), HTTPStatusCode: 403,
+		AutoBan: true, MatchMode: "rule",
+	}
+
+	_, _, _ = BuildUABlockedErrorAndRecord(rctx, hit)
+
+	var refreshed model.User
+	require.NoError(t, model.DB.First(&refreshed, u.Id).Error)
+	assert.Equal(t, common.UserStatusDisabled, refreshed.Status)
+	assert.Contains(t, refreshed.Remark, "原始 UA：Tavo/0.91.0")
+	var refreshedToken model.Token
+	require.NoError(t, model.DB.First(&refreshedToken, tok.Id).Error)
+	assert.Equal(t, common.TokenStatusDisabled, refreshedToken.Status)
+
+	var manageLog model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", u.Id, model.LogTypeManage).Order("id desc").First(&manageLog).Error)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(manageLog.Other, &other))
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	uaAudit, ok := adminInfo["ua_auto_ban"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Tavo/0.91.0", uaAudit["user_agent"])
+	assert.Equal(t, false, uaAudit["ua_log_persisted"])
+	assert.EqualValues(t, 0, uaAudit["ua_block_log_id"])
 }
 
 // TestBuildUABlockedErrorAndRecord_EmptyUAAutoBan verifies the empty-UA path
@@ -601,6 +698,7 @@ func (f *fakePromptBlockRecordContext) RequestParamsRaw() string        { return
 // fakeUABlockRecordContext is a test fake implementing
 // service.UABlockRecordContext.
 type fakeUABlockRecordContext struct {
+	ctx      context.Context
 	userId   int
 	username string
 	ip       string
@@ -610,11 +708,16 @@ type fakeUABlockRecordContext struct {
 	params   string
 }
 
-func (f *fakeUABlockRecordContext) RequestContext() context.Context { return context.Background() }
-func (f *fakeUABlockRecordContext) UserID() int                     { return f.userId }
-func (f *fakeUABlockRecordContext) Username() string                { return f.username }
-func (f *fakeUABlockRecordContext) ClientIP() string                { return f.ip }
-func (f *fakeUABlockRecordContext) RequestPath() string             { return f.path }
-func (f *fakeUABlockRecordContext) UserAgent() string               { return f.ua }
-func (f *fakeUABlockRecordContext) RequestHeadersRaw() string       { return f.headers }
-func (f *fakeUABlockRecordContext) RequestParamsRaw() string        { return f.params }
+func (f *fakeUABlockRecordContext) RequestContext() context.Context {
+	if f.ctx != nil {
+		return f.ctx
+	}
+	return context.Background()
+}
+func (f *fakeUABlockRecordContext) UserID() int               { return f.userId }
+func (f *fakeUABlockRecordContext) Username() string          { return f.username }
+func (f *fakeUABlockRecordContext) ClientIP() string          { return f.ip }
+func (f *fakeUABlockRecordContext) RequestPath() string       { return f.path }
+func (f *fakeUABlockRecordContext) UserAgent() string         { return f.ua }
+func (f *fakeUABlockRecordContext) RequestHeadersRaw() string { return f.headers }
+func (f *fakeUABlockRecordContext) RequestParamsRaw() string  { return f.params }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -272,18 +273,20 @@ func TestCreatePromptBlockLog_AndUABlockLog_Normalization(t *testing.T) {
 	assert.Equal(t, pbl.CreatedAt, pbl.MatchedAt, "MatchedAt defaults to CreatedAt")
 
 	require.NoError(t, CreateUABlockLog(ctx, &UABlockLog{
-		UserId:         2,
-		Username:       "bob",
-		Ip:             "5.6.7.8",
-		UserAgent:      "  curl/8.0  ",
-		RulePattern:    "blocked-ua",
-		HTTPStatusCode: 50, // < 100 -> clamped to 400
-		RequestPath:    "/v1/messages",
-		IsEmptyUA:      true,
+		UserId:            2,
+		Username:          "bob",
+		Ip:                "5.6.7.8",
+		UserAgent:         "  curl/8.0\xff  ",
+		RequestHeadersRaw: "{\"User-Agent\":\"curl/8.0\xff\"}",
+		RulePattern:       "blocked-ua",
+		HTTPStatusCode:    50, // < 100 -> clamped to 400
+		RequestPath:       "/v1/messages",
+		IsEmptyUA:         true,
 	}))
 	var ual UABlockLog
 	require.NoError(t, DB.WithContext(ctx).First(&ual, "user_id = ?", 2).Error)
 	assert.Equal(t, "curl/8.0", ual.UserAgent)
+	assert.True(t, utf8.ValidString(ual.RequestHeadersRaw))
 	assert.Equal(t, 400, ual.HTTPStatusCode)
 	assert.True(t, ual.IsEmptyUA)
 }

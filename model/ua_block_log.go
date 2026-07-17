@@ -54,24 +54,27 @@ func normalizeUABlockLog(record *UABlockLog) {
 	if record == nil {
 		return
 	}
-	record.Username = truncateUABlockLogField(strings.TrimSpace(record.Username), 64)
-	record.Ip = truncateUABlockLogField(strings.TrimSpace(record.Ip), 64)
-	record.UserAgent = truncateUABlockLogField(strings.TrimSpace(record.UserAgent), 512)
-	record.RulePattern = truncateUABlockLogField(strings.TrimSpace(record.RulePattern), 255)
-	record.RuleMessage = truncateUABlockLogField(strings.TrimSpace(record.RuleMessage), 1024)
-	record.ErrorCode = truncateUABlockLogField(strings.TrimSpace(record.ErrorCode), 64)
-	record.RequestPath = truncateUABlockLogField(strings.TrimSpace(record.RequestPath), 255)
-	record.BanReason = truncateUABlockLogField(strings.TrimSpace(record.BanReason), 255)
+	record.Username = normalizeUABlockLogField(record.Username, 64)
+	record.Ip = normalizeUABlockLogField(record.Ip, 64)
+	record.UserAgent = normalizeUABlockLogField(record.UserAgent, 512)
+	record.RequestHeadersRaw = strings.ToValidUTF8(record.RequestHeadersRaw, "")
+	record.RequestParamsRaw = strings.ToValidUTF8(record.RequestParamsRaw, "")
+	record.RulePattern = normalizeUABlockLogField(record.RulePattern, 255)
+	record.RuleMessage = normalizeUABlockLogField(record.RuleMessage, 1024)
+	record.ErrorCode = normalizeUABlockLogField(record.ErrorCode, 64)
+	record.RequestPath = normalizeUABlockLogField(record.RequestPath, 255)
+	record.BanReason = normalizeUABlockLogField(record.BanReason, 255)
 	if record.HTTPStatusCode < 100 || record.HTTPStatusCode > 599 {
 		record.HTTPStatusCode = 400
 	}
 }
 
-func truncateUABlockLogField(value string, maxLen int) string {
-	if maxLen <= 0 || len(value) <= maxLen {
+func normalizeUABlockLogField(value string, maxBytes int) string {
+	value = strings.TrimSpace(strings.ToValidUTF8(value, ""))
+	if maxBytes <= 0 || len(value) <= maxBytes {
 		return value
 	}
-	return value[:maxLen]
+	return truncateRunesToByteBudget(value, maxBytes)
 }
 
 // CreateUABlockLog persists an UA interception record.
