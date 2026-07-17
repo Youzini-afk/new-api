@@ -18,29 +18,38 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
-import { type ColumnDef } from '@tanstack/react-table'
-import { useMediaQuery } from '@/hooks'
+import type {
+  ColumnDef,
+  OnChangeFn,
+  PaginationState,
+} from '@tanstack/react-table'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
-import { useIsAdmin } from '@/hooks/use-admin'
-import { useTableUrlState } from '@/hooks/use-table-url-state'
+
 import {
   DataTablePage,
   DataTableRow,
   useDataTable,
 } from '@/components/data-table'
+import { useMediaQuery } from '@/hooks'
+import { useIsAdmin } from '@/hooks/use-admin'
+import { useTableUrlState } from '@/hooks/use-table-url-state'
+import { cn } from '@/lib/utils'
+
 import {
   DEFAULT_LOGS_DATA,
   LOG_TYPE_ALL_VALUE,
   LOG_TYPE_ENUM,
+  USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS,
 } from '../constants'
 import { useColumnsByCategory } from '../lib/columns'
-import { fetchLogsByCategory } from '../lib/utils'
+import { fetchLogsByCategory, getLogQueryEndTime } from '../lib/utils'
 import type { LogCategory } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
 import { UsageLogsMobileList } from './usage-logs-mobile-card'
+import { useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 
@@ -57,7 +66,12 @@ function getColumnVisibilityStorageKey(
 }
 
 function deserializeLogTypeFilter(value: unknown): unknown[] {
-  const values = Array.isArray(value) ? value : value ? [value] : []
+  let values: unknown[] = []
+  if (Array.isArray(value)) {
+    values = value
+  } else if (value) {
+    values = [value]
+  }
   return values.filter((item) => String(item) !== LOG_TYPE_ALL_VALUE)
 }
 
@@ -70,6 +84,8 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   const isAdmin = useIsAdmin()
   const isMobile = useMediaQuery('(max-width: 640px)')
   const searchParams = route.useSearch()
+  const { autoRefreshEnabled, setAutoRefreshEnabled } = useUsageLogsContext()
+  const previousPageIndexRef = useRef<number | null>(null)
 
   const {
     columnFilters,
@@ -109,6 +125,29 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     ],
   })
 
+  const isAutoRefreshActive =
+    autoRefreshEnabled && logCategory === 'common' && pagination.pageIndex === 0
+
+  useEffect(() => {
+    if (autoRefreshEnabled && logCategory !== 'common') {
+      setAutoRefreshEnabled(false)
+    }
+  }, [autoRefreshEnabled, logCategory, setAutoRefreshEnabled])
+
+  useEffect(() => {
+    const previousPageIndex = previousPageIndexRef.current
+    previousPageIndexRef.current = pagination.pageIndex
+
+    if (
+      autoRefreshEnabled &&
+      previousPageIndex !== null &&
+      previousPageIndex !== pagination.pageIndex &&
+      pagination.pageIndex !== 0
+    ) {
+      setAutoRefreshEnabled(false)
+    }
+  }, [autoRefreshEnabled, pagination.pageIndex, setAutoRefreshEnabled])
+
   const { data, isLoading, isFetching } = useQuery({
     queryKey: [
       'logs',
@@ -118,15 +157,19 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       pagination.pageSize,
       columnFilters,
       searchParams,
+      isAutoRefreshActive,
       t,
     ],
     queryFn: async () => {
+      const effectiveSearchParams = isAutoRefreshActive
+        ? { ...searchParams, endTime: getLogQueryEndTime().getTime() }
+        : searchParams
       const result = await fetchLogsByCategory({
         logCategory,
         isAdmin,
         page: pagination.pageIndex + 1,
         pageSize: pagination.pageSize,
-        searchParams,
+        searchParams: effectiveSearchParams,
         columnFilters,
       })
 
@@ -143,11 +186,21 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       }
       return undefined
     },
+    refetchInterval: isAutoRefreshActive
+      ? USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS
+      : false,
+    refetchIntervalInBackground: false,
   })
 
   const logs = data?.items || []
   const columns = useColumnsByCategory(logCategory, isAdmin)
   const isLoadingData = isLoading || (isFetching && !data)
+  const handlePaginationChange: OnChangeFn<PaginationState> = (updater) => {
+    if (autoRefreshEnabled) {
+      setAutoRefreshEnabled(false)
+    }
+    onPaginationChange(updater)
+  }
 
   const { table } = useDataTable({
     data: logs as Record<string, unknown>[],
@@ -159,7 +212,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     ),
     pagination,
     enableRowSelection: false,
-    onPaginationChange,
+    onPaginationChange: handlePaginationChange,
     onColumnFiltersChange,
     manualPagination: true,
     manualFiltering: true,
@@ -174,7 +227,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       table={table}
       columns={columns as ColumnDef<Record<string, unknown>>[]}
       isLoading={isLoadingData}
-      isFetching={isFetching}
+      isFetching={isFetching && !isAutoRefreshActive}
       emptyTitle={t('No Logs Found')}
       emptyDescription={t(
         'No usage logs available. Logs will appear here once API calls are made.'

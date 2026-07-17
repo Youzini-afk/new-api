@@ -19,13 +19,18 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
+
+import { Skeleton } from '@/components/ui/skeleton'
+import { useIsAdmin } from '@/hooks/use-admin'
 import { formatLogQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { useIsAdmin } from '@/hooks/use-admin'
-import { Skeleton } from '@/components/ui/skeleton'
+
 import { getLogStats, getUserLogStats } from '../api'
-import { DEFAULT_LOG_STATS } from '../constants'
-import { buildApiParams } from '../lib/utils'
+import {
+  DEFAULT_LOG_STATS,
+  USAGE_LOG_STATS_AUTO_REFRESH_INTERVAL_MS,
+} from '../constants'
+import { buildApiParams, getLogQueryEndTime } from '../lib/utils'
 import { useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
@@ -50,15 +55,20 @@ export function CommonLogsStats() {
   const { t } = useTranslation()
   const isAdmin = useIsAdmin()
   const searchParams = route.useSearch()
-  const { sensitiveVisible } = useUsageLogsContext()
+  const { sensitiveVisible, autoRefreshEnabled } = useUsageLogsContext()
+  const isAutoRefreshActive =
+    autoRefreshEnabled && (searchParams.page ?? 1) === 1
 
   const { data: stats, isLoading } = useQuery({
-    queryKey: ['usage-logs-stats', isAdmin, searchParams],
+    queryKey: ['usage-logs-stats', isAdmin, searchParams, isAutoRefreshActive],
     queryFn: async () => {
+      const effectiveSearchParams = isAutoRefreshActive
+        ? { ...searchParams, endTime: getLogQueryEndTime().getTime() }
+        : searchParams
       const params = buildApiParams({
         page: 1,
         pageSize: 1,
-        searchParams,
+        searchParams: effectiveSearchParams,
         columnFilters: [],
         isAdmin,
       })
@@ -72,6 +82,10 @@ export function CommonLogsStats() {
         : DEFAULT_LOG_STATS
     },
     placeholderData: (previousData) => previousData,
+    refetchInterval: isAutoRefreshActive
+      ? USAGE_LOG_STATS_AUTO_REFRESH_INTERVAL_MS
+      : false,
+    refetchIntervalInBackground: false,
   })
 
   if (isLoading) {

@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
  * Shared constants for usage logs feature
  */
 import type { StatusBadgeProps } from '@/components/status-badge'
+
 import type { LogStatistics, LogCategory } from './types'
 
 // ============================================================================
@@ -42,6 +43,12 @@ export const DEFAULT_LOGS_DATA = {
   items: [],
   total: 0,
 }
+
+/**
+ * Polling intervals used by the opt-in live log view.
+ */
+export const USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS = 5_000
+export const USAGE_LOG_STATS_AUTO_REFRESH_INTERVAL_MS = 10_000
 
 // ============================================================================
 // Log Type Enum
