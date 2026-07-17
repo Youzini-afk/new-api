@@ -922,6 +922,9 @@ func performChannelTests(ctx context.Context, channels []*model.Channel, testUse
 		if channel.Status == common.ChannelStatusManuallyDisabled {
 			continue
 		}
+		if !channel.IsWithinAvailabilityScheduleAt(time.Now()) {
+			continue
+		}
 		isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 		tik := time.Now()
 		result := testChannel(ctx, channel, testUserID, "", "", shouldUseStreamForAutomaticChannelTest(channel))
@@ -1017,8 +1020,12 @@ func runChannelTestTask(ctx context.Context, mode string, notify bool, report fu
 
 func selectChannelsForAutomaticTest(channels []*model.Channel, mode string) []*model.Channel {
 	selected := make([]*model.Channel, 0, len(channels))
+	now := time.Now()
 	for _, channel := range channels {
 		if channel.Status == common.ChannelStatusManuallyDisabled {
+			continue
+		}
+		if !channel.IsWithinAvailabilityScheduleAt(now) {
 			continue
 		}
 		if mode == operation_setting.ChannelTestModePassiveRecovery && channel.Status != common.ChannelStatusAutoDisabled {

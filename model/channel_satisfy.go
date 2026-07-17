@@ -1,6 +1,8 @@
 package model
 
 import (
+	"time"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
@@ -17,6 +19,9 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 	defer channelSyncLock.RUnlock()
 
 	if group2model2channels == nil {
+		return false
+	}
+	if !isCachedChannelAvailableAtLocked(channelID, time.Now()) {
 		return false
 	}
 
@@ -48,7 +53,7 @@ func isChannelEnabledForGroupModelDB(group string, modelName string, channelID i
 		Where(commonGroupCol+" = ? and model = ? and channel_id = ? and enabled = ?", group, modelName, channelID, true).
 		Count(&count).Error
 	if err == nil && count > 0 {
-		return true
+		return isChannelAvailableByID(channelID)
 	}
 	normalized := ratio_setting.FormatMatchingModelName(modelName)
 	if normalized == "" || normalized == modelName {
@@ -58,7 +63,12 @@ func isChannelEnabledForGroupModelDB(group string, modelName string, channelID i
 	err = DB.Model(&Ability{}).
 		Where(commonGroupCol+" = ? and model = ? and channel_id = ? and enabled = ?", group, normalized, channelID, true).
 		Count(&count).Error
-	return err == nil && count > 0
+	return err == nil && count > 0 && isChannelAvailableByID(channelID)
+}
+
+func isChannelAvailableByID(channelID int) bool {
+	channel, err := GetChannelById(channelID, false)
+	return err == nil && channel != nil && channel.IsAvailableAt(time.Now())
 }
 
 func isChannelIDInList(list []int, channelID int) bool {

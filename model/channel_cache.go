@@ -21,6 +21,10 @@ var channelsIDM map[int]*Channel                     // all channels include dis
 // channel2advancedCustomConfig caches parsed Advanced Custom (type 58) configs so
 // path-aware selection avoids re-parsing JSON per request. Refreshed on full sync.
 var channel2advancedCustomConfig map[int]*dto.AdvancedCustomConfig
+
+// channel2availabilitySchedule caches validated schedules. A nil entry means
+// the channel has an invalid enabled schedule and therefore fails closed.
+var channel2availabilitySchedule map[int]*dto.CompiledChannelAvailabilitySchedule
 var channelSyncLock sync.RWMutex
 
 func InitChannelCache() {
@@ -29,10 +33,18 @@ func InitChannelCache() {
 	}
 	newChannelId2channel := make(map[int]*Channel)
 	newChannel2advancedCustomConfig := make(map[int]*dto.AdvancedCustomConfig)
+	newChannel2availabilitySchedule := make(map[int]*dto.CompiledChannelAvailabilitySchedule)
 	var channels []*Channel
 	DB.Find(&channels)
 	for _, channel := range channels {
 		newChannelId2channel[channel.Id] = channel
+		compiledSchedule, err := channel.CompileAvailabilitySchedule()
+		if err != nil {
+			common.SysLog(fmt.Sprintf("invalid channel availability schedule: channel_id=%d, error=%v", channel.Id, err))
+			newChannel2availabilitySchedule[channel.Id] = nil
+		} else {
+			newChannel2availabilitySchedule[channel.Id] = compiledSchedule
+		}
 		if channel.Type == constant.ChannelTypeAdvancedCustom {
 			if config := channel.GetOtherSettings().AdvancedCustom; config != nil {
 				newChannel2advancedCustomConfig[channel.Id] = config
@@ -93,6 +105,7 @@ func InitChannelCache() {
 	}
 	channelsIDM = newChannelId2channel
 	channel2advancedCustomConfig = newChannel2advancedCustomConfig
+	channel2availabilitySchedule = newChannel2availabilitySchedule
 	channelSyncLock.Unlock()
 	common.SysLog("channels synced from database")
 }
@@ -202,20 +215,26 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, requestPat
 	return nil, errors.New("channel not found")
 }
 
-// filterChannelsByRequestPath restricts candidates by request path. Only Advanced
-// Custom (type 58) channels are path-checked: they are kept only when one of their
-// configured routes matches requestPath. All other channel types always pass.
-// When requestPath is empty (non-relay callers) filtering is skipped.
+// filterChannelsByRequestPath applies the dynamic availability schedule and
+// then restricts Advanced Custom (type 58) channels by request path.
 // Caller must hold channelSyncLock (read lock). The cached slice is never mutated.
 func filterChannelsByRequestPath(channels []int, requestPath string) []int {
-	if requestPath == "" || len(channels) == 0 {
+	if len(channels) == 0 {
 		return channels
 	}
+	now := time.Now()
 	filtered := make([]int, 0, len(channels))
 	for _, channelId := range channels {
 		channel, ok := channelsIDM[channelId]
 		if !ok {
 			// keep it so the downstream consistency error is raised as before
+			filtered = append(filtered, channelId)
+			continue
+		}
+		if !isCachedChannelAvailableAtLocked(channelId, now) {
+			continue
+		}
+		if requestPath == "" {
 			filtered = append(filtered, channelId)
 			continue
 		}
@@ -228,6 +247,17 @@ func filterChannelsByRequestPath(channels []int, requestPath string) []int {
 		}
 	}
 	return filtered
+}
+
+// isCachedChannelAvailableAtLocked requires channelSyncLock to be held.
+func isCachedChannelAvailableAtLocked(channelID int, now time.Time) bool {
+	channel, channelExists := channelsIDM[channelID]
+	compiledSchedule, scheduleExists := channel2availabilitySchedule[channelID]
+	return channelExists &&
+		channel.Status == common.ChannelStatusEnabled &&
+		scheduleExists &&
+		compiledSchedule != nil &&
+		compiledSchedule.IsOpenAt(now)
 }
 
 func CacheGetChannel(id int) (*Channel, error) {

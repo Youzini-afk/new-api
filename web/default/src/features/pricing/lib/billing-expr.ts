@@ -185,22 +185,7 @@ export const MATCH_RANGE = 'range'
 export const TIME_FUNCS = ['hour', 'minute', 'weekday', 'month', 'day'] as const
 export type TimeFunc = (typeof TIME_FUNCS)[number]
 
-export const COMMON_TIMEZONES: { value: string; label: string }[] = [
-  { value: 'Asia/Shanghai', label: 'UTC+8 Shanghai (Asia/Shanghai)' },
-  { value: 'UTC', label: 'UTC' },
-  { value: 'America/New_York', label: 'UTC-5 New York (America/New_York)' },
-  {
-    value: 'America/Los_Angeles',
-    label: 'UTC-8 Los Angeles (America/Los_Angeles)',
-  },
-  { value: 'America/Chicago', label: 'UTC-6 Chicago (America/Chicago)' },
-  { value: 'Europe/London', label: 'UTC+0 London (Europe/London)' },
-  { value: 'Europe/Berlin', label: 'UTC+1 Berlin (Europe/Berlin)' },
-  { value: 'Asia/Tokyo', label: 'UTC+9 Tokyo (Asia/Tokyo)' },
-  { value: 'Asia/Singapore', label: 'UTC+8 Singapore (Asia/Singapore)' },
-  { value: 'Asia/Seoul', label: 'UTC+9 Seoul (Asia/Seoul)' },
-  { value: 'Australia/Sydney', label: 'UTC+10 Sydney (Australia/Sydney)' },
-]
+export { COMMON_TIMEZONES } from '@/lib/timezones'
 
 const NUMERIC_LITERAL_REGEX = /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/
 

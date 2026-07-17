@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -53,7 +54,8 @@ type Channel struct {
 	// add after v0.8.5
 	ChannelInfo ChannelInfo `json:"channel_info" gorm:"type:json"`
 
-	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
+	OtherSettings             string                        `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
+	AvailabilityScheduleState *dto.ChannelAvailabilityState `json:"availability_schedule_state,omitempty" gorm:"-"`
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
@@ -962,6 +964,11 @@ func (channel *Channel) ValidateSettings() error {
 			return err
 		}
 	}
+	if channelOtherSettings.AvailabilitySchedule != nil {
+		if err := channelOtherSettings.AvailabilitySchedule.Validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1007,6 +1014,70 @@ func (channel *Channel) SetOtherSettings(setting dto.ChannelOtherSettings) {
 		return
 	}
 	channel.OtherSettings = string(settingBytes)
+}
+
+func (channel *Channel) GetAvailabilitySchedule() (*dto.ChannelAvailabilitySchedule, error) {
+	if channel == nil || channel.OtherSettings == "" {
+		return nil, nil
+	}
+	setting := dto.ChannelOtherSettings{}
+	if err := common.UnmarshalJsonStr(channel.OtherSettings, &setting); err != nil {
+		return nil, err
+	}
+	return setting.AvailabilitySchedule, nil
+}
+
+func (channel *Channel) CompileAvailabilitySchedule() (*dto.CompiledChannelAvailabilitySchedule, error) {
+	schedule, err := channel.GetAvailabilitySchedule()
+	if err != nil {
+		return nil, err
+	}
+	return dto.CompileChannelAvailabilitySchedule(schedule)
+}
+
+// IsWithinAvailabilityScheduleAt evaluates only the schedule gate. Recovery
+// tests use this too, because auto-disabled channels still need to be tested
+// during their configured availability window.
+func (channel *Channel) IsWithinAvailabilityScheduleAt(now time.Time) bool {
+	compiled, err := channel.CompileAvailabilitySchedule()
+	return err == nil && compiled.IsOpenAt(now)
+}
+
+// IsAvailableAt is the effective gate for accepting new requests. The schedule
+// never mutates the persisted channel status.
+func (channel *Channel) IsAvailableAt(now time.Time) bool {
+	return channel != nil && channel.Status == common.ChannelStatusEnabled && channel.IsWithinAvailabilityScheduleAt(now)
+}
+
+func (channel *Channel) AttachAvailabilityScheduleState(now time.Time) {
+	if channel == nil {
+		return
+	}
+	schedule, parseErr := channel.GetAvailabilitySchedule()
+	if parseErr != nil {
+		channel.AvailabilityScheduleState = &dto.ChannelAvailabilityState{
+			Open:               false,
+			EffectiveAvailable: false,
+			Error:              parseErr.Error(),
+		}
+		return
+	}
+	compiled, err := dto.CompileChannelAvailabilitySchedule(schedule)
+	if err != nil {
+		state := &dto.ChannelAvailabilityState{
+			Enabled:            schedule != nil && schedule.Enabled,
+			Open:               false,
+			EffectiveAvailable: false,
+			Error:              err.Error(),
+		}
+		if schedule != nil {
+			state.Timezone = strings.TrimSpace(schedule.Timezone)
+		}
+		channel.AvailabilityScheduleState = state
+		return
+	}
+	state := compiled.StateAt(now, channel.Status == common.ChannelStatusEnabled)
+	channel.AvailabilityScheduleState = &state
 }
 
 func (channel *Channel) GetParamOverride() map[string]interface{} {

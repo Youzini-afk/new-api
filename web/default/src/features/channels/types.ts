@@ -34,6 +34,20 @@ export const channelInfoSchema = z.object({
 
 export type ChannelInfo = z.infer<typeof channelInfoSchema>
 
+export const channelAvailabilityStateSchema = z.object({
+  enabled: z.boolean(),
+  open: z.boolean(),
+  effective_available: z.boolean(),
+  timezone: z.string().optional(),
+  next_transition_at: z.number().optional(),
+  next_transition_action: z.enum(['open', 'close']).optional(),
+  error: z.string().optional(),
+})
+
+export type ChannelAvailabilityState = z.infer<
+  typeof channelAvailabilityStateSchema
+>
+
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
@@ -71,6 +85,7 @@ export const channelSchema = z.object({
     multi_key_mode: 'random',
   }),
   settings: z.string().default('{}'), // other_settings JSON
+  availability_schedule_state: channelAvailabilityStateSchema.optional(),
 })
 
 export type Channel = z.infer<typeof channelSchema>
@@ -106,6 +121,19 @@ export interface ChannelOtherSettings {
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
   advanced_custom?: AdvancedCustomConfig
+  availability_schedule?: ChannelAvailabilitySchedule
+}
+
+export interface ChannelAvailabilitySchedule {
+  enabled?: boolean
+  timezone?: string
+  windows?: ChannelAvailabilityWindow[]
+}
+
+export interface ChannelAvailabilityWindow {
+  weekdays: number[]
+  start: string
+  end: string
 }
 
 export interface AdvancedCustomConfig {

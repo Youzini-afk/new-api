@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import {
   AlertTriangle,
+  CalendarClock,
   ChevronDown,
   ChevronRight,
   ListOrdered,
@@ -78,7 +79,7 @@ import {
   type TagRow,
 } from '../lib'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
-import type { Channel } from '../types'
+import type { Channel, ChannelAvailabilityState } from '../types'
 import { useChannels } from './channels-provider'
 import { DataTableRowActions } from './data-table-row-actions'
 import { DataTableTagRowActions } from './data-table-tag-row-actions'
@@ -167,6 +168,73 @@ function UpstreamUpdateTags({ channel }: { channel: Channel }) {
         />
       )}
     </div>
+  )
+}
+
+function formatScheduleTransition(state: ChannelAvailabilityState): string {
+  if (!state.next_transition_at) return ''
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: state.timezone || undefined,
+    }).format(new Date(state.next_transition_at * 1000))
+  } catch {
+    return formatTimestampToDate(state.next_transition_at)
+  }
+}
+
+function AvailabilityScheduleBadge({ channel }: { channel: Channel }) {
+  const { t } = useTranslation()
+  const state = channel.availability_schedule_state
+  if (!state?.enabled) return null
+
+  const transition = formatScheduleTransition(state)
+  const action =
+    state.next_transition_action === 'open' ? t('opens') : t('closes')
+  let label = t('Scheduled Closed')
+  let variant: StatusBadgeProps['variant'] = 'neutral'
+  if (state.error) {
+    label = t('Schedule Invalid')
+    variant = 'danger'
+  } else if (state.open) {
+    label = t('Scheduled Open')
+    variant = 'success'
+  }
+
+  return (
+    <TooltipProvider delay={100}>
+      <Tooltip>
+        <TooltipTrigger render={<span />}>
+          <StatusBadge
+            label={label}
+            variant={variant}
+            size='sm'
+            copyable={false}
+            icon={CalendarClock}
+          />
+        </TooltipTrigger>
+        <TooltipContent side='top' className='max-w-xs'>
+          <div className='space-y-1 text-xs'>
+            <div>
+              {t('Scheduled Availability')} ·{' '}
+              {state.timezone || t('Unknown timezone')}
+            </div>
+            {transition && (
+              <div>
+                {t('Next transition')}: {action} {transition}
+              </div>
+            )}
+            {state.error && (
+              <div className='text-destructive'>{state.error}</div>
+            )}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
@@ -625,6 +693,7 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
                     </TooltipProvider>
                   )}
                   <UpstreamUpdateTags channel={channel} />
+                  <AvailabilityScheduleBadge channel={channel} />
                 </div>
                 {channel.remark && (
                   <TooltipProvider delay={200}>

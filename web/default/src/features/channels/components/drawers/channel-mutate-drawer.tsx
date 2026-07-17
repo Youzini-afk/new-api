@@ -161,6 +161,7 @@ import { ModelMappingEditor } from '../model-mapping-editor'
 import {
   ChannelAdvancedSection,
   ChannelApiAccessSection,
+  ChannelAvailabilitySection,
   ChannelAuthSection,
   ChannelBasicSection,
   ChannelEditorLoadingState,
@@ -1208,6 +1209,14 @@ export function ChannelMutateDrawer({
                       />
                     )}
                   </ChannelBasicSection>
+
+                  <ChannelAvailabilitySection
+                    form={form}
+                    savedState={
+                      channelData?.data?.availability_schedule_state ||
+                      currentRow?.availability_schedule_state
+                    }
+                  />
 
                   {/* ── API Access ── */}
                   <ChannelApiAccessSection>

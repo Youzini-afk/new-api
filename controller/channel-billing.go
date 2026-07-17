@@ -457,7 +457,7 @@ func updateAllChannelsBalance() error {
 		return err
 	}
 	for _, channel := range channels {
-		if channel.Status != common.ChannelStatusEnabled {
+		if !channel.IsAvailableAt(time.Now()) {
 			continue
 		}
 		if channel.ChannelInfo.IsMultiKey {

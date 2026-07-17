@@ -590,6 +590,9 @@ scanLoop:
 			if report != nil {
 				report(processed, int(totalChannels))
 			}
+			if !force && !channel.IsWithinAvailabilityScheduleAt(time.Now()) {
+				continue
+			}
 
 			settings := channel.GetOtherSettings()
 			if !settings.UpstreamModelUpdateCheckEnabled {

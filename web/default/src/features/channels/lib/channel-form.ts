@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
+
 import {
   CHANNEL_STATUS,
   ERROR_MESSAGES,
@@ -127,6 +128,15 @@ function addRequiredIssue(
   })
 }
 
+const AVAILABILITY_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+const DEFAULT_AVAILABILITY_WINDOWS = [
+  {
+    weekdays: [1, 2, 3, 4, 5, 6, 7],
+    start: '00:00',
+    end: '08:00',
+  },
+]
+
 export const channelFormSchema = z
   .object({
     name: z.string().min(1, ERROR_MESSAGES.REQUIRED_NAME),
@@ -207,6 +217,19 @@ export const channelFormSchema = z
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),
+    // Channel availability schedule (stored in settings JSON)
+    availability_schedule_enabled: z.boolean().optional(),
+    availability_schedule_timezone: z.string().optional(),
+    availability_schedule_windows: z
+      .array(
+        z.object({
+          weekdays: z.array(z.number().int().min(1).max(7)).max(7),
+          start: z.string(),
+          end: z.string(),
+        })
+      )
+      .max(32)
+      .optional(),
   })
   .superRefine((data, ctx) => {
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
@@ -288,6 +311,54 @@ export const channelFormSchema = z
         'Vertex AI API Key mode does not support batch creation'
       )
     }
+
+    if (data.availability_schedule_enabled) {
+      if (!data.availability_schedule_timezone?.trim()) {
+        addRequiredIssue(
+          ctx,
+          'availability_schedule_timezone',
+          'Timezone is required when scheduled availability is enabled'
+        )
+      }
+      const windows = data.availability_schedule_windows || []
+      if (windows.length === 0) {
+        addRequiredIssue(
+          ctx,
+          'availability_schedule_windows',
+          'Add at least one availability window'
+        )
+      }
+      windows.forEach((window, index) => {
+        if (window.weekdays.length === 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['availability_schedule_windows', index, 'weekdays'],
+            message: 'Select at least one weekday',
+          })
+        }
+        if (!AVAILABILITY_TIME_PATTERN.test(window.start)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['availability_schedule_windows', index, 'start'],
+            message: 'Use HH:mm in 24-hour format',
+          })
+        }
+        if (!AVAILABILITY_TIME_PATTERN.test(window.end)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['availability_schedule_windows', index, 'end'],
+            message: 'Use HH:mm in 24-hour format',
+          })
+        }
+        if (window.start === window.end) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['availability_schedule_windows', index, 'end'],
+            message: 'Start and end times must differ',
+          })
+        }
+      })
+    }
   })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -345,6 +416,9 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
+  availability_schedule_enabled: false,
+  availability_schedule_timezone: 'Asia/Shanghai',
+  availability_schedule_windows: DEFAULT_AVAILABILITY_WINDOWS,
   advanced_custom: '',
 }
 
@@ -400,6 +474,11 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
+  let availabilityScheduleEnabled = false
+  let availabilityScheduleTimezone = 'Asia/Shanghai'
+  let availabilityScheduleWindows = DEFAULT_AVAILABILITY_WINDOWS.map(
+    (window) => ({ ...window, weekdays: [...window.weekdays] })
+  )
   let advancedCustom = ''
 
   if (channel.settings) {
@@ -425,6 +504,55 @@ export function transformChannelToFormDefaults(
       )
         ? parsed.upstream_model_update_ignored_models.join(',')
         : ''
+      if (
+        parsed.availability_schedule &&
+        typeof parsed.availability_schedule === 'object'
+      ) {
+        availabilityScheduleEnabled =
+          parsed.availability_schedule.enabled === true
+        availabilityScheduleTimezone =
+          typeof parsed.availability_schedule.timezone === 'string' &&
+          parsed.availability_schedule.timezone.trim()
+            ? parsed.availability_schedule.timezone.trim()
+            : 'Asia/Shanghai'
+        if (Array.isArray(parsed.availability_schedule.windows)) {
+          const normalizedWindows = parsed.availability_schedule.windows
+            .map((window: unknown) => {
+              if (!isJsonObjectValue(window)) return null
+              const weekdays = Array.isArray(window.weekdays)
+                ? [
+                    ...new Set(
+                      window.weekdays
+                        .map((weekday) => Number(weekday))
+                        .filter(
+                          (weekday) =>
+                            Number.isInteger(weekday) &&
+                            weekday >= 1 &&
+                            weekday <= 7
+                        )
+                    ),
+                  ].sort((a, b) => a - b)
+                : []
+              const start = String(window.start || '')
+              const end = String(window.end || '')
+              if (!weekdays.length || !start || !end) return null
+              return { weekdays, start, end }
+            })
+            .filter(
+              (
+                window: {
+                  weekdays: number[]
+                  start: string
+                  end: string
+                } | null
+              ): window is { weekdays: number[]; start: string; end: string } =>
+                window !== null
+            )
+          if (normalizedWindows.length > 0) {
+            availabilityScheduleWindows = normalizedWindows
+          }
+        }
+      }
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
@@ -477,6 +605,9 @@ export function transformChannelToFormDefaults(
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
+    availability_schedule_enabled: availabilityScheduleEnabled,
+    availability_schedule_timezone: availabilityScheduleTimezone,
+    availability_schedule_windows: availabilityScheduleWindows,
     advanced_custom: advancedCustom,
   }
 }
@@ -600,6 +731,24 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     if (typeof settingsObj.upstream_model_update_last_check_time !== 'number') {
       settingsObj.upstream_model_update_last_check_time = 0
     }
+  }
+
+  const hadAvailabilitySchedule = isJsonObjectValue(
+    settingsObj.availability_schedule
+  )
+  if (formData.availability_schedule_enabled || hadAvailabilitySchedule) {
+    settingsObj.availability_schedule = {
+      enabled: formData.availability_schedule_enabled === true,
+      timezone:
+        formData.availability_schedule_timezone?.trim() || 'Asia/Shanghai',
+      windows: (formData.availability_schedule_windows || []).map((window) => ({
+        weekdays: [...new Set(window.weekdays)].sort((a, b) => a - b),
+        start: window.start,
+        end: window.end,
+      })),
+    }
+  } else if ('availability_schedule' in settingsObj) {
+    delete settingsObj.availability_schedule
   }
 
   if (formData.type === CHANNEL_TYPE_ADVANCED_CUSTOM) {

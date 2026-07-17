@@ -63,6 +63,7 @@ func parseStatusFilter(statusParam string) int {
 }
 
 func clearChannelInfo(channel *model.Channel) {
+	channel.AttachAvailabilityScheduleState(time.Now())
 	if channel.ChannelInfo.IsMultiKey {
 		channel.ChannelInfo.MultiKeyDisabledReason = nil
 		channel.ChannelInfo.MultiKeyDisabledTime = nil
@@ -684,6 +685,7 @@ func AddChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	model.InitChannelCache()
 	service.ResetProxyClientCache()
 	recordManageAudit(c, "channel.create", map[string]interface{}{
 		"name":  addChannelRequest.Channel.Name,
@@ -1033,6 +1035,9 @@ func UpdateChannel(c *gin.Context) {
 	}
 	if !equalStringPtr(channel.BaseURL, originChannel.BaseURL) {
 		changedFields = append(changedFields, "base_url")
+	}
+	if channel.OtherSettings != originChannel.OtherSettings {
+		changedFields = append(changedFields, "settings")
 	}
 	if channel.Key != "" && channel.Key != originChannel.Key {
 		changedFields = append(changedFields, "key")

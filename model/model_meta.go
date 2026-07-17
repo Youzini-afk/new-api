@@ -3,6 +3,7 @@ package model
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -163,11 +164,12 @@ func GetPreferredModelOwnerChannelTypes(modelNames []string, groups []string) (m
 	type row struct {
 		Model       string
 		ChannelType int
+		ChannelID   int
 	}
 	var rows []row
 
 	query := DB.Table("abilities").
-		Select("abilities.model as model, channels.type as channel_type").
+		Select("abilities.model as model, channels.type as channel_type, abilities.channel_id as channel_id").
 		Joins("JOIN channels ON abilities.channel_id = channels.id").
 		Where("abilities.model IN ? AND abilities.enabled = ? AND channels.status = ?", modelNames, true, common.ChannelStatusEnabled).
 		Order("COALESCE(abilities.priority, 0) DESC").
@@ -182,8 +184,31 @@ func GetPreferredModelOwnerChannelTypes(modelNames []string, groups []string) (m
 	if err := query.Scan(&rows).Error; err != nil {
 		return nil, err
 	}
+	channelIDs := make([]int, 0, len(rows))
+	seenChannelIDs := make(map[int]struct{}, len(rows))
+	for _, row := range rows {
+		if _, ok := seenChannelIDs[row.ChannelID]; ok {
+			continue
+		}
+		seenChannelIDs[row.ChannelID] = struct{}{}
+		channelIDs = append(channelIDs, row.ChannelID)
+	}
+	var channels []*Channel
+	if len(channelIDs) > 0 {
+		if err := DB.Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+			return nil, err
+		}
+	}
+	availableChannels := make(map[int]bool, len(channels))
+	now := time.Now()
+	for _, channel := range channels {
+		availableChannels[channel.Id] = channel.IsAvailableAt(now)
+	}
 
 	for _, r := range rows {
+		if !availableChannels[r.ChannelID] {
+			continue
+		}
 		if _, ok := result[r.Model]; ok {
 			continue
 		}
