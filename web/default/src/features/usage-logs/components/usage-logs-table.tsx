@@ -62,6 +62,12 @@ import { useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 const LIVE_ROW_ENTER_DURATION_MS = 650
+const LIVE_LAYOUT_ROW_LIMIT = 24
+
+interface LiveFeedRenderState {
+  logs: UsageLog[]
+  enteringLogKeys: Set<string>
+}
 
 const logTypeRowTint: Record<number, string> = {
   [LOG_TYPE_ENUM.ERROR]: 'bg-rose-50/40 dark:bg-rose-950/20',
@@ -107,9 +113,11 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   )
   const livePageSizeRef = useRef(100)
   const liveActiveRef = useRef(false)
-  const [liveLogs, setLiveLogs] = useState<UsageLog[]>([])
-  const [enteringLogKeys, setEnteringLogKeys] = useState<Set<string>>(
-    () => new Set()
+  const [liveFeedState, setLiveFeedState] = useState<LiveFeedRenderState>(
+    () => ({
+      logs: [],
+      enteringLogKeys: new Set(),
+    })
   )
   const shouldReduceMotion = useReducedMotion()
 
@@ -180,27 +188,30 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     liveInsertIntervalRef.current = 0
   }, [])
 
-  const markLiveRowEntering = useCallback((key: string) => {
-    setEnteringLogKeys((current) => {
-      const next = new Set(current)
-      next.add(key)
-      return next
-    })
-
-    const existingTimer = liveEntryTimersRef.current.get(key)
-    if (existingTimer) clearTimeout(existingTimer)
-
-    const timer = setTimeout(() => {
-      setEnteringLogKeys((current) => {
-        if (!current.has(key)) return current
-        const next = new Set(current)
-        next.delete(key)
-        return next
+  const commitLiveRowInsertion = useCallback(
+    (logs: UsageLog[], key: string) => {
+      setLiveFeedState((current) => {
+        const enteringLogKeys = new Set(current.enteringLogKeys)
+        enteringLogKeys.add(key)
+        return { logs, enteringLogKeys }
       })
-      liveEntryTimersRef.current.delete(key)
-    }, LIVE_ROW_ENTER_DURATION_MS)
-    liveEntryTimersRef.current.set(key, timer)
-  }, [])
+
+      const existingTimer = liveEntryTimersRef.current.get(key)
+      if (existingTimer) clearTimeout(existingTimer)
+
+      const timer = setTimeout(() => {
+        setLiveFeedState((current) => {
+          if (!current.enteringLogKeys.has(key)) return current
+          const enteringLogKeys = new Set(current.enteringLogKeys)
+          enteringLogKeys.delete(key)
+          return { ...current, enteringLogKeys }
+        })
+        liveEntryTimersRef.current.delete(key)
+      }, LIVE_ROW_ENTER_DURATION_MS)
+      liveEntryTimersRef.current.set(key, timer)
+    },
+    []
+  )
 
   const drainLiveFeedQueue = useCallback(() => {
     liveInsertTimerRef.current = null
@@ -219,8 +230,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     )
     if (merged.newKeys.length > 0) {
       liveLogsRef.current = merged.items
-      setLiveLogs(merged.items)
-      markLiveRowEntering(merged.newKeys[0])
+      commitLiveRowInsertion(merged.items, merged.newKeys[0])
     }
 
     if (pendingLiveLogsRef.current.length > 0) {
@@ -229,7 +239,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
         liveInsertIntervalRef.current
       )
     }
-  }, [markLiveRowEntering])
+  }, [commitLiveRowInsertion])
 
   useEffect(() => {
     if (autoRefreshEnabled && logCategory !== 'common') {
@@ -305,10 +315,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     clearLiveFeedTimers()
     liveFeedContextRef.current = ''
     liveLogsRef.current = []
-    setLiveLogs([])
-    setEnteringLogKeys((current) =>
-      current.size > 0 ? new Set<string>() : current
-    )
+    setLiveFeedState({ logs: [], enteringLogKeys: new Set() })
   }, [clearLiveFeedTimers, isAutoRefreshActive])
 
   useEffect(() => {
@@ -319,10 +326,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       clearLiveFeedTimers()
       liveFeedContextRef.current = liveFeedContextKey
       liveLogsRef.current = incomingLogs
-      setLiveLogs(incomingLogs)
-      setEnteringLogKeys((current) =>
-        current.size > 0 ? new Set<string>() : current
-      )
+      setLiveFeedState({ logs: incomingLogs, enteringLogKeys: new Set() })
       return
     }
 
@@ -380,8 +384,9 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
 
   const logs =
     isAutoRefreshActive && liveFeedContextRef.current === liveFeedContextKey
-      ? liveLogs
+      ? liveFeedState.logs
       : rawLogs
+  const enteringLogKeys = liveFeedState.enteringLogKeys
   const columns = useColumnsByCategory(logCategory, isAdmin)
   const isLoadingData = isLoading || (isFetching && !data)
   const handlePaginationChange: OnChangeFn<PaginationState> = (updater) => {
@@ -466,7 +471,11 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
         const isEntering = isAutoRefreshActive && enteringLogKeys.has(row.id)
         const rowClassName = cn('transition-colors duration-300', tintClass)
 
-        if (isAutoRefreshActive && !shouldReduceMotion) {
+        if (
+          isAutoRefreshActive &&
+          !shouldReduceMotion &&
+          row.index < LIVE_LAYOUT_ROW_LIMIT
+        ) {
           return (
             <LiveUsageLogRow
               key={row.id}

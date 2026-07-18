@@ -28,10 +28,12 @@ import {
   TruncatedCell,
   type DataTableColumnClassName,
 } from '@/components/data-table'
-import { TableCell, TableRow } from '@/components/ui/table'
+import { TableCell } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 
-const MotionTableRow = motion.create(TableRow)
+const MotionTableRow = motion.tr
+const tableRowClassName =
+  'group data-[state=selected]:bg-muted border-b transition-colors hover:[background-color:color-mix(in_oklch,var(--muted)_50%,var(--background))] has-aria-expanded:[background-color:color-mix(in_oklch,var(--muted)_50%,var(--background))]'
 
 interface LiveUsageLogRowProps<TData> {
   row: Row<TData>
@@ -47,22 +49,21 @@ function LiveUsageLogRowInner<TData>(props: LiveUsageLogRowProps<TData>) {
   return (
     <MotionTableRow
       layout='position'
-      initial={props.isEntering ? { opacity: 0, y: -16, scaleY: 0.96 } : false}
-      animate={{ opacity: 1, y: 0, scaleY: 1 }}
+      initial={props.isEntering ? { opacity: 0, y: -14 } : false}
+      animate={{ opacity: 1, y: 0 }}
       transition={{
         layout: {
           type: 'spring',
-          stiffness: 300,
-          damping: 32,
-          mass: 0.7,
+          stiffness: 260,
+          damping: 30,
+          mass: 0.65,
         },
-        opacity: { duration: 0.2, ease: 'easeOut' },
-        y: { type: 'spring', stiffness: 380, damping: 30, mass: 0.55 },
-        scaleY: { type: 'spring', stiffness: 360, damping: 30, mass: 0.55 },
+        opacity: { duration: 0.18, ease: 'easeOut' },
+        y: { type: 'spring', stiffness: 340, damping: 28, mass: 0.5 },
       }}
-      style={{ transformOrigin: 'top' }}
+      data-slot='table-row'
       data-state={props.row.getIsSelected() ? 'selected' : undefined}
-      className={props.className}
+      className={cn(tableRowClassName, props.className)}
     >
       {props.row.getVisibleCells().map((cell) => {
         const content = flexRender(
