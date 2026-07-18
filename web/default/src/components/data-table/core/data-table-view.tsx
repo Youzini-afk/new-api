@@ -99,7 +99,10 @@ function UnifiedTableView<TData>({
   const tableSizing = getTableSizing(props)
 
   return (
-    <div className={props.tableContainerClassName}>
+    <div
+      ref={props.bodyContainerRef}
+      className={props.tableContainerClassName}
+    >
       <Table className={props.tableClassName} style={tableSizing.style}>
         {tableSizing.colgroup}
         <DataTableHeader
@@ -136,6 +139,7 @@ function SplitHeaderTableView<TData>({
       )}
     >
       <div
+        ref={props.bodyContainerRef}
         className={cn(
           'min-h-0 flex-1 overflow-auto',
           '**:data-[slot=table-header]:[--table-header-bg:var(--table-header)]',

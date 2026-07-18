@@ -23,7 +23,8 @@ import type {
   OnChangeFn,
   PaginationState,
 } from '@tanstack/react-table'
-import { useEffect, useRef } from 'react'
+import { useReducedMotion } from 'motion/react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -43,15 +44,19 @@ import {
   LOG_TYPE_ENUM,
   USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS,
 } from '../constants'
+import type { UsageLog } from '../data/schema'
 import { useColumnsByCategory } from '../lib/columns'
+import { getUsageLogLiveKey, mergeUsageLogLiveFeed } from '../lib/live-feed'
 import { fetchLogsByCategory, getLogQueryEndTime } from '../lib/utils'
 import type { LogCategory } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
+import { LiveUsageLogRow } from './live-usage-log-row'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
 import { UsageLogsMobileList } from './usage-logs-mobile-card'
 import { useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
+const LIVE_ROW_HIGHLIGHT_MS = 1_800
 
 const logTypeRowTint: Record<number, string> = {
   [LOG_TYPE_ENUM.ERROR]: 'bg-rose-50/40 dark:bg-rose-950/20',
@@ -86,6 +91,17 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   const searchParams = route.useSearch()
   const { autoRefreshEnabled, setAutoRefreshEnabled } = useUsageLogsContext()
   const previousPageIndexRef = useRef<number | null>(null)
+  const liveTableBodyRef = useRef<HTMLDivElement>(null)
+  const liveFeedContextRef = useRef('')
+  const liveLogsRef = useRef<UsageLog[]>([])
+  const liveHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
+  const [liveLogs, setLiveLogs] = useState<UsageLog[]>([])
+  const [enteringLogKeys, setEnteringLogKeys] = useState<Set<string>>(
+    () => new Set()
+  )
+  const shouldReduceMotion = useReducedMotion()
 
   const {
     columnFilters,
@@ -127,6 +143,17 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
 
   const isAutoRefreshActive =
     autoRefreshEnabled && logCategory === 'common' && pagination.pageIndex === 0
+  const liveFeedContextKey = useMemo(
+    () =>
+      JSON.stringify([
+        logCategory,
+        isAdmin,
+        pagination.pageSize,
+        columnFilters,
+        searchParams,
+      ]),
+    [columnFilters, isAdmin, logCategory, pagination.pageSize, searchParams]
+  )
 
   useEffect(() => {
     if (autoRefreshEnabled && logCategory !== 'common') {
@@ -174,7 +201,9 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       })
 
       if (!result?.success) {
-        toast.error(result?.message || t('Failed to load logs'))
+        toast.error(result?.message || t('Failed to load logs'), {
+          id: 'usage-logs-load-error',
+        })
         return DEFAULT_LOGS_DATA
       }
 
@@ -192,7 +221,91 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     refetchIntervalInBackground: false,
   })
 
-  const logs = data?.items || []
+  const rawLogs = data?.items || DEFAULT_LOGS_DATA.items
+
+  useEffect(() => {
+    if (isAutoRefreshActive) return
+
+    liveFeedContextRef.current = ''
+    liveLogsRef.current = []
+    setLiveLogs([])
+    setEnteringLogKeys((current) =>
+      current.size > 0 ? new Set<string>() : current
+    )
+    if (liveHighlightTimerRef.current) {
+      clearTimeout(liveHighlightTimerRef.current)
+      liveHighlightTimerRef.current = null
+    }
+  }, [isAutoRefreshActive])
+
+  useEffect(() => {
+    if (!isAutoRefreshActive) return
+
+    const incomingLogs = rawLogs as UsageLog[]
+    if (liveFeedContextRef.current !== liveFeedContextKey) {
+      liveFeedContextRef.current = liveFeedContextKey
+      liveLogsRef.current = incomingLogs
+      setLiveLogs(incomingLogs)
+      setEnteringLogKeys((current) =>
+        current.size > 0 ? new Set<string>() : current
+      )
+      return
+    }
+
+    const merged = mergeUsageLogLiveFeed(
+      liveLogsRef.current,
+      incomingLogs,
+      pagination.pageSize
+    )
+    if (merged.newKeys.length === 0) return
+
+    liveLogsRef.current = merged.items
+    setLiveLogs(merged.items)
+    setEnteringLogKeys(new Set(merged.newKeys))
+
+    if (liveHighlightTimerRef.current) {
+      clearTimeout(liveHighlightTimerRef.current)
+    }
+    liveHighlightTimerRef.current = setTimeout(() => {
+      setEnteringLogKeys(new Set())
+      liveHighlightTimerRef.current = null
+    }, LIVE_ROW_HIGHLIGHT_MS)
+  }, [isAutoRefreshActive, liveFeedContextKey, pagination.pageSize, rawLogs])
+
+  useEffect(
+    () => () => {
+      if (liveHighlightTimerRef.current) {
+        clearTimeout(liveHighlightTimerRef.current)
+      }
+    },
+    []
+  )
+
+  useEffect(() => {
+    if (!isAutoRefreshActive || isMobile) return
+
+    const frame = requestAnimationFrame(() => {
+      liveTableBodyRef.current?.scrollTo({ top: 0, behavior: 'auto' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [isAutoRefreshActive, isMobile, liveFeedContextKey])
+
+  useEffect(() => {
+    if (!isAutoRefreshActive || isMobile || enteringLogKeys.size === 0) return
+
+    const frame = requestAnimationFrame(() => {
+      liveTableBodyRef.current?.scrollTo({
+        top: 0,
+        behavior: shouldReduceMotion ? 'auto' : 'smooth',
+      })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [enteringLogKeys, isAutoRefreshActive, isMobile, shouldReduceMotion])
+
+  const logs =
+    isAutoRefreshActive && liveFeedContextRef.current === liveFeedContextKey
+      ? liveLogs
+      : rawLogs
   const columns = useColumnsByCategory(logCategory, isAdmin)
   const isLoadingData = isLoading || (isFetching && !data)
   const handlePaginationChange: OnChangeFn<PaginationState> = (updater) => {
@@ -201,6 +314,15 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     }
     onPaginationChange(updater)
   }
+  const getRowId = useCallback(
+    (row: Record<string, unknown>) => {
+      if (logCategory === 'common') {
+        return getUsageLogLiveKey(row as unknown as UsageLog)
+      }
+      return String(row.id)
+    },
+    [logCategory]
+  )
 
   const { table } = useDataTable({
     data: logs as Record<string, unknown>[],
@@ -211,6 +333,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       isAdmin
     ),
     pagination,
+    getRowId,
     enableRowSelection: false,
     onPaginationChange: handlePaginationChange,
     onColumnFiltersChange,
@@ -221,6 +344,10 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   })
 
   const isCommon = logCategory === 'common'
+  const getLogColumnClassName = useCallback(
+    () => (isCommon ? 'py-2' : 'py-3.5'),
+    [isCommon]
+  )
 
   return (
     <DataTablePage
@@ -234,6 +361,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       )}
       skeletonKeyPrefix='usage-log-skeleton'
       applyHeaderSize
+      tableBodyRef={liveTableBodyRef}
       tableClassName={cn(
         '[&_[data-slot=table]]:text-[13px] [&_[data-slot=table]_td]:text-[13px] [&_[data-slot=table]_td_*]:text-[13px] [&_[data-slot=table]_th]:text-[13px] [&_[data-slot=table]_th_*]:text-[13px]'
       )}
@@ -242,6 +370,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
           table={table}
           isLoading={isLoadingData}
           logCategory={logCategory}
+          enteringRowIds={enteringLogKeys}
         />
       }
       toolbar={
@@ -257,13 +386,32 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
           | undefined
         const tintClass =
           isCommon && logType != null ? (logTypeRowTint[logType] ?? '') : ''
+        const isEntering = isAutoRefreshActive && enteringLogKeys.has(row.id)
+        const rowClassName = cn(
+          'transition-colors duration-700',
+          tintClass,
+          isEntering && 'bg-emerald-500/10 dark:bg-emerald-400/10'
+        )
+
+        if (isAutoRefreshActive && !shouldReduceMotion) {
+          return (
+            <LiveUsageLogRow
+              key={row.id}
+              row={row}
+              className={rowClassName}
+              getColumnClassName={getLogColumnClassName}
+              cellRenderColumns={table.options.columns}
+              isEntering={isEntering}
+            />
+          )
+        }
 
         return (
           <DataTableRow
             key={row.id}
             row={row}
-            className={cn('transition-colors', tintClass)}
-            getColumnClassName={() => (isCommon ? 'py-2' : 'py-3.5')}
+            className={rowClassName}
+            getColumnClassName={getLogColumnClassName}
           />
         )
       }}

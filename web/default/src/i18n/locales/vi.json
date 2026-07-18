@@ -514,6 +514,7 @@
     "Auto detect (default)": "Tự động phát hiện (mặc định)",
     "Auto group behavior": "Cách hoạt động của nhóm auto",
     "Auto refresh": "Tự động làm mới",
+    "Live feed": "Luồng trực tiếp",
     "Auto-ban": "Auto-ban",
     "Auto-ban disables the user and their tokens locally. It does not perform any external joint ban.": "Auto-ban disables the user and their tokens locally. It does not perform any external joint ban.",
     "Auto-ban is not configured for this rule.": "Auto-ban is not configured for this rule.",

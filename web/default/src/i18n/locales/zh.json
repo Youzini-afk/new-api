@@ -514,6 +514,7 @@
     "Auto detect (default)": "自动检测（默认）",
     "Auto group behavior": "自动分组行为",
     "Auto refresh": "自动刷新",
+    "Live feed": "实时流",
     "Auto-ban": "自动封禁",
     "Auto-ban disables the user and their tokens locally. It does not perform any external joint ban.": "自动封禁将在本地禁用该用户及其令牌，不会执行任何外部联合封禁。",
     "Auto-ban is not configured for this rule.": "该规则未配置自动封禁。",

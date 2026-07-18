@@ -514,6 +514,7 @@
     "Auto detect (default)": "Auto detect (default)",
     "Auto group behavior": "Auto group behavior",
     "Auto refresh": "Auto refresh",
+    "Live feed": "Live feed",
     "Auto-ban": "Auto-ban",
     "Auto-ban disables the user and their tokens locally. It does not perform any external joint ban.": "Auto-ban disables the user and their tokens locally. It does not perform any external joint ban.",
     "Auto-ban is not configured for this rule.": "Auto-ban is not configured for this rule.",

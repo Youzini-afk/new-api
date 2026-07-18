@@ -47,7 +47,7 @@ export const DEFAULT_LOGS_DATA = {
 /**
  * Polling intervals used by the opt-in live log view.
  */
-export const USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS = 5_000
+export const USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS = 3_000
 export const USAGE_LOG_STATS_AUTO_REFRESH_INTERVAL_MS = 10_000
 
 // ============================================================================

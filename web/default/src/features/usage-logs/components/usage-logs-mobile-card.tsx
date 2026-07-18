@@ -51,6 +51,7 @@ interface UsageLogsMobileListProps<TData> {
   emptyTitle?: string
   emptyDescription?: string
   logCategory: LogCategory
+  enteringRowIds?: ReadonlySet<string>
 }
 
 function UsageLogsMobileSkeleton() {
@@ -321,6 +322,7 @@ export function UsageLogsMobileList<TData>({
   emptyTitle,
   emptyDescription,
   logCategory,
+  enteringRowIds,
 }: UsageLogsMobileListProps<TData>) {
   const { t } = useTranslation()
 
@@ -362,13 +364,16 @@ export function UsageLogsMobileList<TData>({
           | number
           | undefined
         const tintClass = logType != null ? (logTypeRowTint[logType] ?? '') : ''
+        const isEntering = enteringRowIds?.has(row.id) ?? false
 
         return (
           <div
             key={row.id}
             className={cn(
               'border-border/40 border-b border-l-2 border-l-transparent p-3 transition-colors last:border-b-0',
-              tintClass
+              tintClass,
+              isEntering &&
+                'animate-in fade-in-0 slide-in-from-top-2 bg-emerald-500/10 duration-500 motion-reduce:animate-none dark:bg-emerald-400/10'
             )}
           >
             {logCategory === 'common' && <CommonLogsCard cells={cells} />}

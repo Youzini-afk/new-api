@@ -327,7 +327,7 @@ export function CommonLogsFilterBar<TData>(
             variant={autoRefreshEnabled ? 'secondary' : 'ghost'}
             size='sm'
             onClick={handleAutoRefreshToggle}
-            aria-label={t('Auto refresh')}
+            aria-label={t('Live feed')}
             aria-pressed={autoRefreshEnabled}
             className={cn(
               'text-muted-foreground hover:text-foreground h-7 gap-1.5 px-2 text-xs',
@@ -340,10 +340,10 @@ export function CommonLogsFilterBar<TData>(
         <Radio
           className={cn('size-3.5', autoRefreshEnabled && 'animate-pulse')}
         />
-        <span className='hidden sm:inline'>{t('Auto refresh')}</span>
+        <span className='hidden sm:inline'>{t('Live feed')}</span>
       </TooltipTrigger>
       <TooltipContent>
-        {t('Auto refresh')} · {USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS / 1000}s
+        {t('Live feed')} · {USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS / 1000}s
       </TooltipContent>
     </Tooltip>
   )

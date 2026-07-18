@@ -514,6 +514,7 @@
     "Auto detect (default)": "自動検出 (デフォルト)",
     "Auto group behavior": "auto グループの動作",
     "Auto refresh": "自動更新",
+    "Live feed": "ライブフィード",
     "Auto-ban": "Auto-ban",
     "Auto-ban disables the user and their tokens locally. It does not perform any external joint ban.": "Auto-ban disables the user and their tokens locally. It does not perform any external joint ban.",
     "Auto-ban is not configured for this rule.": "Auto-ban is not configured for this rule.",
