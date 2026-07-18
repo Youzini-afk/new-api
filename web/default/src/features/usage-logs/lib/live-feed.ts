@@ -18,6 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { UsageLog } from '../data/schema'
 
+const LIVE_FEED_TARGET_BATCH_DURATION_MS = 1_400
+const LIVE_FEED_MIN_INSERT_INTERVAL_MS = 55
+const LIVE_FEED_MAX_INSERT_INTERVAL_MS = 420
+
 /**
  * ClickHouse supplies page-relative display IDs, so the live feed cannot use
  * `id` to recognize a row across polls. Request IDs are the best identity when
@@ -62,7 +66,7 @@ export function mergeUsageLogLiveFeed(
   previous: UsageLog[],
   incoming: UsageLog[],
   limit: number
-): { items: UsageLog[]; newKeys: string[] } {
+): { items: UsageLog[]; newItems: UsageLog[]; newKeys: string[] } {
   const previousKeys = new Set(previous.map(getUsageLogLiveKey))
   const nextKeys = new Set<string>()
   const newItems: UsageLog[] = []
@@ -76,7 +80,7 @@ export function mergeUsageLogLiveFeed(
   }
 
   if (newItems.length === 0) {
-    return { items: previous, newKeys: [] }
+    return { items: previous, newItems: [], newKeys: [] }
   }
 
   const merged: UsageLog[] = []
@@ -92,6 +96,27 @@ export function mergeUsageLogLiveFeed(
 
   return {
     items: merged.slice(0, Math.max(0, limit)),
+    newItems,
     newKeys: newItems.map(getUsageLogLiveKey),
   }
+}
+
+export function getLiveFeedInsertInterval(itemCount: number): number {
+  if (itemCount <= 1) return 0
+
+  return Math.min(
+    LIVE_FEED_MAX_INSERT_INTERVAL_MS,
+    Math.max(
+      LIVE_FEED_MIN_INSERT_INTERVAL_MS,
+      Math.round(LIVE_FEED_TARGET_BATCH_DURATION_MS / (itemCount - 1))
+    )
+  )
+}
+
+/**
+ * The API returns newest-first. Inserting oldest-first at the top preserves
+ * the final newest-first order while still letting each row enter separately.
+ */
+export function getLiveFeedInsertionOrder(newItems: UsageLog[]): UsageLog[] {
+  return [...newItems].reverse()
 }

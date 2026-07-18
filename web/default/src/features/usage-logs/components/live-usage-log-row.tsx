@@ -32,7 +32,6 @@ import { TableCell, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 
 const MotionTableRow = motion.create(TableRow)
-const LIVE_ROW_EASE = [0.22, 1, 0.36, 1] as const
 
 interface LiveUsageLogRowProps<TData> {
   row: Row<TData>
@@ -44,18 +43,24 @@ interface LiveUsageLogRowProps<TData> {
 
 function LiveUsageLogRowInner<TData>(props: LiveUsageLogRowProps<TData>) {
   void props.cellRenderColumns
-  const delay = Math.min(props.row.index, 8) * 0.035
 
   return (
     <MotionTableRow
       layout='position'
-      initial={props.isEntering ? { opacity: 0, y: -22 } : false}
-      animate={{ opacity: 1, y: 0 }}
+      initial={props.isEntering ? { opacity: 0, y: -16, scaleY: 0.96 } : false}
+      animate={{ opacity: 1, y: 0, scaleY: 1 }}
       transition={{
-        layout: { duration: 0.38, ease: LIVE_ROW_EASE },
-        opacity: { duration: 0.24, delay },
-        y: { duration: 0.38, delay, ease: LIVE_ROW_EASE },
+        layout: {
+          type: 'spring',
+          stiffness: 300,
+          damping: 32,
+          mass: 0.7,
+        },
+        opacity: { duration: 0.2, ease: 'easeOut' },
+        y: { type: 'spring', stiffness: 380, damping: 30, mass: 0.55 },
+        scaleY: { type: 'spring', stiffness: 360, damping: 30, mass: 0.55 },
       }}
+      style={{ transformOrigin: 'top' }}
       data-state={props.row.getIsSelected() ? 'selected' : undefined}
       className={props.className}
     >

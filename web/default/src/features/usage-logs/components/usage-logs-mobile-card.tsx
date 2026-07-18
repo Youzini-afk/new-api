@@ -373,7 +373,7 @@ export function UsageLogsMobileList<TData>({
               'border-border/40 border-b border-l-2 border-l-transparent p-3 transition-colors last:border-b-0',
               tintClass,
               isEntering &&
-                'animate-in fade-in-0 slide-in-from-top-2 bg-emerald-500/10 duration-500 motion-reduce:animate-none dark:bg-emerald-400/10'
+                'animate-in fade-in-0 slide-in-from-top-2 duration-400 motion-reduce:animate-none'
             )}
           >
             {logCategory === 'common' && <CommonLogsCard cells={cells} />}

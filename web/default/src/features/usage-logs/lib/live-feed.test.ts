@@ -20,7 +20,12 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import type { UsageLog } from '../data/schema'
-import { getUsageLogLiveKey, mergeUsageLogLiveFeed } from './live-feed'
+import {
+  getLiveFeedInsertInterval,
+  getLiveFeedInsertionOrder,
+  getUsageLogLiveKey,
+  mergeUsageLogLiveFeed,
+} from './live-feed'
 
 function createLog(overrides: Partial<UsageLog> = {}): UsageLog {
   return {
@@ -107,6 +112,25 @@ describe('usage log live feed', () => {
     assert.deepEqual(
       result.items.map((log) => log.request_id),
       ['request-4', 'request-3', 'request-2']
+    )
+  })
+
+  test('spreads batches over a bounded insertion window', () => {
+    assert.equal(getLiveFeedInsertInterval(1), 0)
+    assert.equal(getLiveFeedInsertInterval(4), 420)
+    assert.equal(getLiveFeedInsertInterval(100), 55)
+  })
+
+  test('inserts a newest-first batch one row at a time without changing final order', () => {
+    const newest = createLog({ request_id: 'request-3' })
+    const middle = createLog({ request_id: 'request-2' })
+    const oldest = createLog({ request_id: 'request-1' })
+
+    assert.deepEqual(
+      getLiveFeedInsertionOrder([newest, middle, oldest]).map(
+        (log) => log.request_id
+      ),
+      ['request-1', 'request-2', 'request-3']
     )
   })
 })

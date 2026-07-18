@@ -46,7 +46,12 @@ import {
 } from '../constants'
 import type { UsageLog } from '../data/schema'
 import { useColumnsByCategory } from '../lib/columns'
-import { getUsageLogLiveKey, mergeUsageLogLiveFeed } from '../lib/live-feed'
+import {
+  getLiveFeedInsertInterval,
+  getLiveFeedInsertionOrder,
+  getUsageLogLiveKey,
+  mergeUsageLogLiveFeed,
+} from '../lib/live-feed'
 import { fetchLogsByCategory, getLogQueryEndTime } from '../lib/utils'
 import type { LogCategory } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
@@ -56,7 +61,7 @@ import { UsageLogsMobileList } from './usage-logs-mobile-card'
 import { useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
-const LIVE_ROW_HIGHLIGHT_MS = 1_800
+const LIVE_ROW_ENTER_DURATION_MS = 650
 
 const logTypeRowTint: Record<number, string> = {
   [LOG_TYPE_ENUM.ERROR]: 'bg-rose-50/40 dark:bg-rose-950/20',
@@ -94,9 +99,14 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   const liveTableBodyRef = useRef<HTMLDivElement>(null)
   const liveFeedContextRef = useRef('')
   const liveLogsRef = useRef<UsageLog[]>([])
-  const liveHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
+  const pendingLiveLogsRef = useRef<UsageLog[]>([])
+  const liveInsertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const liveInsertIntervalRef = useRef(0)
+  const liveEntryTimersRef = useRef(
+    new Map<string, ReturnType<typeof setTimeout>>()
   )
+  const livePageSizeRef = useRef(100)
+  const liveActiveRef = useRef(false)
   const [liveLogs, setLiveLogs] = useState<UsageLog[]>([])
   const [enteringLogKeys, setEnteringLogKeys] = useState<Set<string>>(
     () => new Set()
@@ -154,6 +164,72 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       ]),
     [columnFilters, isAdmin, logCategory, pagination.pageSize, searchParams]
   )
+  liveActiveRef.current = isAutoRefreshActive
+  livePageSizeRef.current = pagination.pageSize
+
+  const clearLiveFeedTimers = useCallback(() => {
+    if (liveInsertTimerRef.current) {
+      clearTimeout(liveInsertTimerRef.current)
+      liveInsertTimerRef.current = null
+    }
+    for (const timer of liveEntryTimersRef.current.values()) {
+      clearTimeout(timer)
+    }
+    liveEntryTimersRef.current.clear()
+    pendingLiveLogsRef.current = []
+    liveInsertIntervalRef.current = 0
+  }, [])
+
+  const markLiveRowEntering = useCallback((key: string) => {
+    setEnteringLogKeys((current) => {
+      const next = new Set(current)
+      next.add(key)
+      return next
+    })
+
+    const existingTimer = liveEntryTimersRef.current.get(key)
+    if (existingTimer) clearTimeout(existingTimer)
+
+    const timer = setTimeout(() => {
+      setEnteringLogKeys((current) => {
+        if (!current.has(key)) return current
+        const next = new Set(current)
+        next.delete(key)
+        return next
+      })
+      liveEntryTimersRef.current.delete(key)
+    }, LIVE_ROW_ENTER_DURATION_MS)
+    liveEntryTimersRef.current.set(key, timer)
+  }, [])
+
+  const drainLiveFeedQueue = useCallback(() => {
+    liveInsertTimerRef.current = null
+    if (!liveActiveRef.current) {
+      pendingLiveLogsRef.current = []
+      return
+    }
+
+    const nextLog = pendingLiveLogsRef.current.shift()
+    if (!nextLog) return
+
+    const merged = mergeUsageLogLiveFeed(
+      liveLogsRef.current,
+      [nextLog],
+      livePageSizeRef.current
+    )
+    if (merged.newKeys.length > 0) {
+      liveLogsRef.current = merged.items
+      setLiveLogs(merged.items)
+      markLiveRowEntering(merged.newKeys[0])
+    }
+
+    if (pendingLiveLogsRef.current.length > 0) {
+      liveInsertTimerRef.current = setTimeout(
+        drainLiveFeedQueue,
+        liveInsertIntervalRef.current
+      )
+    }
+  }, [markLiveRowEntering])
 
   useEffect(() => {
     if (autoRefreshEnabled && logCategory !== 'common') {
@@ -226,23 +302,21 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   useEffect(() => {
     if (isAutoRefreshActive) return
 
+    clearLiveFeedTimers()
     liveFeedContextRef.current = ''
     liveLogsRef.current = []
     setLiveLogs([])
     setEnteringLogKeys((current) =>
       current.size > 0 ? new Set<string>() : current
     )
-    if (liveHighlightTimerRef.current) {
-      clearTimeout(liveHighlightTimerRef.current)
-      liveHighlightTimerRef.current = null
-    }
-  }, [isAutoRefreshActive])
+  }, [clearLiveFeedTimers, isAutoRefreshActive])
 
   useEffect(() => {
     if (!isAutoRefreshActive) return
 
     const incomingLogs = rawLogs as UsageLog[]
     if (liveFeedContextRef.current !== liveFeedContextKey) {
+      clearLiveFeedTimers()
       liveFeedContextRef.current = liveFeedContextKey
       liveLogsRef.current = incomingLogs
       setLiveLogs(incomingLogs)
@@ -252,34 +326,48 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       return
     }
 
-    const merged = mergeUsageLogLiveFeed(
-      liveLogsRef.current,
+    const knownLogs = [...liveLogsRef.current, ...pendingLiveLogsRef.current]
+    const discovered = mergeUsageLogLiveFeed(
+      knownLogs,
       incomingLogs,
-      pagination.pageSize
+      knownLogs.length + incomingLogs.length
     )
-    if (merged.newKeys.length === 0) return
+    if (discovered.newItems.length === 0) return
 
-    liveLogsRef.current = merged.items
-    setLiveLogs(merged.items)
-    setEnteringLogKeys(new Set(merged.newKeys))
-
-    if (liveHighlightTimerRef.current) {
-      clearTimeout(liveHighlightTimerRef.current)
+    pendingLiveLogsRef.current.push(
+      ...getLiveFeedInsertionOrder(discovered.newItems)
+    )
+    const nextInterval = getLiveFeedInsertInterval(
+      pendingLiveLogsRef.current.length
+    )
+    if (nextInterval > 0) {
+      liveInsertIntervalRef.current =
+        liveInsertTimerRef.current && liveInsertIntervalRef.current > 0
+          ? Math.min(liveInsertIntervalRef.current, nextInterval)
+          : nextInterval
     }
-    liveHighlightTimerRef.current = setTimeout(() => {
-      setEnteringLogKeys(new Set())
-      liveHighlightTimerRef.current = null
-    }, LIVE_ROW_HIGHLIGHT_MS)
-  }, [isAutoRefreshActive, liveFeedContextKey, pagination.pageSize, rawLogs])
 
-  useEffect(
-    () => () => {
-      if (liveHighlightTimerRef.current) {
-        clearTimeout(liveHighlightTimerRef.current)
-      }
-    },
-    []
-  )
+    if (!isMobile && (liveTableBodyRef.current?.scrollTop ?? 0) > 2) {
+      liveTableBodyRef.current?.scrollTo({
+        top: 0,
+        behavior: shouldReduceMotion ? 'auto' : 'smooth',
+      })
+    }
+
+    if (!liveInsertTimerRef.current) {
+      drainLiveFeedQueue()
+    }
+  }, [
+    clearLiveFeedTimers,
+    drainLiveFeedQueue,
+    isAutoRefreshActive,
+    isMobile,
+    liveFeedContextKey,
+    rawLogs,
+    shouldReduceMotion,
+  ])
+
+  useEffect(() => () => clearLiveFeedTimers(), [clearLiveFeedTimers])
 
   useEffect(() => {
     if (!isAutoRefreshActive || isMobile) return
@@ -289,18 +377,6 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     })
     return () => cancelAnimationFrame(frame)
   }, [isAutoRefreshActive, isMobile, liveFeedContextKey])
-
-  useEffect(() => {
-    if (!isAutoRefreshActive || isMobile || enteringLogKeys.size === 0) return
-
-    const frame = requestAnimationFrame(() => {
-      liveTableBodyRef.current?.scrollTo({
-        top: 0,
-        behavior: shouldReduceMotion ? 'auto' : 'smooth',
-      })
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [enteringLogKeys, isAutoRefreshActive, isMobile, shouldReduceMotion])
 
   const logs =
     isAutoRefreshActive && liveFeedContextRef.current === liveFeedContextKey
@@ -362,6 +438,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       skeletonKeyPrefix='usage-log-skeleton'
       applyHeaderSize
       tableBodyRef={liveTableBodyRef}
+      tableBodyClassName={isAutoRefreshActive ? '[overflow-anchor:none]' : ''}
       tableClassName={cn(
         '[&_[data-slot=table]]:text-[13px] [&_[data-slot=table]_td]:text-[13px] [&_[data-slot=table]_td_*]:text-[13px] [&_[data-slot=table]_th]:text-[13px] [&_[data-slot=table]_th_*]:text-[13px]'
       )}
@@ -387,11 +464,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
         const tintClass =
           isCommon && logType != null ? (logTypeRowTint[logType] ?? '') : ''
         const isEntering = isAutoRefreshActive && enteringLogKeys.has(row.id)
-        const rowClassName = cn(
-          'transition-colors duration-700',
-          tintClass,
-          isEntering && 'bg-emerald-500/10 dark:bg-emerald-400/10'
-        )
+        const rowClassName = cn('transition-colors duration-300', tintClass)
 
         if (isAutoRefreshActive && !shouldReduceMotion) {
           return (

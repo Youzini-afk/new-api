@@ -332,7 +332,7 @@ export function CommonLogsFilterBar<TData>(
             className={cn(
               'text-muted-foreground hover:text-foreground h-7 gap-1.5 px-2 text-xs',
               autoRefreshEnabled &&
-                'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/15 hover:text-emerald-600 dark:text-emerald-400 dark:hover:text-emerald-400'
+                'bg-sky-500/10 text-sky-600 hover:bg-sky-500/15 hover:text-sky-600 dark:text-sky-400 dark:hover:text-sky-400'
             )}
           />
         }
