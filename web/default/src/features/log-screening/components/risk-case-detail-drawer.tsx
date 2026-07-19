@@ -16,14 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  useIsMutating,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Loader2, ShieldCheck, Sparkles } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -82,8 +77,6 @@ const DEFAULT_ACTION: RiskActionRequest = {
   user_message: '',
 }
 
-const ANALYZE_MUTATION_KEY = ['risk-control', 'case', 'analyze'] as const
-
 export function RiskCaseDetailDrawer(props: RiskCaseDetailDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -92,6 +85,12 @@ export function RiskCaseDetailDrawer(props: RiskCaseDetailDrawerProps) {
     useState<RiskActionRequest>(DEFAULT_ACTION)
   const [reviewNote, setReviewNote] = useState('')
   const [confirmActionOpen, setConfirmActionOpen] = useState(false)
+  const [analyzingCaseIds, setAnalyzingCaseIds] = useState<Set<number>>(
+    () => new Set()
+  )
+  const analyzeRequestsRef = useRef(
+    new Map<number, ReturnType<typeof analyzeRiskCase>>()
+  )
 
   const detailQuery = useQuery({
     queryKey: ['risk-control', 'case', props.caseId],
@@ -130,24 +129,43 @@ export function RiskCaseDetailDrawer(props: RiskCaseDetailDrawerProps) {
   const invalidate = () => invalidateCase(props.caseId)
 
   const analyzingCurrentCase =
-    useIsMutating({
-      mutationKey: ANALYZE_MUTATION_KEY,
-      predicate: (mutation) => mutation.state.variables === props.caseId,
-    }) > 0
+    props.caseId !== null && analyzingCaseIds.has(props.caseId)
 
-  const analyzeMutation = useMutation({
-    mutationKey: ANALYZE_MUTATION_KEY,
-    mutationFn: (caseId: number) => analyzeRiskCase(caseId),
-    onSuccess: (result, caseId) => {
-      if (!result.success) {
-        toast.error(result.message || t('Agent analysis failed'))
-        return
-      }
-      toast.success(t('Agent analysis completed'))
-      invalidateCase(caseId)
-    },
-    onError: (error: Error) => toast.error(error.message),
-  })
+  const analyzeCase = (caseId: number) => {
+    if (analyzeRequestsRef.current.has(caseId)) return
+
+    const request = analyzeRiskCase(caseId)
+    analyzeRequestsRef.current.set(caseId, request)
+    setAnalyzingCaseIds((current) => {
+      const next = new Set(current)
+      next.add(caseId)
+      return next
+    })
+
+    void request
+      .then((result) => {
+        if (!result.success) {
+          toast.error(result.message || t('Agent analysis failed'))
+          return
+        }
+        toast.success(t('Agent analysis completed'))
+        invalidateCase(caseId)
+      })
+      .catch((error: unknown) => {
+        toast.error(
+          error instanceof Error ? error.message : t('Agent analysis failed')
+        )
+      })
+      .finally(() => {
+        if (analyzeRequestsRef.current.get(caseId) !== request) return
+        analyzeRequestsRef.current.delete(caseId)
+        setAnalyzingCaseIds((current) => {
+          const next = new Set(current)
+          next.delete(caseId)
+          return next
+        })
+      })
+  }
 
   const reviewMutation = useMutation({
     mutationFn: (status: string) =>
@@ -305,7 +323,7 @@ export function RiskCaseDetailDrawer(props: RiskCaseDetailDrawerProps) {
                       disabled={analyzingCurrentCase}
                       onClick={() => {
                         if (props.caseId !== null) {
-                          analyzeMutation.mutate(props.caseId)
+                          analyzeCase(props.caseId)
                         }
                       }}
                     >
