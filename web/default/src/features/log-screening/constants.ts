@@ -25,22 +25,26 @@ For commercial licensing, please contact support@quantumnous.com
 // ============================================================================
 
 export type LogScreeningTabId =
+  | 'cases'
   | 'records'
   | 'prompt-blocks'
   | 'ua-blocks'
+  | 'risk-settings'
   | 'settings'
 
 export const LOG_SCREENING_TABS: {
   id: LogScreeningTabId
   titleKey: string
 }[] = [
+  { id: 'cases', titleKey: 'Risk Cases' },
   { id: 'records', titleKey: 'Screening Records' },
   { id: 'prompt-blocks', titleKey: 'Prompt Blocks' },
   { id: 'ua-blocks', titleKey: 'UA Blocks' },
-  { id: 'settings', titleKey: 'Settings' },
+  { id: 'risk-settings', titleKey: 'Risk Settings' },
+  { id: 'settings', titleKey: 'Interception Settings' },
 ]
 
-export const LOG_SCREENING_DEFAULT_TAB: LogScreeningTabId = 'records'
+export const LOG_SCREENING_DEFAULT_TAB: LogScreeningTabId = 'cases'
 
 // ============================================================================
 // Screening run kinds

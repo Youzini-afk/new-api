@@ -2,7 +2,6 @@ package controller
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -634,12 +634,17 @@ func generateErrorInsightRulesWithAI(c *gin.Context, cfg *system_setting.ErrorIn
 }
 
 func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonOutputParams json.RawMessage, prompt string) (string, error) {
+	const maxAIResponseBytes = 2 << 20
+
 	channel, err := model.GetChannelById(channelID, true)
 	if err != nil {
 		return "", errors.New("failed to load AI channel")
 	}
 	if channel.Status != common.ChannelStatusEnabled {
 		return "", errors.New("AI channel is not enabled")
+	}
+	if !channel.IsAvailableAt(time.Now()) {
+		return "", errors.New("AI channel is outside its configured availability schedule")
 	}
 	request := &dto.GeneralOpenAIRequest{
 		Model: modelName,
@@ -651,7 +656,7 @@ func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonO
 		return "", err
 	}
 	relayCtx, _ := gin.CreateTestContext(c.Writer)
-	relayCtx.Request = c.Request.Clone(context.Background())
+	relayCtx.Request = c.Request.Clone(c.Request.Context())
 	relayCtx.Request.Method = http.MethodPost
 	relayCtx.Request.URL.Path = "/v1/chat/completions"
 	if newAPIError := middleware.SetupContextForSelectedChannel(relayCtx, channel, modelName); newAPIError != nil {
@@ -705,15 +710,18 @@ func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonO
 		return "", errors.New("AI channel returned empty response")
 	}
 	httpResp := resp.(*http.Response)
+	defer httpResp.Body.Close()
 	if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
 		err := service.RelayErrorHandler(relayCtx.Request.Context(), httpResp, true)
 		return "", fmt.Errorf("AI channel request failed: %w", err)
 	}
-	body, err := io.ReadAll(httpResp.Body)
+	body, err := io.ReadAll(io.LimitReader(httpResp.Body, maxAIResponseBytes+1))
 	if err != nil {
 		return "", err
 	}
-	_ = httpResp.Body.Close()
+	if len(body) > maxAIResponseBytes {
+		return "", errors.New("AI channel response is too large")
+	}
 	return extractErrorInsightAIContent(body)
 }
 

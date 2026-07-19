@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
  * API functions for log screening (Phase 5 admin-only endpoints).
  */
 import { api } from '@/lib/api'
+
 import type {
   LogScreeningCleanupResult,
   LogScreeningListParams,
@@ -33,6 +34,13 @@ import type {
   UABlockLogDetail,
   UABlockLogItem,
   UABlockLogListParams,
+  RiskActionItem,
+  RiskActionRequest,
+  RiskCaseDetail,
+  RiskCaseItem,
+  RiskCaseListParams,
+  RiskControlSetting,
+  RiskRunTaskResult,
 } from './types'
 
 // ============================================================================
@@ -126,4 +134,65 @@ export function appendUABlockRemark(
   return api
     .post(`/api/log_screening/ua_block_logs/${logId}/remark`, { remark })
     .then((res) => res.data)
+}
+
+// ============================================================================
+// Comprehensive risk control
+// ============================================================================
+
+export function getRiskCases(
+  params: RiskCaseListParams
+): Promise<LogScreeningResponse<LogScreeningPage<RiskCaseItem>>> {
+  return api.get('/api/risk_control/cases', { params }).then((res) => res.data)
+}
+
+export function getRiskCaseDetail(
+  caseId: number
+): Promise<LogScreeningResponse<RiskCaseDetail>> {
+  return api.get(`/api/risk_control/cases/${caseId}`).then((res) => res.data)
+}
+
+export function analyzeRiskCase(
+  caseId: number
+): Promise<LogScreeningResponse<RiskCaseItem>> {
+  return api
+    .post(`/api/risk_control/cases/${caseId}/analyze`)
+    .then((res) => res.data)
+}
+
+export function reviewRiskCase(
+  caseId: number,
+  status: string,
+  note: string
+): Promise<LogScreeningResponse<{ id: number }>> {
+  return api
+    .post(`/api/risk_control/cases/${caseId}/review`, { status, note })
+    .then((res) => res.data)
+}
+
+export function applyRiskCaseAction(
+  caseId: number,
+  request: RiskActionRequest
+): Promise<LogScreeningResponse<RiskActionItem>> {
+  return api
+    .post(`/api/risk_control/cases/${caseId}/action`, request)
+    .then((res) => res.data)
+}
+
+export function runRiskControl(): Promise<
+  LogScreeningResponse<RiskRunTaskResult>
+> {
+  return api.post('/api/risk_control/run').then((res) => res.data)
+}
+
+export function getRiskControlSetting(): Promise<
+  LogScreeningResponse<RiskControlSetting>
+> {
+  return api.get('/api/risk_control/settings').then((res) => res.data)
+}
+
+export function saveRiskControlSetting(
+  setting: RiskControlSetting
+): Promise<LogScreeningResponse<RiskControlSetting>> {
+  return api.put('/api/risk_control/settings', setting).then((res) => res.data)
 }

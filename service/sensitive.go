@@ -4,11 +4,38 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/types"
 )
+
+type compiledSensitiveRegex struct {
+	regex *regexp.Regexp
+}
+
+// sensitiveRegexCache keeps compiled expressions by their exact configured
+// pattern. Rule metadata (message/status/auto-ban) is still read from the
+// current setting on every match, so changing metadata takes effect
+// immediately without recompiling the expression.
+var sensitiveRegexCache sync.Map
+
+func getCompiledSensitiveRegex(pattern string) *regexp.Regexp {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil
+	}
+	if cached, ok := sensitiveRegexCache.Load(pattern); ok {
+		return cached.(compiledSensitiveRegex).regex
+	}
+	re, err := regexp.Compile("(?i)" + pattern)
+	if err != nil {
+		re = nil
+	}
+	actual, _ := sensitiveRegexCache.LoadOrStore(pattern, compiledSensitiveRegex{regex: re})
+	return actual.(compiledSensitiveRegex).regex
+}
 
 func CheckSensitiveMessages(messages []dto.Message) ([]string, error) {
 	if len(messages) == 0 {
@@ -161,8 +188,8 @@ func matchSensitiveRule(text string, rules []setting.SensitiveRegexRule, matchMo
 		if pattern == "" {
 			continue
 		}
-		re, err := regexp.Compile("(?i)" + pattern)
-		if err != nil {
+		re := getCompiledSensitiveRegex(pattern)
+		if re == nil {
 			continue
 		}
 		if !re.MatchString(text) {
@@ -223,8 +250,8 @@ func SensitiveRegexContains(text string, patterns []string) (bool, []string) {
 		if pattern == "" {
 			continue
 		}
-		re, err := regexp.Compile("(?i)" + pattern)
-		if err != nil {
+		re := getCompiledSensitiveRegex(pattern)
+		if re == nil {
 			continue
 		}
 		if re.MatchString(text) {

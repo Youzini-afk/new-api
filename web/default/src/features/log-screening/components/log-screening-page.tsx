@@ -19,30 +19,36 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Main log screening page shell with tabs.
  */
-import { useCallback } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
-import { useTranslation } from 'react-i18next'
 import { ShieldCheck } from 'lucide-react'
+import { useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
+
 import {
   LOG_SCREENING_DEFAULT_TAB,
   LOG_SCREENING_TABS,
   type LogScreeningTabId,
 } from '../constants'
-import { ScreeningRecordsTab } from './screening-records-tab'
 import { PromptBlocksTab } from './prompt-blocks-tab'
-import { UABlocksTab } from './ua-blocks-tab'
+import { RiskCasesTab } from './risk-cases-tab'
+import { RiskSettingsTab } from './risk-settings-tab'
+import { ScreeningRecordsTab } from './screening-records-tab'
 import { ScreeningSettingsTab } from './screening-settings-tab'
+import { UABlocksTab } from './ua-blocks-tab'
 
 const route = getRouteApi('/_authenticated/log-screening/$tab')
 
 const TAB_COMPONENTS: Record<LogScreeningTabId, React.ComponentType> = {
+  cases: RiskCasesTab,
   records: ScreeningRecordsTab,
   'prompt-blocks': PromptBlocksTab,
   'ua-blocks': UABlocksTab,
+  'risk-settings': RiskSettingsTab,
   settings: ScreeningSettingsTab,
 }
 
@@ -52,7 +58,9 @@ export function LogScreeningPage() {
   const navigate = useNavigate()
   const role = useAuthStore((state) => state.auth.user?.role ?? ROLE.GUEST)
   const visibleTabs = LOG_SCREENING_TABS.filter(
-    (tab) => tab.id !== 'settings' || role >= ROLE.SUPER_ADMIN
+    (tab) =>
+      (tab.id !== 'settings' && tab.id !== 'risk-settings') ||
+      role >= ROLE.SUPER_ADMIN
   )
 
   const activeTab = isLogScreeningTabId(params.tab)
@@ -77,7 +85,7 @@ export function LogScreeningPage() {
       <SectionPageLayout.Title>
         <span className='inline-flex items-center gap-2'>
           <ShieldCheck className='size-5' />
-          {t('Log Screening')}
+          {t('Risk Control')}
         </span>
       </SectionPageLayout.Title>
       <SectionPageLayout.Content>

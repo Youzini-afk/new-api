@@ -1,9 +1,12 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -11,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // logScreeningRiskLevelHigh is the risk level stored for high-risk screening
@@ -24,6 +28,13 @@ const logScreeningRiskLevelHigh = "high"
 // BuildRawRequestParamsForInterceptLog, so a large body or many headers do not
 // blow up the TEXT column of an interception log.
 const rawInterceptLogMaxBytes = 8192
+
+type observedScreeningCacheEntry struct {
+	observed  bool
+	expiresAt int64
+}
+
+var observedScreeningUserCache sync.Map
 
 // BuildRequestParamsForLog extracts configured fields from the request body and
 // returns a sanitized map. It is admin-visible only (merged into log "other").
@@ -352,16 +363,52 @@ func isObservedLogScreeningUser(userId int) bool {
 	if model.DB == nil {
 		return false
 	}
-	var record model.LogScreeningRecord
 	now := common.GetTimestamp()
-	err := model.DB.Select("id").
+	if cached, ok := observedScreeningUserCache.Load(userId); ok {
+		entry := cached.(observedScreeningCacheEntry)
+		if entry.expiresAt > now {
+			return entry.observed
+		}
+		observedScreeningUserCache.Delete(userId)
+	}
+	var record model.LogScreeningRecord
+	err := model.DB.Select("id", "observed_until", "expires_at").
 		Where("user_id = ?", userId).
 		Where("risk_level = ?", logScreeningRiskLevelHigh).
 		Where("(observed_until = 0 OR observed_until >= ?)", now).
 		Where("(expires_at = 0 OR expires_at >= ?)", now).
 		Order("matched_at desc, id desc").
 		First(&record).Error
-	return err == nil
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		common.SysLog("observed log-screening cache lookup failed: " + err.Error())
+		return false
+	}
+	observed := err == nil
+	cacheUntil := now + int64((30 * time.Second).Seconds())
+	if observed {
+		if record.ObservedUntil > 0 && record.ObservedUntil < cacheUntil {
+			cacheUntil = record.ObservedUntil
+		}
+		if record.ExpiresAt > 0 && record.ExpiresAt < cacheUntil {
+			cacheUntil = record.ExpiresAt
+		}
+	} else {
+		cacheUntil = now + int64((10 * time.Second).Seconds())
+	}
+	if cacheUntil <= now {
+		return observed
+	}
+	observedScreeningUserCache.Store(userId, observedScreeningCacheEntry{
+		observed:  observed,
+		expiresAt: cacheUntil,
+	})
+	return observed
+}
+
+func invalidateObservedLogScreeningUser(userId int) {
+	if userId > 0 {
+		observedScreeningUserCache.Delete(userId)
+	}
 }
 
 // MergeRequestParamsToOther appends request params to the log "other" map under

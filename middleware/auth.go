@@ -217,6 +217,41 @@ func UserAuth() func(c *gin.Context) {
 	}
 }
 
+// UserRelayContext refreshes the current user state for session-authenticated
+// relay endpoints. Dashboard sessions can outlive a ban, role change, group
+// change, or risk action, so relay authorization must not rely only on the
+// values captured when the session was created.
+func UserRelayContext() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		userID := c.GetInt("id")
+		if userID <= 0 {
+			abortWithOpenAiMessage(c, http.StatusUnauthorized,
+				common.TranslateMessage(c, i18n.MsgAuthNotLoggedIn))
+			return
+		}
+
+		userCache, err := model.GetUserCache(userID)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("UserRelayContext GetUserCache error for user %d: %v", userID, err))
+			abortWithOpenAiMessage(c, http.StatusInternalServerError,
+				common.TranslateMessage(c, i18n.MsgDatabaseError))
+			return
+		}
+		if userCache.Status != common.UserStatusEnabled {
+			message := common.TranslateMessage(c, i18n.MsgAuthUserBanned)
+			if userCache.RiskAction == model.RiskActionPermanentBan && strings.TrimSpace(userCache.RiskMessage) != "" {
+				message = strings.TrimSpace(userCache.RiskMessage)
+			}
+			abortWithOpenAiMessage(c, http.StatusForbidden, message)
+			return
+		}
+
+		userCache.WriteContext(c)
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, userCache.Group)
+		c.Next()
+	}
+}
+
 func AdminAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		authHelper(c, common.RoleAdminUser)
@@ -240,21 +275,27 @@ func TokenOrUserAuth() func(c *gin.Context) {
 		// Try session auth first (dashboard users)
 		session := sessions.Default(c)
 		if id := session.Get("id"); id != nil {
-			if status, ok := session.Get("status").(int); ok && status == common.UserStatusEnabled {
-				if userID, ok := id.(int); ok && discordSessionReauthRequired(userID) {
-					session.Clear()
-					_ = session.Save()
-					c.JSON(http.StatusUnauthorized, gin.H{
-						"success": false,
-						"message": "Discord verification is required. Please sign in again with Discord.",
-					})
-					c.Abort()
-					return
-				}
-				c.Set("id", id)
-				c.Next()
+			userID, ok := id.(int)
+			if !ok || userID <= 0 {
+				abortWithOpenAiMessage(c, http.StatusUnauthorized,
+					common.TranslateMessage(c, i18n.MsgAuthNotLoggedIn))
 				return
 			}
+			if discordSessionReauthRequired(userID) {
+				session.Clear()
+				_ = session.Save()
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"success": false,
+					"message": "Discord verification is required. Please sign in again with Discord.",
+				})
+				c.Abort()
+				return
+			}
+			// Session status is only a login-time snapshot. Refresh the user so a
+			// later ban or risk action also applies to session-backed relay paths.
+			c.Set("id", userID)
+			UserRelayContext()(c)
+			return
 		}
 		// Fall back to token auth (API clients)
 		TokenAuth()(c)
@@ -312,9 +353,13 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			return
 		}
 		if userCache.Status != common.UserStatusEnabled {
+			message := common.TranslateMessage(c, i18n.MsgAuthUserBanned)
+			if userCache.RiskAction == model.RiskActionPermanentBan && strings.TrimSpace(userCache.RiskMessage) != "" {
+				message = strings.TrimSpace(userCache.RiskMessage)
+			}
 			c.JSON(http.StatusForbidden, gin.H{
 				"success": false,
-				"message": common.TranslateMessage(c, i18n.MsgAuthUserBanned),
+				"message": message,
 			})
 			c.Abort()
 			return
@@ -427,7 +472,11 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		userEnabled := userCache.Status == common.UserStatusEnabled
 		if !userEnabled {
-			abortWithOpenAiMessage(c, http.StatusForbidden, common.TranslateMessage(c, i18n.MsgAuthUserBanned))
+			message := common.TranslateMessage(c, i18n.MsgAuthUserBanned)
+			if userCache.RiskAction == model.RiskActionPermanentBan && strings.TrimSpace(userCache.RiskMessage) != "" {
+				message = strings.TrimSpace(userCache.RiskMessage)
+			}
+			abortWithOpenAiMessage(c, http.StatusForbidden, message)
 			return
 		}
 

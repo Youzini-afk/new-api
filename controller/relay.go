@@ -135,7 +135,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	needPromptSensitiveCheck := setting.ShouldCheckPromptSensitive()
-	needSensitiveCheck := needPromptSensitiveCheck || setting.ShouldCheckUASensitive()
+	needUASensitiveCheck := setting.ShouldCheckUASensitive() && !common.GetContextKeyBool(c, constant.ContextKeySensitiveUAChecked)
+	needSensitiveCheck := needPromptSensitiveCheck || needUASensitiveCheck
 	needCountToken := constant.CountToken
 	skipSensitiveIntercept := shouldSkipSensitiveIntercept(c, relayInfo.UserId, needSensitiveCheck)
 	// OpenAIRealtime upgrades the websocket at function entry; its body is not a
@@ -488,6 +489,12 @@ func shouldSkipSensitiveIntercept(c *gin.Context, userId int, enabled bool) bool
 	if !enabled {
 		return true
 	}
+	if userRole, ok := common.GetContextKeyType[int](c, constant.ContextKeyUserRole); ok {
+		return userRole >= common.RoleAdminUser
+	}
+	// Compatibility fallback for tests and non-token call paths. TokenAuth
+	// always populates ContextKeyUserRole, so normal relay traffic never reaches
+	// this database lookup.
 	userRole, roleErr := model.GetUserRoleById(userId)
 	if roleErr != nil {
 		logger.LogWarn(c, fmt.Sprintf("failed to get user role for sensitive bypass: %v", roleErr))
@@ -525,7 +532,7 @@ func runSensitiveIntercept(c *gin.Context, meta *types.TokenCountMeta, checkProm
 		}
 	}
 
-	if !setting.ShouldCheckUASensitive() {
+	if !setting.ShouldCheckUASensitive() || common.GetContextKeyBool(c, constant.ContextKeySensitiveUAChecked) {
 		return nil
 	}
 	uaGroup := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyTokenGroup))
@@ -816,7 +823,8 @@ func RelayTask(c *gin.Context) {
 		})
 		return
 	}
-	taskSensitiveCheck := setting.ShouldCheckPromptSensitive() || setting.ShouldCheckUASensitive()
+	taskSensitiveCheck := setting.ShouldCheckPromptSensitive() ||
+		(setting.ShouldCheckUASensitive() && !common.GetContextKeyBool(c, constant.ContextKeySensitiveUAChecked))
 	if !shouldSkipSensitiveIntercept(c, relayInfo.UserId, taskSensitiveCheck) {
 		var meta *types.TokenCountMeta
 		if setting.ShouldCheckPromptSensitive() {

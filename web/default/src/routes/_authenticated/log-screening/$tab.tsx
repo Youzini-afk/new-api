@@ -17,13 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { useAuthStore } from '@/stores/auth-store'
-import { ROLE } from '@/lib/roles'
+
 import { LogScreeningPage } from '@/features/log-screening'
 import {
   LOG_SCREENING_DEFAULT_TAB,
   LOG_SCREENING_TABS,
 } from '@/features/log-screening/constants'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/log-screening/$tab')({
   beforeLoad: ({ params, location }) => {
@@ -36,7 +37,10 @@ export const Route = createFileRoute('/_authenticated/log-screening/$tab')({
       })
     }
 
-    if (params.tab === 'settings' && role < ROLE.SUPER_ADMIN) {
+    if (
+      (params.tab === 'settings' || params.tab === 'risk-settings') &&
+      role < ROLE.SUPER_ADMIN
+    ) {
       throw redirect({
         to: '/403',
       })

@@ -316,6 +316,8 @@ func migrateDB() error {
 		&PromptBlockLog{},
 		&UABlockLog{},
 		&SuspiciousIPMark{},
+		&RiskCase{},
+		&RiskAction{},
 		// User-uploaded avatars: blob lives in a separate table so the users
 		// row only carries short avatar_url / avatar_source fields.
 		&UserAvatar{},
@@ -386,6 +388,8 @@ func migrateDBFast() error {
 		{&PromptBlockLog{}, "PromptBlockLog"},
 		{&UABlockLog{}, "UABlockLog"},
 		{&SuspiciousIPMark{}, "SuspiciousIPMark"},
+		{&RiskCase{}, "RiskCase"},
+		{&RiskAction{}, "RiskAction"},
 		// User-uploaded avatars (separate blob table).
 		{&UserAvatar{}, "UserAvatar"},
 		// Error governance insight (admin-only).

@@ -51,6 +51,17 @@ const (
 	ContextKeyUserGroup   ContextKey = "user_group"
 	ContextKeyUsingGroup  ContextKey = "group"
 	ContextKeyUserName    ContextKey = "username"
+	ContextKeyUserRole    ContextKey = "role"
+
+	/* active risk-control summary loaded by TokenAuth from UserBase */
+	ContextKeyRiskAction         ContextKey = "risk_action"
+	ContextKeyRiskUntil          ContextKey = "risk_until"
+	ContextKeyRiskScore          ContextKey = "risk_score"
+	ContextKeyRiskCaseId         ContextKey = "risk_case_id"
+	ContextKeyRiskActionId       ContextKey = "risk_action_id"
+	ContextKeyRiskRequestLimit   ContextKey = "risk_request_limit"
+	ContextKeyRiskMessage        ContextKey = "risk_message"
+	ContextKeySensitiveUAChecked ContextKey = "sensitive_ua_checked"
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 

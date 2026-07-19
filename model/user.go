@@ -61,6 +61,18 @@ type User struct {
 	CreatedAt              int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	LastLoginAt            int64          `json:"last_login_at" gorm:"default:0;column:last_login_at"`
 
+	// Risk-control summary fields are copied into UserBase and therefore ride
+	// the existing token-auth user cache. They are intentionally hidden from
+	// ordinary user payloads; admins inspect the full decision trail through
+	// RiskCase/RiskAction endpoints instead.
+	RiskAction       string `json:"-" gorm:"column:risk_action;type:varchar(32)"`
+	RiskUntil        int64  `json:"-" gorm:"column:risk_until"`
+	RiskScore        int    `json:"-" gorm:"column:risk_score"`
+	RiskCaseId       int64  `json:"-" gorm:"column:risk_case_id"`
+	RiskActionId     int64  `json:"-" gorm:"column:risk_action_id"`
+	RiskRequestLimit int    `json:"-" gorm:"column:risk_request_limit"`
+	RiskMessage      string `json:"-" gorm:"column:risk_message;type:varchar(512)"`
+
 	// Discord gate data contract. No default:true GORM tag: the business default
 	// (gate not passed / not exempt) is enforced by the zero value here.
 	// DiscordRefreshToken stores an encrypted refresh token and must never be
@@ -138,13 +150,21 @@ func DiscordGateScopeStatusForScopes(scopes string) string {
 
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
-		Id:       user.Id,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
+		Id:               user.Id,
+		Role:             user.Role,
+		Group:            user.Group,
+		Quota:            user.Quota,
+		Status:           user.Status,
+		Username:         user.Username,
+		Setting:          user.Setting,
+		Email:            user.Email,
+		RiskAction:       user.RiskAction,
+		RiskUntil:        user.RiskUntil,
+		RiskScore:        user.RiskScore,
+		RiskCaseId:       user.RiskCaseId,
+		RiskActionId:     user.RiskActionId,
+		RiskRequestLimit: user.RiskRequestLimit,
+		RiskMessage:      user.RiskMessage,
 	}
 	return cache
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,110 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
 	service.RegisterSystemTaskHandler(discordGatePatrolHandler{})
 	service.RegisterSystemTaskHandler(discordBanPatrolHandler{})
+	service.RegisterSystemTaskHandler(riskScreeningHandler{})
+}
+
+type riskScreeningTaskPayload struct {
+	Manual bool `json:"manual,omitempty"`
+}
+
+type riskScreeningHandler struct{}
+
+func (riskScreeningHandler) Type() string { return model.SystemTaskTypeRiskScreening }
+
+func (riskScreeningHandler) Enabled() bool {
+	setting := system_setting.GetRiskControlSetting()
+	return (setting.Enabled && setting.ScheduleEnabled) || model.HasActiveExpiringRiskActions()
+}
+
+func (riskScreeningHandler) Interval() time.Duration {
+	return time.Duration(system_setting.GetRiskControlSetting().IntervalMinutes) * time.Minute
+}
+
+func (riskScreeningHandler) NewPayload() any {
+	return riskScreeningTaskPayload{Manual: false}
+}
+
+func (riskScreeningHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := riskScreeningTaskPayload{}
+	if err := task.DecodePayload(&payload); err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	expired, err := service.ExpireRiskActions(ctx, common.GetTimestamp(), 500)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	setting := system_setting.GetRiskControlSetting()
+	if !payload.Manual && !setting.ScheduleEnabled {
+		now := common.GetTimestamp()
+		summary := &service.RiskScreeningRunSummary{
+			Status:         "expiry_only",
+			Enabled:        setting.Enabled,
+			StartedAt:      now,
+			FinishedAt:     now,
+			ExpiredActions: expired,
+			CaseIds:        []int64{},
+		}
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+		return
+	}
+	summary, err := service.RunRiskScreening(ctx, payload.Manual)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	summary.ExpiredActions = expired
+	if setting.AgentEnabled {
+		agentAttempts := 0
+		for _, caseId := range summary.CaseIds {
+			if err := ctx.Err(); err != nil {
+				finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
+				return
+			}
+			riskCase, caseErr := model.GetRiskCaseById(ctx, caseId)
+			if caseErr != nil {
+				summary.AgentErrors++
+				continue
+			}
+			if riskCase.RuleScore < setting.AgentMinRuleScore {
+				continue
+			}
+			// Scheduled Agent work only owns open cases. Reviewing is a human
+			// hold, while actioned/resolved/dismissed cases must wait for an
+			// explicit reopen or genuinely new evidence.
+			if riskCase.Status != model.RiskCaseStatusOpen {
+				continue
+			}
+			if strings.TrimSpace(riskCase.AgentResult) == "" {
+				if agentAttempts >= setting.MaxAgentCasesPerRun {
+					continue
+				}
+				agentAttempts++
+				summary.AgentAttempts = agentAttempts
+				agentContext := newRiskAgentContext(ctx)
+				if analyzeErr := analyzeRiskCaseWithAI(agentContext, riskCase); analyzeErr != nil {
+					common.SysLog(fmt.Sprintf("risk Agent analysis failed for case %d: %v", caseId, analyzeErr))
+					summary.AgentErrors++
+					continue
+				}
+				summary.AgentAnalyzed++
+			}
+			updated, reloadErr := model.GetRiskCaseById(ctx, caseId)
+			if reloadErr != nil {
+				summary.AgentErrors++
+				continue
+			}
+			if _, applied, actionErr := service.MaybeApplyAutomaticRiskAction(ctx, updated, summary.AutoActionsApplied); actionErr != nil {
+				common.SysLog(fmt.Sprintf("risk automatic action failed for case %d: %v", caseId, actionErr))
+				summary.AgentErrors++
+			} else if applied {
+				summary.AutoActionsApplied++
+			}
+		}
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and

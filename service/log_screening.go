@@ -325,6 +325,7 @@ func RunLogScreening(ctx context.Context, operatorUserId int, operatorName strin
 			} else {
 				summary.RecordsUpdated++
 			}
+			invalidateObservedLogScreeningUser(match.UserId)
 			if rule.Name != "" && (created || manual) {
 				if err := appendLogScreeningUserRemark(ctx, match.UserId, rule.Name, matchedAt); err != nil {
 					common.SysLog("log screening append user remark failed: " + err.Error())

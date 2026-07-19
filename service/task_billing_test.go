@@ -58,6 +58,8 @@ func TestMain(m *testing.M) {
 		&model.PromptBlockLog{},
 		&model.UABlockLog{},
 		&model.SuspiciousIPMark{},
+		&model.RiskCase{},
+		&model.RiskAction{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -87,6 +89,8 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM prompt_block_logs")
 		model.DB.Exec("DELETE FROM ua_block_logs")
 		model.DB.Exec("DELETE FROM suspicious_ip_marks")
+		model.DB.Exec("DELETE FROM risk_actions")
+		model.DB.Exec("DELETE FROM risk_cases")
 	})
 }
 

@@ -443,6 +443,23 @@ func SetApiRouter(router *gin.Engine) {
 			logScreeningRoute.POST("/cleanup", controller.CleanupLogScreeningRecords)
 		}
 
+		riskControlRoute := apiRouter.Group("/risk_control")
+		riskControlRoute.Use(middleware.AdminAuth())
+		{
+			riskControlRoute.GET("/cases", controller.ListRiskCases)
+			riskControlRoute.GET("/cases/:id", controller.GetRiskCaseDetail)
+			riskControlRoute.POST("/cases/:id/analyze", middleware.CriticalRateLimit(), controller.AnalyzeRiskCase)
+			riskControlRoute.POST("/cases/:id/review", controller.ReviewRiskCase)
+			riskControlRoute.POST("/cases/:id/action", middleware.CriticalRateLimit(), controller.ApplyRiskCaseAction)
+		}
+		riskControlRootRoute := apiRouter.Group("/risk_control")
+		riskControlRootRoute.Use(middleware.RootAuth())
+		{
+			riskControlRootRoute.GET("/settings", controller.GetRiskControlSetting)
+			riskControlRootRoute.PUT("/settings", controller.SaveRiskControlSetting)
+			riskControlRootRoute.POST("/run", controller.RunRiskControl)
+		}
+
 		uaStatsRoute := apiRouter.Group("/ua_stats")
 		uaStatsRoute.Use(middleware.AdminAuth())
 		{

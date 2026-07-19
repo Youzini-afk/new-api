@@ -20,14 +20,14 @@ func DisableAllUserTokens(userId int) error {
 	return result.Error
 }
 
-// GetUserRoleById returns the role for the given user id. Used by the relay
-// sensitive-intercept to bypass admin/root users (they must not be blocked or
-// auto-banned). Reads from the user cache path via GetUserById.
+// GetUserRoleById returns the role for the given user id through the existing
+// user cache. Relay middleware normally reads the role directly from Gin
+// context; this remains as a compatibility fallback for non-token call paths.
 func GetUserRoleById(userId int) (int, error) {
 	if userId <= 0 {
 		return 0, errors.New("invalid user id")
 	}
-	user, err := GetUserById(userId, false)
+	user, err := GetUserCache(userId)
 	if err != nil {
 		return 0, err
 	}

@@ -94,6 +94,13 @@ var auditRouteActions = map[string]string{
 
 	// 日志
 	"DELETE /api/log/": "log.clear",
+
+	// Comprehensive risk control.
+	"POST /api/risk_control/run":               "risk.screening_run",
+	"PUT /api/risk_control/settings":           "risk.settings_update",
+	"POST /api/risk_control/cases/:id/analyze": "risk.case_analyze",
+	"POST /api/risk_control/cases/:id/review":  "risk.case_review",
+	"POST /api/risk_control/cases/:id/action":  "risk.case_action",
 }
 
 // beginAdminAudit 在管理/root 写操作进入 handler 前包装 ResponseWriter，
