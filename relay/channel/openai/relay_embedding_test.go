@@ -1,7 +1,10 @@
 package openai
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -97,6 +100,26 @@ func TestOpenaiEmbeddingHandlerAcceptsBase64Embedding(t *testing.T) {
 	require.Nil(t, apiErr)
 	require.NotNil(t, usage)
 	assert.Contains(t, recorder.Body.String(), `"embedding":"AAAA"`)
+}
+
+func TestOpenaiEmbeddingHandlerConvertsNumericEmbeddingToBase64(t *testing.T) {
+	request := &dto.EmbeddingRequest{Model: "text-embedding-3-small", Input: "hello", EncodingFormat: "base64"}
+	c, recorder, resp, info := newEmbeddingTestContext(t, `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[1,-2.5]}],"model":"text-embedding-3-small","usage":{"prompt_tokens":3,"total_tokens":3}}`, request)
+
+	usage, apiErr := OpenaiEmbeddingHandler(c, info, resp)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	var response dto.FlexibleEmbeddingResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Data, 1)
+	encoded, ok := response.Data[0].Embedding.(string)
+	require.True(t, ok)
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	require.Len(t, decoded, 8)
+	assert.Equal(t, float32(1), math.Float32frombits(binary.LittleEndian.Uint32(decoded[0:4])))
+	assert.Equal(t, float32(-2.5), math.Float32frombits(binary.LittleEndian.Uint32(decoded[4:8])))
 }
 
 func TestOpenaiEmbeddingHandlerFillsMissingUsage(t *testing.T) {

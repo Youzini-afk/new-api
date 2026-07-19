@@ -427,6 +427,9 @@ func parseEmbeddingBatchChunk(body []byte, info *relaycommon.RelayInfo, chunk re
 		return response, dto.Usage{}, batchResponseError(chunk.index+1, err)
 	}
 	request := &dto.EmbeddingRequest{Input: input, EncodingFormat: encodingFormat}
+	if _, err := openaiChannel.NormalizeOpenAIEmbeddingResponseEncoding(request, &response); err != nil {
+		return response, dto.Usage{}, batchResponseError(chunk.index+1, err)
+	}
 	if err := openaiChannel.ValidateOpenAIEmbeddingResponse(request, &response); err != nil {
 		return response, dto.Usage{}, batchResponseError(chunk.index+1, err)
 	}

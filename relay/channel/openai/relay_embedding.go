@@ -1,8 +1,11 @@
 package openai
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 
@@ -52,6 +55,10 @@ func OpenaiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	request, _ := info.Request.(*dto.EmbeddingRequest)
+	encodingModified, err := NormalizeOpenAIEmbeddingResponseEncoding(request, &embeddingResponse)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
 	if err := ValidateOpenAIEmbeddingResponse(request, &embeddingResponse); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -70,12 +77,17 @@ func OpenaiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		usageModified = true
 	}
 	applyUsagePostProcessing(info, &embeddingResponse.Usage, responseBody)
-	if usageModified {
+	if encodingModified || usageModified {
 		var bodyMap map[string]interface{}
 		if err := common.Unmarshal(responseBody, &bodyMap); err != nil {
 			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
-		bodyMap["usage"] = embeddingResponse.Usage
+		if encodingModified {
+			bodyMap["data"] = embeddingResponse.Data
+		}
+		if usageModified {
+			bodyMap["usage"] = embeddingResponse.Usage
+		}
 		responseBody, err = common.Marshal(bodyMap)
 		if err != nil {
 			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -84,6 +96,87 @@ func OpenaiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 	return &embeddingResponse.Usage, nil
+}
+
+// NormalizeOpenAIEmbeddingResponseEncoding converts numeric embeddings to the
+// OpenAI-compatible base64 representation when the client requested it but the
+// upstream provider returned float arrays instead.
+func NormalizeOpenAIEmbeddingResponseEncoding(request *dto.EmbeddingRequest, response *dto.FlexibleEmbeddingResponse) (bool, error) {
+	if request == nil || response == nil || !strings.EqualFold(strings.TrimSpace(request.EncodingFormat), "base64") {
+		return false, nil
+	}
+
+	modified := false
+	for i := range response.Data {
+		if _, ok := response.Data[i].Embedding.(string); ok {
+			continue
+		}
+		values, ok := openAIEmbeddingFloat32Values(response.Data[i].Embedding)
+		if !ok || len(values) == 0 {
+			return false, fmt.Errorf("embedding response data[%d] cannot be converted to base64", i)
+		}
+		buffer := make([]byte, len(values)*4)
+		for index, value := range values {
+			binary.LittleEndian.PutUint32(buffer[index*4:], math.Float32bits(value))
+		}
+		response.Data[i].Embedding = base64.StdEncoding.EncodeToString(buffer)
+		modified = true
+	}
+	return modified, nil
+}
+
+func openAIEmbeddingFloat32Values(value any) ([]float32, bool) {
+	switch embedding := value.(type) {
+	case []any:
+		values := make([]float32, len(embedding))
+		for i, item := range embedding {
+			converted, ok := openAIEmbeddingNumberToFloat32(item)
+			if !ok {
+				return nil, false
+			}
+			values[i] = converted
+		}
+		return values, true
+	case []float64:
+		values := make([]float32, len(embedding))
+		for i, item := range embedding {
+			values[i] = float32(item)
+		}
+		return values, true
+	case []float32:
+		return embedding, true
+	case []int:
+		values := make([]float32, len(embedding))
+		for i, item := range embedding {
+			values[i] = float32(item)
+		}
+		return values, true
+	default:
+		return nil, false
+	}
+}
+
+func openAIEmbeddingNumberToFloat32(value any) (float32, bool) {
+	switch number := value.(type) {
+	case float64:
+		return float32(number), true
+	case float32:
+		return number, true
+	case int:
+		return float32(number), true
+	case int64:
+		return float32(number), true
+	case int32:
+		return float32(number), true
+	case uint:
+		return float32(number), true
+	case uint64:
+		return float32(number), true
+	case uint32:
+		return float32(number), true
+	default:
+		return 0, false
+	}
 }
 
 func ValidateOpenAIEmbeddingResponse(request *dto.EmbeddingRequest, response *dto.FlexibleEmbeddingResponse) error {

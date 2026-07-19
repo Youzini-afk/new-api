@@ -2,7 +2,9 @@ package relay
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -159,10 +161,11 @@ func TestMaybeRelayEmbeddingInBatchesPreservesJinaBase64Encoding(t *testing.T) {
 
 		data := make([]dto.FlexibleEmbeddingResponseItem, len(payload.Input))
 		for i, input := range payload.Input {
+			globalIndex := mustTrailingInt(t, input)
 			data[i] = dto.FlexibleEmbeddingResponseItem{
 				Object:    "embedding",
 				Index:     i,
-				Embedding: base64.StdEncoding.EncodeToString([]byte(input)),
+				Embedding: []float64{float64(globalIndex), 0.5},
 			}
 		}
 		writeJSON(t, writer, dto.FlexibleEmbeddingResponse{
@@ -201,7 +204,13 @@ func TestMaybeRelayEmbeddingInBatchesPreservesJinaBase64Encoding(t *testing.T) {
 	require.Len(t, response.Data, 26)
 	for i, item := range response.Data {
 		assert.Equal(t, i, item.Index)
-		assert.Equal(t, base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("item-%02d", i))), item.Embedding)
+		encoded, ok := item.Embedding.(string)
+		require.True(t, ok)
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		require.NoError(t, err)
+		require.Len(t, decoded, 8)
+		assert.Equal(t, float32(i), math.Float32frombits(binary.LittleEndian.Uint32(decoded[0:4])))
+		assert.Equal(t, float32(0.5), math.Float32frombits(binary.LittleEndian.Uint32(decoded[4:8])))
 	}
 }
 
