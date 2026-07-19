@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
@@ -8,6 +10,35 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPrepareErrorInsightAIRelayRequestForcesJSONHeaders(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/risk_control/cases/2/analyze?source=admin", nil)
+	request.Header.Del("Content-Type")
+
+	require.NoError(t, prepareErrorInsightAIRelayRequest(request))
+	assert.Equal(t, http.MethodPost, request.Method)
+	assert.Equal(t, "/v1/chat/completions", request.URL.Path)
+	assert.Empty(t, request.URL.RawQuery)
+	assert.Equal(t, "application/json", request.Header.Get("Content-Type"))
+	assert.Equal(t, "application/json", request.Header.Get("Accept"))
+}
+
+func TestEnsureErrorInsightAIModelPreservesBracketedModelName(t *testing.T) {
+	const bracketedModel = "[R]deepseek-v4-flash"
+	request := &dto.GeneralOpenAIRequest{Model: bracketedModel}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: bracketedModel,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: bracketedModel,
+		},
+	}
+
+	resolved, err := ensureErrorInsightAIModel(request, info, bracketedModel)
+	require.NoError(t, err)
+	assert.Equal(t, bracketedModel, resolved)
+	assert.Equal(t, bracketedModel, request.Model)
+	assert.Equal(t, bracketedModel, info.UpstreamModelName)
+}
 
 func TestEnsureErrorInsightAIModelUsesMappedModel(t *testing.T) {
 	request := &dto.GeneralOpenAIRequest{Model: "configured-model"}

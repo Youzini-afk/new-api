@@ -661,8 +661,9 @@ func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonO
 	}
 	relayCtx, _ := gin.CreateTestContext(c.Writer)
 	relayCtx.Request = c.Request.Clone(c.Request.Context())
-	relayCtx.Request.Method = http.MethodPost
-	relayCtx.Request.URL.Path = "/v1/chat/completions"
+	if err := prepareErrorInsightAIRelayRequest(relayCtx.Request); err != nil {
+		return "", err
+	}
 	if newAPIError := middleware.SetupContextForSelectedChannel(relayCtx, channel, modelName); newAPIError != nil {
 		return "", newAPIError
 	}
@@ -747,6 +748,26 @@ func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonO
 		return "", errors.New("AI channel response is too large")
 	}
 	return extractErrorInsightAIContent(body)
+}
+
+func prepareErrorInsightAIRelayRequest(request *http.Request) error {
+	if request == nil || request.URL == nil {
+		return errors.New("failed to prepare AI relay request")
+	}
+	request.Method = http.MethodPost
+	request.URL.Path = "/v1/chat/completions"
+	request.URL.RawPath = ""
+	request.URL.RawQuery = ""
+	if request.Header == nil {
+		request.Header = make(http.Header)
+	}
+	// The admin analyze endpoint and scheduled Agent context may not carry a
+	// Content-Type because their original requests have no body. This relay
+	// request does carry a generated JSON body, so always describe it as JSON;
+	// otherwise a new-api upstream skips body parsing and sees an empty model.
+	request.Header.Set("Content-Type", gin.MIMEJSON)
+	request.Header.Set("Accept", gin.MIMEJSON)
+	return nil
 }
 
 func ensureErrorInsightAIModel(request *dto.GeneralOpenAIRequest, info *relaycommon.RelayInfo, configuredModel string) (string, error) {
