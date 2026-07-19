@@ -5717,6 +5717,7 @@
     "Set maximum concurrency or requests per minute when traffic control is enabled.": "При включённом управлении трафиком задайте максимальный параллелизм или число запросов в минуту.",
     "Queue timeout must be greater than 0 when queue capacity is enabled.": "Тайм-аут очереди должен быть больше 0, если включена очередь.",
     "Concurrent Agent cases": "Параллельные дела Agent",
-    "Agent retry count": "Количество повторных попыток Agent"
+    "Agent retry count": "Количество повторных попыток Agent",
+    "Local validation adjustments": "Локальные корректировки проверки"
   }
 }

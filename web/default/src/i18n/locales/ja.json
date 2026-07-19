@@ -5717,6 +5717,7 @@
     "Set maximum concurrency or requests per minute when traffic control is enabled.": "流量制御を有効にする場合、最大同時実行数または1分あたりのリクエスト数を設定してください。",
     "Queue timeout must be greater than 0 when queue capacity is enabled.": "キュー容量を有効にする場合、キュータイムアウトは0より大きくする必要があります。",
     "Concurrent Agent cases": "Agent 同時分析案件数",
-    "Agent retry count": "Agent 再試行回数"
+    "Agent retry count": "Agent 再試行回数",
+    "Local validation adjustments": "ローカル検証による調整"
   }
 }

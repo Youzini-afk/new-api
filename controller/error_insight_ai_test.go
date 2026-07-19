@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,60 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestApplyErrorInsightAIJSONParamsBeforeAdaptorConversion(t *testing.T) {
+	request := &dto.GeneralOpenAIRequest{
+		Model:    "test-model",
+		Messages: []dto.Message{{Role: "user", Content: "test"}},
+	}
+	passthrough, err := applyErrorInsightAIJSONParams(request, json.RawMessage(`{
+		"response_format":{"type":"json_object"},
+		"temperature":0,
+		"max_tokens":2048,
+		"vendor_extension":{"enabled":true}
+	}`))
+	require.NoError(t, err)
+	require.NotNil(t, request.ResponseFormat)
+	assert.Equal(t, "json_object", request.ResponseFormat.Type)
+	require.NotNil(t, request.Temperature)
+	assert.Zero(t, *request.Temperature)
+	require.NotNil(t, request.MaxTokens)
+	assert.Equal(t, uint(2048), *request.MaxTokens)
+	assert.Contains(t, passthrough, "vendor_extension")
+	assert.NotContains(t, passthrough, "response_format")
+	assert.NotContains(t, passthrough, "temperature")
+
+	_, err = applyErrorInsightAIJSONParams(request, json.RawMessage(`{"messages":[]}`))
+	require.Error(t, err)
+}
+
+func TestMergeErrorInsightAIJSONParamsOnlyAddsPassthroughFields(t *testing.T) {
+	merged, err := mergeErrorInsightAIJSONParams(
+		[]byte(`{"model":"test-model","messages":[]}`),
+		map[string]json.RawMessage{"vendor_extension": json.RawMessage(`{"enabled":true}`)},
+	)
+	require.NoError(t, err)
+	var payload map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(merged, &payload))
+	assert.Contains(t, payload, "vendor_extension")
+	assert.NotContains(t, payload, "response_format")
+	assert.True(t, errorInsightAIRequestSupportsPassthrough(&dto.GeneralOpenAIRequest{}))
+	assert.False(t, errorInsightAIRequestSupportsPassthrough(map[string]any{}))
+}
+
+func TestExtractErrorInsightAIContentSupportsObjectAndReasoningFallback(t *testing.T) {
+	content, err := extractErrorInsightAIContent([]byte(`{
+		"choices":[{"message":{"content":{"verdict":"uncertain","risk_score":40}}}]
+	}`))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"verdict":"uncertain","risk_score":40}`, content)
+
+	content, err = extractErrorInsightAIContent([]byte(`{
+		"choices":[{"message":{"content":"","reasoning_content":"{\"verdict\":\"uncertain\"}"}}]
+	}`))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"verdict":"uncertain"}`, content)
+}
 
 func TestPrepareErrorInsightAIRelayRequestForcesJSONHeaders(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/risk_control/cases/2/analyze?source=admin", nil)

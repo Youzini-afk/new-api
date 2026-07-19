@@ -281,6 +281,9 @@ export function RiskCaseDetailDrawer(props: RiskCaseDetailDrawerProps) {
                     suggestedFingerprint={
                       detail.agent_result.suggested_fingerprint
                     }
+                    validationWarnings={
+                      detail.agent_result.local_validation_warnings
+                    }
                   />
                 )}
                 {detail.judge_result && (
@@ -303,6 +306,9 @@ export function RiskCaseDetailDrawer(props: RiskCaseDetailDrawerProps) {
                     policyViolation={detail.judge_result.policy_violation}
                     suggestedFingerprint={
                       detail.judge_result.suggested_fingerprint
+                    }
+                    validationWarnings={
+                      detail.judge_result.local_validation_warnings
                     }
                   />
                 )}
@@ -490,6 +496,7 @@ function DecisionCard(props: {
   meta?: string
   policyViolation?: boolean
   suggestedFingerprint?: RiskSuggestedFingerprint
+  validationWarnings?: string[]
 }) {
   const { t } = useTranslation()
   return (
@@ -539,6 +546,16 @@ function DecisionCard(props: {
           <ul className='text-muted-foreground mt-1 list-disc space-y-1 pl-5 text-xs'>
             {props.counterEvidence.map((item) => (
               <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {props.validationWarnings && props.validationWarnings.length > 0 && (
+        <div className='mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs'>
+          <p className='font-medium'>{t('Local validation adjustments')}</p>
+          <ul className='text-muted-foreground mt-1 list-disc space-y-1 pl-5'>
+            {props.validationWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
             ))}
           </ul>
         </div>

@@ -5877,6 +5877,7 @@
     "Set maximum concurrency or requests per minute when traffic control is enabled.": "Set maximum concurrency or requests per minute when traffic control is enabled.",
     "Queue timeout must be greater than 0 when queue capacity is enabled.": "Queue timeout must be greater than 0 when queue capacity is enabled.",
     "Concurrent Agent cases": "Concurrent Agent cases",
-    "Agent retry count": "Agent retry count"
+    "Agent retry count": "Agent retry count",
+    "Local validation adjustments": "Local validation adjustments"
   }
 }

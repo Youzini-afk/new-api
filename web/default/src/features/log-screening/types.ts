@@ -364,6 +364,7 @@ export interface RiskAgentDecision {
   admin_reason: string
   user_reason: string
   suggested_fingerprint: RiskSuggestedFingerprint
+  local_validation_warnings?: string[]
 }
 
 export interface RiskCaseItem {

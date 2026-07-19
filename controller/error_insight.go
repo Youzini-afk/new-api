@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -634,6 +635,19 @@ func generateErrorInsightRulesWithAI(c *gin.Context, cfg *system_setting.ErrorIn
 }
 
 func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonOutputParams json.RawMessage, prompt string) (string, error) {
+	return invokeErrorInsightAIWithPrompts(c, channelID, modelName, jsonOutputParams, "", prompt)
+}
+
+func invokeErrorInsightAIWithPrompts(c *gin.Context, channelID int, modelName string, jsonOutputParams json.RawMessage, systemPrompt string, userPrompt string) (string, error) {
+	messages := make([]dto.Message, 0, 2)
+	if strings.TrimSpace(systemPrompt) != "" {
+		messages = append(messages, dto.Message{Role: "system", Content: systemPrompt})
+	}
+	messages = append(messages, dto.Message{Role: "user", Content: userPrompt})
+	return invokeErrorInsightAIWithMessages(c, channelID, modelName, jsonOutputParams, messages)
+}
+
+func invokeErrorInsightAIWithMessages(c *gin.Context, channelID int, modelName string, jsonOutputParams json.RawMessage, messages []dto.Message) (string, error) {
 	const maxAIResponseBytes = 2 << 20
 
 	modelName = strings.TrimSpace(modelName)
@@ -651,12 +665,11 @@ func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonO
 		return "", errors.New("AI channel is outside its configured availability schedule")
 	}
 	request := &dto.GeneralOpenAIRequest{
-		Model: modelName,
-		Messages: []dto.Message{
-			{Role: "user", Content: prompt},
-		},
+		Model:    modelName,
+		Messages: messages,
 	}
-	if err := applyErrorInsightAIJSONParams(request, jsonOutputParams); err != nil {
+	passthroughParams, err := applyErrorInsightAIJSONParams(request, jsonOutputParams)
+	if err != nil {
 		return "", err
 	}
 	relayCtx, _ := gin.CreateTestContext(c.Writer)
@@ -711,9 +724,11 @@ func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonO
 			return "", err
 		}
 	}
-	jsonData, err = mergeErrorInsightAIJSONParams(jsonData, jsonOutputParams)
-	if err != nil {
-		return "", err
+	if errorInsightAIRequestSupportsPassthrough(convertedRequest) && len(passthroughParams) > 0 {
+		jsonData, err = mergeErrorInsightAIJSONParams(jsonData, passthroughParams)
+		if err != nil {
+			return "", err
+		}
 	}
 	if bodyCarriesModel {
 		var repaired bool
@@ -843,32 +858,81 @@ func ensureErrorInsightAIRequestModel(jsonData []byte, fallbackModel string) ([]
 	return repaired, true, err
 }
 
-func applyErrorInsightAIJSONParams(request *dto.GeneralOpenAIRequest, params json.RawMessage) error {
-	if len(params) == 0 || string(params) == "null" {
-		return nil
-	}
-	var extra map[string]json.RawMessage
-	if err := json.Unmarshal(params, &extra); err != nil {
-		return errors.New("json output params must be a JSON object")
-	}
-	if raw, ok := extra["response_format"]; ok {
-		var responseFormat dto.ResponseFormat
-		if err := json.Unmarshal(raw, &responseFormat); err != nil {
-			return errors.New("response_format in JSON output params is invalid")
-		}
-		request.ResponseFormat = &responseFormat
-	}
-	return nil
+var errorInsightAIRequestFieldNames = collectJSONFieldNames(reflect.TypeOf(dto.GeneralOpenAIRequest{}))
+
+var errorInsightAIReservedParams = map[string]struct{}{
+	"model":             {},
+	"messages":          {},
+	"input":             {},
+	"prompt":            {},
+	"stream":            {},
+	"tools":             {},
+	"tool_choice":       {},
+	"functions":         {},
+	"function_call":     {},
+	"user":              {},
+	"safety_identifier": {},
 }
 
-func mergeErrorInsightAIJSONParams(jsonData []byte, params json.RawMessage) ([]byte, error) {
+func collectJSONFieldNames(valueType reflect.Type) map[string]struct{} {
+	fields := make(map[string]struct{}, valueType.NumField())
+	for index := 0; index < valueType.NumField(); index++ {
+		name := strings.Split(valueType.Field(index).Tag.Get("json"), ",")[0]
+		if name != "" && name != "-" {
+			fields[name] = struct{}{}
+		}
+	}
+	return fields
+}
+
+func applyErrorInsightAIJSONParams(request *dto.GeneralOpenAIRequest, params json.RawMessage) (map[string]json.RawMessage, error) {
 	if len(params) == 0 || string(params) == "null" {
-		return jsonData, nil
+		return nil, nil
 	}
 	var extra map[string]json.RawMessage
 	if err := json.Unmarshal(params, &extra); err != nil {
 		return nil, errors.New("json output params must be a JSON object")
 	}
+	requestData, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+	var requestPayload map[string]json.RawMessage
+	if err := json.Unmarshal(requestData, &requestPayload); err != nil {
+		return nil, err
+	}
+	passthrough := make(map[string]json.RawMessage)
+	for key, value := range extra {
+		normalizedKey := strings.ToLower(strings.TrimSpace(key))
+		if _, reserved := errorInsightAIReservedParams[normalizedKey]; reserved {
+			return nil, fmt.Errorf("json output params cannot override reserved field: %s", key)
+		}
+		if _, known := errorInsightAIRequestFieldNames[key]; known {
+			requestPayload[key] = value
+		} else {
+			passthrough[key] = value
+		}
+	}
+	normalized, err := json.Marshal(requestPayload)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(normalized, request); err != nil {
+		return nil, fmt.Errorf("json output params contain an invalid request field: %w", err)
+	}
+	return passthrough, nil
+}
+
+func errorInsightAIRequestSupportsPassthrough(convertedRequest any) bool {
+	switch convertedRequest.(type) {
+	case *dto.GeneralOpenAIRequest, dto.GeneralOpenAIRequest:
+		return true
+	default:
+		return false
+	}
+}
+
+func mergeErrorInsightAIJSONParams(jsonData []byte, extra map[string]json.RawMessage) ([]byte, error) {
 	if len(extra) == 0 {
 		return jsonData, nil
 	}
@@ -945,11 +1009,13 @@ func extractErrorInsightAIContent(body []byte) (string, error) {
 	var payload struct {
 		Choices []struct {
 			Message struct {
-				Content any `json:"content"`
+				Content          any `json:"content"`
+				ReasoningContent any `json:"reasoning_content"`
+				Reasoning        any `json:"reasoning"`
 			} `json:"message"`
 			Text string `json:"text"`
 		} `json:"choices"`
-		OutputText string `json:"output_text"`
+		OutputText any `json:"output_text"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", err
@@ -961,9 +1027,15 @@ func extractErrorInsightAIContent(body []byte) (string, error) {
 		if strings.TrimSpace(payload.Choices[0].Text) != "" {
 			return strings.TrimSpace(payload.Choices[0].Text), nil
 		}
+		if content := stringifyAIContent(payload.Choices[0].Message.ReasoningContent); content != "" {
+			return content, nil
+		}
+		if content := stringifyAIContent(payload.Choices[0].Message.Reasoning); content != "" {
+			return content, nil
+		}
 	}
-	if strings.TrimSpace(payload.OutputText) != "" {
-		return strings.TrimSpace(payload.OutputText), nil
+	if content := stringifyAIContent(payload.OutputText); content != "" {
+		return content, nil
 	}
 	return "", errors.New("AI response does not contain content")
 }
@@ -975,13 +1047,22 @@ func stringifyAIContent(content any) string {
 	case []any:
 		parts := make([]string, 0, len(value))
 		for _, item := range value {
-			if m, ok := item.(map[string]any); ok {
-				if text, ok := m["text"].(string); ok {
-					parts = append(parts, text)
-				}
+			if text := stringifyAIContent(item); text != "" {
+				parts = append(parts, text)
 			}
 		}
 		return strings.TrimSpace(strings.Join(parts, ""))
+	case map[string]any:
+		for _, key := range []string{"json", "output_text", "content", "text"} {
+			if text := stringifyAIContent(value[key]); text != "" {
+				return text
+			}
+		}
+		encoded, err := json.Marshal(value)
+		if err == nil {
+			return string(encoded)
+		}
+		return ""
 	default:
 		return ""
 	}
