@@ -245,6 +245,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 
 	info.IsChannelTest = true
+	info.BypassChannelTrafficControl = true
 	info.InitChannelMeta(c)
 
 	err = attachTestBillingRequestInput(info, request)

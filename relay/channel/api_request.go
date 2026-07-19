@@ -497,7 +497,7 @@ func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 // provider request. It is exported for adaptors that use provider SDKs instead
 // of the shared HTTP request path.
 func AcquireChannelTraffic(c *gin.Context, info *common.RelayInfo) (*service.ChannelTrafficLease, error) {
-	if info == nil {
+	if info == nil || info.BypassChannelTrafficControl {
 		return nil, nil
 	}
 	ctx := context.Background()

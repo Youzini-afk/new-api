@@ -199,14 +199,18 @@ type RelayInfo struct {
 	SubscriptionAmountUsedAfterPreConsume int64
 	IsClaudeBetaQuery                     bool // /v1/messages?beta=true
 	IsChannelTest                         bool // channel test request
-	RetryIndex                            int
-	LastError                             *types.NewAPIError
-	RuntimeHeadersOverride                map[string]interface{}
-	UseRuntimeHeadersOverride             bool
-	ParamOverrideAudit                    []string
-	ResponseText                          string
-	ResponseTextTruncated                 bool
-	BatchSplit                            *BatchSplitInfo
+	// BypassChannelTrafficControl is set only by trusted internal workflows
+	// such as channel diagnostics and governance Agents. It must never be
+	// derived from client headers or the caller's user role.
+	BypassChannelTrafficControl bool
+	RetryIndex                  int
+	LastError                   *types.NewAPIError
+	RuntimeHeadersOverride      map[string]interface{}
+	UseRuntimeHeadersOverride   bool
+	ParamOverrideAudit          []string
+	ResponseText                string
+	ResponseTextTruncated       bool
+	BatchSplit                  *BatchSplitInfo
 
 	// UpstreamRequestBodySize is the byte size of the marshaled upstream request
 	// body. It is set when the body is wrapped in a BodyStorage (see

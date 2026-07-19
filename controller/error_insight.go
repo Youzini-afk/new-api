@@ -690,6 +690,7 @@ func invokeErrorInsightAIWithMessages(c *gin.Context, channelID int, modelName s
 	}
 	info.RelayMode = relayconstant.RelayModeChatCompletions
 	info.IsChannelTest = true
+	info.BypassChannelTrafficControl = true
 	info.InitChannelMeta(relayCtx)
 	if err := helper.ModelMappedHelper(relayCtx, info, request); err != nil {
 		return "", err
