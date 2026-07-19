@@ -68,10 +68,6 @@ func maybeRelayEmbeddingInBatches(c *gin.Context, info *relaycommon.RelayInfo, j
 	if len(items) > setting.MaxItems {
 		return true, nil, batchMaxItemsError(system_setting.RelayBatchKindEmbedding, len(items), setting.MaxItems)
 	}
-	if !supportsRelayBatchSplitAPI(info.ApiType) {
-		return true, nil, unsupportedBatchAPIError(info.ApiType)
-	}
-
 	chunks, err := buildRelayBatchChunks(payload, "input", items, setting.BatchSize, nil)
 	if err != nil {
 		return true, nil, batchPayloadError(err)
@@ -141,10 +137,6 @@ func maybeRelayRerankInBatches(c *gin.Context, info *relaycommon.RelayInfo, json
 	if len(documents) > setting.MaxItems {
 		return true, nil, batchMaxItemsError(system_setting.RelayBatchKindRerank, len(documents), setting.MaxItems)
 	}
-	if !supportsRelayBatchSplitAPI(info.ApiType) {
-		return true, nil, unsupportedBatchAPIError(info.ApiType)
-	}
-
 	topN, err := rawJSONOptionalInt(payload["top_n"])
 	if err != nil {
 		return true, nil, batchPayloadError(fmt.Errorf("invalid top_n: %w", err))
@@ -729,15 +721,6 @@ func newRelayBatchSplitInfo(info *relaycommon.RelayInfo, kind string, itemCount 
 	}
 }
 
-func supportsRelayBatchSplitAPI(apiType int) bool {
-	switch apiType {
-	case constant.APITypeOpenAI, constant.APITypeSiliconFlow:
-		return true
-	default:
-		return false
-	}
-}
-
 func countCompletedBatchChunks(results []relayBatchHTTPResult) int {
 	completed := 0
 	for i := range results {
@@ -766,14 +749,6 @@ func batchMaxItemsError(kind string, itemCount, maxItems int) *types.NewAPIError
 		types.ErrorCodeInvalidRequest,
 		http.StatusBadRequest,
 		types.ErrOptionWithSkipRetry(),
-	)
-}
-
-func unsupportedBatchAPIError(apiType int) *types.NewAPIError {
-	return types.NewOpenAIError(
-		fmt.Errorf("所选渠道的 API 类型 %d 暂不支持安全的批量拆分", apiType),
-		types.ErrorCodeInvalidApiType,
-		http.StatusBadGateway,
 	)
 }
 

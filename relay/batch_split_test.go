@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -55,12 +56,6 @@ func TestBuildRelayBatchChunksSplitsTwentySixIntoTwentyFiveAndOne(t *testing.T) 
 	assert.Len(t, chunks[0].items, 25)
 	assert.Len(t, chunks[1].items, 1)
 	assert.Equal(t, 25, chunks[1].offset)
-}
-
-func TestSupportsRelayBatchSplitAPI(t *testing.T) {
-	assert.True(t, supportsRelayBatchSplitAPI(constant.APITypeOpenAI))
-	assert.True(t, supportsRelayBatchSplitAPI(constant.APITypeSiliconFlow))
-	assert.False(t, supportsRelayBatchSplitAPI(constant.APITypeAdvancedCustom))
 }
 
 func TestMaybeRelayEmbeddingInBatchesMergesResponseAndKeepsOriginalRequest(t *testing.T) {
@@ -144,7 +139,73 @@ func TestMaybeRelayEmbeddingInBatchesMergesResponseAndKeepsOriginalRequest(t *te
 	assert.Equal(t, 0, info.BatchSplit.FailedChunk)
 }
 
-func TestMaybeRelayRerankInBatchesAppliesGlobalTopNAndRebuildsDocuments(t *testing.T) {
+func TestMaybeRelayEmbeddingInBatchesPreservesJinaBase64Encoding(t *testing.T) {
+	setRelayBatchSplitTestConfig(t, system_setting.RelayBatchSplitSetting{
+		Version:    1,
+		Enabled:    true,
+		ChannelIDs: []int{44},
+		Embedding:  system_setting.RelayBatchKindSetting{Enabled: true, BatchSize: 25, Concurrency: 2, MaxItems: 1000},
+		Rerank:     system_setting.RelayBatchKindSetting{Enabled: false, BatchSize: 25, Concurrency: 1, MaxItems: 200},
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Model          string   `json:"model"`
+			Input          []string `json:"input"`
+			EncodingFormat string   `json:"encoding_format"`
+		}
+		require.NoError(t, common.DecodeJson(request.Body, &payload))
+		assert.Equal(t, "base64", payload.EncodingFormat)
+
+		data := make([]dto.FlexibleEmbeddingResponseItem, len(payload.Input))
+		for i, input := range payload.Input {
+			data[i] = dto.FlexibleEmbeddingResponseItem{
+				Object:    "embedding",
+				Index:     i,
+				Embedding: base64.StdEncoding.EncodeToString([]byte(input)),
+			}
+		}
+		writeJSON(t, writer, dto.FlexibleEmbeddingResponse{
+			Object: "list",
+			Model:  payload.Model,
+			Data:   data,
+			Usage:  dto.Usage{PromptTokens: len(payload.Input), TotalTokens: len(payload.Input)},
+		})
+	}))
+	defer server.Close()
+
+	inputs := make([]any, 26)
+	for i := range inputs {
+		inputs[i] = fmt.Sprintf("item-%02d", i)
+	}
+	originalRequest := &dto.EmbeddingRequest{
+		Model:          "embedding-model",
+		Input:          inputs,
+		EncodingFormat: "base64",
+	}
+	body, err := common.Marshal(originalRequest)
+	require.NoError(t, err)
+	context, recorder := newRelayBatchTestContext(http.MethodPost, "/v1/embeddings", body)
+	info := newRelayBatchTestInfo(server.URL, "/v1/embeddings", 44, relayconstant.RelayModeEmbeddings, types.RelayFormatEmbedding, originalRequest)
+	info.ChannelType = constant.ChannelTypeJina
+	info.ApiType = constant.APITypeJina
+
+	handled, usage, apiErr := maybeRelayEmbeddingInBatches(context, info, body)
+	require.True(t, handled)
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	assert.Equal(t, 26, usage.TotalTokens)
+
+	var response dto.FlexibleEmbeddingResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Data, 26)
+	for i, item := range response.Data {
+		assert.Equal(t, i, item.Index)
+		assert.Equal(t, base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("item-%02d", i))), item.Embedding)
+	}
+}
+
+func TestMaybeRelayRerankInBatchesSupportsJinaAndAppliesGlobalTopN(t *testing.T) {
 	setRelayBatchSplitTestConfig(t, system_setting.RelayBatchSplitSetting{
 		Version:    1,
 		Enabled:    true,
@@ -207,6 +268,8 @@ func TestMaybeRelayRerankInBatchesAppliesGlobalTopNAndRebuildsDocuments(t *testi
 	require.NoError(t, err)
 	context, recorder := newRelayBatchTestContext(http.MethodPost, "/v1/rerank", body)
 	info := newRelayBatchTestInfo(server.URL, "/v1/rerank", 42, relayconstant.RelayModeRerank, types.RelayFormatRerank, originalRequest)
+	info.ChannelType = constant.ChannelTypeJina
+	info.ApiType = constant.APITypeJina
 
 	handled, usage, apiErr := maybeRelayRerankInBatches(context, info, body)
 	require.True(t, handled)
