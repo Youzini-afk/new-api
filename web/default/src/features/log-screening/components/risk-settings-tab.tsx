@@ -80,6 +80,8 @@ const DEFAULT_SETTING: RiskControlSetting = {
   judge_model: '',
   agent_min_rule_score: 40,
   max_agent_cases_per_run: 20,
+  agent_concurrency: 4,
+  agent_retry_count: 2,
   judge_min_final_score: 75,
   triage_prompt_template: '',
   judge_prompt_template: '',
@@ -510,6 +512,22 @@ export function RiskSettingsTab() {
                 value={form.max_agent_cases_per_run}
                 onChange={(max_agent_cases_per_run) =>
                   updateForm({ max_agent_cases_per_run })
+                }
+              />
+              <NumberField
+                label={t('Concurrent Agent cases')}
+                value={form.agent_concurrency}
+                max={16}
+                onChange={(agent_concurrency) =>
+                  updateForm({ agent_concurrency })
+                }
+              />
+              <NumberField
+                label={t('Agent retry count')}
+                value={form.agent_retry_count}
+                max={5}
+                onChange={(agent_retry_count) =>
+                  updateForm({ agent_retry_count })
                 }
               />
               <NumberField

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -18,7 +20,56 @@ import (
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/singleflight"
 )
+
+var riskAgentCaseAnalysisGroup singleflight.Group
+var riskAgentAnalysisLimiter = newRiskAgentLimiter()
+
+type riskAgentLimiter struct {
+	mu     sync.Mutex
+	active int
+	notify chan struct{}
+}
+
+func newRiskAgentLimiter() *riskAgentLimiter {
+	return &riskAgentLimiter{notify: make(chan struct{})}
+}
+
+func (l *riskAgentLimiter) acquire(ctx context.Context, limit int) (func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	for {
+		l.mu.Lock()
+		if l.active < limit {
+			l.active++
+			l.mu.Unlock()
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					l.mu.Lock()
+					if l.active > 0 {
+						l.active--
+					}
+					close(l.notify)
+					l.notify = make(chan struct{})
+					l.mu.Unlock()
+				})
+			}, nil
+		}
+		notify := l.notify
+		l.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-notify:
+		}
+	}
+}
 
 type riskAgentDecision struct {
 	Verdict                    string                   `json:"verdict"`
@@ -271,7 +322,27 @@ func analyzeRiskCaseWithAI(c *gin.Context, riskCase *model.RiskCase) error {
 	if c == nil || riskCase == nil {
 		return errors.New("invalid risk analysis context")
 	}
-	cfg := system_setting.GetRiskControlSetting()
+	if riskCase.Id <= 0 || c.Request == nil {
+		return errors.New("invalid risk case")
+	}
+	cfg := *system_setting.GetRiskControlSetting()
+	cfg.JSONOutputParams = append(json.RawMessage(nil), cfg.JSONOutputParams...)
+	key := strconv.FormatInt(riskCase.Id, 10)
+	_, err, _ := riskAgentCaseAnalysisGroup.Do(key, func() (interface{}, error) {
+		release, err := riskAgentAnalysisLimiter.acquire(c.Request.Context(), cfg.AgentConcurrency)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+		return nil, analyzeRiskCaseWithAIOnce(c, riskCase, &cfg)
+	})
+	return err
+}
+
+func analyzeRiskCaseWithAIOnce(c *gin.Context, riskCase *model.RiskCase, cfg *system_setting.RiskControlSetting) error {
+	if cfg == nil {
+		return errors.New("risk Agent setting is unavailable")
+	}
 	if !cfg.AgentEnabled {
 		return errors.New("risk Agent is disabled")
 	}
@@ -286,15 +357,8 @@ func analyzeRiskCaseWithAI(c *gin.Context, riskCase *model.RiskCase) error {
 	if cfg.RedactSensitive {
 		prompt = redactRiskAgentPrompt(prompt)
 	}
-	content, err := invokeErrorInsightAI(c, cfg.ChannelID, cfg.TriageModel, cfg.JSONOutputParams, prompt)
+	triage, rawTriage, err := requestRiskAgentDecision(c, cfg, cfg.TriageModel, prompt, agentInput, invokeErrorInsightAI)
 	if err != nil {
-		return err
-	}
-	triage, rawTriage, err := parseRiskAgentDecision(content)
-	if err != nil {
-		return err
-	}
-	if err := validateRiskAgentEvidence(triage, agentInput); err != nil {
 		return err
 	}
 	triageRecommendation := normalizeRiskAgentRecommendation(triage, riskCase)
@@ -325,16 +389,9 @@ func analyzeRiskCaseWithAI(c *gin.Context, riskCase *model.RiskCase) error {
 		if cfg.RedactSensitive {
 			judgePrompt = redactRiskAgentPrompt(judgePrompt)
 		}
-		judgeContent, judgeErr := invokeErrorInsightAI(c, cfg.ChannelID, cfg.JudgeModel, cfg.JSONOutputParams, judgePrompt)
+		judge, rawJudge, judgeErr := requestRiskAgentDecision(c, cfg, cfg.JudgeModel, judgePrompt, judgeInput, invokeErrorInsightAI)
 		if judgeErr != nil {
 			return judgeErr
-		}
-		judge, rawJudge, parseErr := parseRiskAgentDecision(judgeContent)
-		if parseErr != nil {
-			return parseErr
-		}
-		if evidenceErr := validateRiskAgentEvidence(judge, judgeInput); evidenceErr != nil {
-			return evidenceErr
 		}
 		riskCase.JudgeScore = judge.RiskScore
 		riskCase.JudgeResult = rawJudge
@@ -526,13 +583,110 @@ func buildRiskAgentInput(ctx context.Context, riskCase *model.RiskCase, triage *
 	return input, nil
 }
 
+type riskAgentInvokeFunc func(*gin.Context, int, string, json.RawMessage, string) (string, error)
+
+func requestRiskAgentDecision(
+	c *gin.Context,
+	cfg *system_setting.RiskControlSetting,
+	modelName string,
+	prompt string,
+	input riskAgentInput,
+	invoke riskAgentInvokeFunc,
+) (riskAgentDecision, string, error) {
+	var empty riskAgentDecision
+	if c == nil || c.Request == nil || cfg == nil || invoke == nil {
+		return empty, "", errors.New("invalid risk Agent request context")
+	}
+	attempts := cfg.AgentRetryCount + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	params := append(json.RawMessage(nil), cfg.JSONOutputParams...)
+	currentPrompt := prompt
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		content, invokeErr := invoke(c, cfg.ChannelID, modelName, params, currentPrompt)
+		if invokeErr == nil {
+			decision, raw, parseErr := parseRiskAgentDecision(content)
+			if parseErr == nil {
+				if evidenceErr := validateRiskAgentEvidence(decision, input); evidenceErr == nil {
+					return decision, raw, nil
+				} else {
+					lastErr = evidenceErr
+				}
+			} else {
+				lastErr = parseErr
+			}
+		} else {
+			lastErr = invokeErr
+		}
+		if attempt >= attempts {
+			break
+		}
+		params = riskAgentParamsWithoutResponseFormat(params)
+		currentPrompt = buildRiskAgentRetryPrompt(prompt, attempt+1, attempts, lastErr)
+		common.SysLog(fmt.Sprintf(
+			"risk Agent response retry: model=%s next_attempt=%d/%d reason=%s",
+			modelName,
+			attempt+1,
+			attempts,
+			common.LocalLogPreview(lastErr.Error()),
+		))
+	}
+	if lastErr == nil {
+		lastErr = errors.New("risk Agent returned no decision")
+	}
+	return empty, "", fmt.Errorf("risk Agent failed after %d attempt(s): %w", attempts, lastErr)
+}
+
+func riskAgentParamsWithoutResponseFormat(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return raw
+	}
+	var params map[string]json.RawMessage
+	if err := common.Unmarshal(raw, &params); err != nil {
+		return raw
+	}
+	if _, exists := params["response_format"]; !exists {
+		return raw
+	}
+	delete(params, "response_format")
+	normalized, err := common.Marshal(params)
+	if err != nil {
+		return raw
+	}
+	return normalized
+}
+
+func buildRiskAgentRetryPrompt(basePrompt string, attempt int, attempts int, cause error) string {
+	reason := "unknown validation error"
+	if cause != nil {
+		reason = common.LocalLogPreview(cause.Error())
+	}
+	return fmt.Sprintf(
+		"%s\n\n[LOCAL VALIDATION RETRY %d/%d]\nThe previous output failed local validation: %s\nReturn exactly one valid JSON object matching the required schema. Do not use Markdown fences, comments, prefixes, or trailing explanations. Only cite signal_id and request_id values present in the case evidence.",
+		basePrompt,
+		attempt,
+		attempts,
+		reason,
+	)
+}
+
 func parseRiskAgentDecision(content string) (riskAgentDecision, string, error) {
 	trimmed := normalizeErrorInsightAIJSONContent(content)
 	var decision riskAgentDecision
 	if len(trimmed) > 256*1024 {
 		return decision, "", errors.New("risk Agent response is too large")
 	}
-	if err := common.Unmarshal([]byte(trimmed), &decision); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	var rawDecision json.RawMessage
+	if err := decoder.Decode(&rawDecision); err != nil {
+		return decision, "", errors.New("risk Agent response is not valid JSON")
+	}
+	if len(rawDecision) > 256*1024 {
+		return decision, "", errors.New("risk Agent response is too large")
+	}
+	if err := common.Unmarshal(rawDecision, &decision); err != nil {
 		return decision, "", errors.New("risk Agent response is not valid JSON")
 	}
 	decision.Verdict = strings.TrimSpace(decision.Verdict)

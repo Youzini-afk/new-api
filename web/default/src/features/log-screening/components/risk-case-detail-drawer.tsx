@@ -16,7 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { Bot, Loader2, ShieldCheck, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -77,6 +82,8 @@ const DEFAULT_ACTION: RiskActionRequest = {
   user_message: '',
 }
 
+const ANALYZE_MUTATION_KEY = ['risk-control', 'case', 'analyze'] as const
+
 export function RiskCaseDetailDrawer(props: RiskCaseDetailDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -113,22 +120,31 @@ export function RiskCaseDetailDrawer(props: RiskCaseDetailDrawerProps) {
     setReviewNote(riskCase.review_note || '')
   }, [detailQuery.data?.case])
 
-  const invalidate = () => {
+  const invalidateCase = (caseId: number | null) => {
     void queryClient.invalidateQueries({ queryKey: ['risk-control', 'cases'] })
     void queryClient.invalidateQueries({
-      queryKey: ['risk-control', 'case', props.caseId],
+      queryKey: ['risk-control', 'case', caseId],
     })
   }
 
+  const invalidate = () => invalidateCase(props.caseId)
+
+  const analyzingCurrentCase =
+    useIsMutating({
+      mutationKey: ANALYZE_MUTATION_KEY,
+      predicate: (mutation) => mutation.state.variables === props.caseId,
+    }) > 0
+
   const analyzeMutation = useMutation({
-    mutationFn: () => analyzeRiskCase(props.caseId ?? 0),
-    onSuccess: (result) => {
+    mutationKey: ANALYZE_MUTATION_KEY,
+    mutationFn: (caseId: number) => analyzeRiskCase(caseId),
+    onSuccess: (result, caseId) => {
       if (!result.success) {
         toast.error(result.message || t('Agent analysis failed'))
         return
       }
       toast.success(t('Agent analysis completed'))
-      invalidate()
+      invalidateCase(caseId)
     },
     onError: (error: Error) => toast.error(error.message),
   })
@@ -286,10 +302,14 @@ export function RiskCaseDetailDrawer(props: RiskCaseDetailDrawerProps) {
                     <Button
                       size='sm'
                       variant='outline'
-                      disabled={analyzeMutation.isPending}
-                      onClick={() => analyzeMutation.mutate()}
+                      disabled={analyzingCurrentCase}
+                      onClick={() => {
+                        if (props.caseId !== null) {
+                          analyzeMutation.mutate(props.caseId)
+                        }
+                      }}
                     >
-                      {analyzeMutation.isPending ? (
+                      {analyzingCurrentCase ? (
                         <Loader2 className='size-4 animate-spin' />
                       ) : (
                         <Bot className='size-4' />

@@ -5875,6 +5875,8 @@
     "Requests leave the queue with a service unavailable error after this time.": "超过此时间仍未出队时，将返回服务暂不可用错误。",
     "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis 可在多节点间协调限制；未启用 Redis 时，每个实例维护自己的队列。",
     "Set maximum concurrency or requests per minute when traffic control is enabled.": "启用流量控制时，请至少设置最大并发数或每分钟请求数。",
-    "Queue timeout must be greater than 0 when queue capacity is enabled.": "启用队列容量时，队列超时必须大于 0。"
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "启用队列容量时，队列超时必须大于 0。",
+    "Concurrent Agent cases": "Agent 并发分析案件数",
+    "Agent retry count": "Agent 自动重试次数"
   }
 }

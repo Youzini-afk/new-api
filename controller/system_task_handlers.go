@@ -64,7 +64,7 @@ func (riskScreeningHandler) Run(ctx context.Context, task *model.SystemTask, run
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
 		return
 	}
-	setting := system_setting.GetRiskControlSetting()
+	setting := *system_setting.GetRiskControlSetting()
 	if !payload.Manual && !setting.ScheduleEnabled {
 		now := common.GetTimestamp()
 		summary := &service.RiskScreeningRunSummary{
@@ -85,7 +85,8 @@ func (riskScreeningHandler) Run(ctx context.Context, task *model.SystemTask, run
 	}
 	summary.ExpiredActions = expired
 	if setting.AgentEnabled {
-		agentAttempts := 0
+		actionEligible := make(map[int64]bool, len(summary.CaseIds))
+		analysisCases := make([]*model.RiskCase, 0, min(len(summary.CaseIds), setting.MaxAgentCasesPerRun))
 		for _, caseId := range summary.CaseIds {
 			if err := ctx.Err(); err != nil {
 				finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
@@ -105,19 +106,33 @@ func (riskScreeningHandler) Run(ctx context.Context, task *model.SystemTask, run
 			if riskCase.Status != model.RiskCaseStatusOpen {
 				continue
 			}
-			if strings.TrimSpace(riskCase.AgentResult) == "" {
-				if agentAttempts >= setting.MaxAgentCasesPerRun {
-					continue
-				}
-				agentAttempts++
-				summary.AgentAttempts = agentAttempts
-				agentContext := newRiskAgentContext(ctx)
-				if analyzeErr := analyzeRiskCaseWithAI(agentContext, riskCase); analyzeErr != nil {
-					common.SysLog(fmt.Sprintf("risk Agent analysis failed for case %d: %v", caseId, analyzeErr))
-					summary.AgentErrors++
-					continue
-				}
-				summary.AgentAnalyzed++
+			if strings.TrimSpace(riskCase.AgentResult) != "" {
+				actionEligible[caseId] = true
+				continue
+			}
+			if len(analysisCases) < setting.MaxAgentCasesPerRun {
+				analysisCases = append(analysisCases, riskCase)
+			}
+		}
+
+		summary.AgentAttempts = len(analysisCases)
+		for result := range analyzeScheduledRiskCases(ctx, analysisCases, setting.AgentConcurrency) {
+			if result.err != nil {
+				common.SysLog(fmt.Sprintf("risk Agent analysis failed for case %d: %v", result.caseId, result.err))
+				summary.AgentErrors++
+				continue
+			}
+			summary.AgentAnalyzed++
+			actionEligible[result.caseId] = true
+		}
+		if err := ctx.Err(); err != nil {
+			finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
+			return
+		}
+
+		for _, caseId := range summary.CaseIds {
+			if !actionEligible[caseId] {
+				continue
 			}
 			updated, reloadErr := model.GetRiskCaseById(ctx, caseId)
 			if reloadErr != nil {
@@ -133,6 +148,59 @@ func (riskScreeningHandler) Run(ctx context.Context, task *model.SystemTask, run
 		}
 	}
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+}
+
+type scheduledRiskAgentResult struct {
+	caseId int64
+	err    error
+}
+
+func analyzeScheduledRiskCases(ctx context.Context, cases []*model.RiskCase, concurrency int) <-chan scheduledRiskAgentResult {
+	results := make(chan scheduledRiskAgentResult, len(cases))
+	if len(cases) == 0 {
+		close(results)
+		return results
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency > len(cases) {
+		concurrency = len(cases)
+	}
+	jobs := make(chan *model.RiskCase)
+	var workers sync.WaitGroup
+	workers.Add(concurrency)
+	for range concurrency {
+		go func() {
+			defer workers.Done()
+			for riskCase := range jobs {
+				if err := ctx.Err(); err != nil {
+					results <- scheduledRiskAgentResult{caseId: riskCase.Id, err: err}
+					continue
+				}
+				agentContext := newRiskAgentContext(ctx)
+				results <- scheduledRiskAgentResult{
+					caseId: riskCase.Id,
+					err:    analyzeRiskCaseWithAI(agentContext, riskCase),
+				}
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for _, riskCase := range cases {
+			select {
+			case <-ctx.Done():
+				return
+			case jobs <- riskCase:
+			}
+		}
+	}()
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
+	return results
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and

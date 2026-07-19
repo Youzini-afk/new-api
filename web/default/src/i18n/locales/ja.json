@@ -5715,6 +5715,8 @@
     "Requests leave the queue with a service unavailable error after this time.": "この時間を超えると、サービス利用不可エラーでキューから退出します。",
     "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis が利用可能な場合はノード間で制限を共有します。Redis がない場合、各インスタンスが独自のキューを管理します。",
     "Set maximum concurrency or requests per minute when traffic control is enabled.": "流量制御を有効にする場合、最大同時実行数または1分あたりのリクエスト数を設定してください。",
-    "Queue timeout must be greater than 0 when queue capacity is enabled.": "キュー容量を有効にする場合、キュータイムアウトは0より大きくする必要があります。"
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "キュー容量を有効にする場合、キュータイムアウトは0より大きくする必要があります。",
+    "Concurrent Agent cases": "Agent 同時分析案件数",
+    "Agent retry count": "Agent 再試行回数"
   }
 }

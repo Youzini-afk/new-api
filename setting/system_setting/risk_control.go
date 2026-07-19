@@ -86,6 +86,8 @@ type RiskControlSetting struct {
 	JudgeModel              string          `json:"judge_model"`
 	AgentMinRuleScore       int             `json:"agent_min_rule_score"`
 	MaxAgentCasesPerRun     int             `json:"max_agent_cases_per_run"`
+	AgentConcurrency        int             `json:"agent_concurrency"`
+	AgentRetryCount         int             `json:"agent_retry_count"`
 	JudgeMinFinalScore      int             `json:"judge_min_final_score"`
 	TriagePromptTemplate    string          `json:"triage_prompt_template"`
 	JudgePromptTemplate     string          `json:"judge_prompt_template"`
@@ -127,6 +129,8 @@ var defaultRiskControlSetting = RiskControlSetting{
 	AgentEnabled:            false,
 	AgentMinRuleScore:       40,
 	MaxAgentCasesPerRun:     20,
+	AgentConcurrency:        4,
+	AgentRetryCount:         2,
 	JudgeMinFinalScore:      75,
 	TriagePromptTemplate:    DefaultRiskTriagePrompt,
 	JudgePromptTemplate:     DefaultRiskJudgePrompt,
@@ -203,6 +207,8 @@ func normalizeRiskControlSetting(setting *RiskControlSetting) {
 	setting.CaseCooldownMinutes = clampRiskInt(setting.CaseCooldownMinutes, 1, 43200, 360)
 	setting.AgentMinRuleScore = clampRiskInt(setting.AgentMinRuleScore, 1, 100, 40)
 	setting.MaxAgentCasesPerRun = clampRiskInt(setting.MaxAgentCasesPerRun, 1, 500, 20)
+	setting.AgentConcurrency = clampRiskInt(setting.AgentConcurrency, 1, 16, 4)
+	setting.AgentRetryCount = clampRiskInt(setting.AgentRetryCount, 1, 5, 2)
 	setting.JudgeMinFinalScore = clampRiskInt(setting.JudgeMinFinalScore, 1, 100, 75)
 	setting.AutoActionMinScore = clampRiskInt(setting.AutoActionMinScore, 1, 100, 82)
 	setting.AutoPermanentMinScore = clampRiskInt(setting.AutoPermanentMinScore, setting.AutoActionMinScore, 100, 95)

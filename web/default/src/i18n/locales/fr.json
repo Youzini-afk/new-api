@@ -5715,6 +5715,8 @@
     "Requests leave the queue with a service unavailable error after this time.": "Après ce délai, les requêtes quittent la file avec une erreur de service indisponible.",
     "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis coordonne les limites entre les nœuds. Sans Redis, chaque instance maintient sa propre file.",
     "Set maximum concurrency or requests per minute when traffic control is enabled.": "Définissez la concurrence maximale ou les requêtes par minute lorsque le contrôle du trafic est activé.",
-    "Queue timeout must be greater than 0 when queue capacity is enabled.": "Le délai de la file doit être supérieur à 0 lorsque sa capacité est activée."
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "Le délai de la file doit être supérieur à 0 lorsque sa capacité est activée.",
+    "Concurrent Agent cases": "Dossiers Agent simultanés",
+    "Agent retry count": "Nombre de nouvelles tentatives de l’Agent"
   }
 }

@@ -5875,6 +5875,8 @@
     "Requests leave the queue with a service unavailable error after this time.": "Requests leave the queue with a service unavailable error after this time.",
     "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.",
     "Set maximum concurrency or requests per minute when traffic control is enabled.": "Set maximum concurrency or requests per minute when traffic control is enabled.",
-    "Queue timeout must be greater than 0 when queue capacity is enabled.": "Queue timeout must be greater than 0 when queue capacity is enabled."
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "Queue timeout must be greater than 0 when queue capacity is enabled.",
+    "Concurrent Agent cases": "Concurrent Agent cases",
+    "Agent retry count": "Agent retry count"
   }
 }

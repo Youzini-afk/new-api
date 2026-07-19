@@ -1,10 +1,15 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,6 +48,82 @@ func TestParseRiskAgentDecisionValidatesContract(t *testing.T) {
 		AllowedRequestIDs: map[string]struct{}{"req-1": {}},
 	}))
 }
+
+func TestParseRiskAgentDecisionAcceptsFirstJSONValue(t *testing.T) {
+	decision, _, err := parseRiskAgentDecision("```json\n" + validRiskAgentDecisionJSON + "\n```\nThis trailing explanation should be ignored.")
+	require.NoError(t, err)
+	assert.Equal(t, "uncertain", decision.Verdict)
+}
+
+func TestRequestRiskAgentDecisionRetriesWithoutResponseFormat(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/api/risk-control/cases/1/analyze", nil)
+	cfg := &system_setting.RiskControlSetting{
+		ChannelID:        1,
+		AgentRetryCount:  1,
+		JSONOutputParams: json.RawMessage(`{"response_format":{"type":"json_object"},"temperature":0}`),
+	}
+	input := riskAgentInput{
+		AllowedSignalIDs:  map[string]struct{}{},
+		AllowedRequestIDs: map[string]struct{}{},
+	}
+	calls := 0
+	decision, _, err := requestRiskAgentDecision(c, cfg, "test-model", "base prompt", input, func(
+		_ *gin.Context,
+		_ int,
+		_ string,
+		params json.RawMessage,
+		prompt string,
+	) (string, error) {
+		calls++
+		var decoded map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(params, &decoded))
+		if calls == 1 {
+			assert.Contains(t, decoded, "response_format")
+			return "not json", nil
+		}
+		assert.NotContains(t, decoded, "response_format")
+		assert.Contains(t, decoded, "temperature")
+		assert.Contains(t, prompt, "LOCAL VALIDATION RETRY")
+		return validRiskAgentDecisionJSON, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, calls)
+	assert.Equal(t, "uncertain", decision.Verdict)
+}
+
+func TestRiskAgentLimiterEnforcesConfiguredConcurrency(t *testing.T) {
+	limiter := newRiskAgentLimiter()
+	releaseFirst, err := limiter.acquire(context.Background(), 2)
+	require.NoError(t, err)
+	releaseSecond, err := limiter.acquire(context.Background(), 2)
+	require.NoError(t, err)
+
+	blockedContext, cancelBlocked := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancelBlocked()
+	_, err = limiter.acquire(blockedContext, 2)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	releaseFirst()
+	releaseThird, err := limiter.acquire(context.Background(), 2)
+	require.NoError(t, err)
+	releaseThird()
+	releaseSecond()
+}
+
+const validRiskAgentDecisionJSON = `{
+	"verdict":"uncertain",
+	"risk_score":40,
+	"confidence":0.5,
+	"policy_violation":false,
+	"evidence":[],
+	"counter_evidence":[],
+	"recommended_action":"manual_review",
+	"recommended_duration_minutes":0,
+	"admin_reason":"manual review required",
+	"user_reason":"",
+	"suggested_fingerprint":{"kind":"none","pattern":"","reason":""}
+}`
 
 func TestRedactRiskAgentPromptMasksCredentials(t *testing.T) {
 	redacted := redactRiskAgentPrompt(`{"authorization":"Bearer secret-token","api_key":"sk-abcdefghijklmnopqrstuvwxyz","ip":"10.0.0.1"}`)

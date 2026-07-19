@@ -5715,6 +5715,8 @@
     "Requests leave the queue with a service unavailable error after this time.": "Sau thời gian này, yêu cầu rời hàng đợi với lỗi dịch vụ không khả dụng.",
     "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis phối hợp giới hạn giữa các nút. Nếu không có Redis, mỗi phiên bản duy trì hàng đợi riêng.",
     "Set maximum concurrency or requests per minute when traffic control is enabled.": "Khi bật kiểm soát lưu lượng, hãy đặt số đồng thời tối đa hoặc số yêu cầu mỗi phút.",
-    "Queue timeout must be greater than 0 when queue capacity is enabled.": "Thời gian chờ phải lớn hơn 0 khi bật sức chứa hàng đợi."
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "Thời gian chờ phải lớn hơn 0 khi bật sức chứa hàng đợi.",
+    "Concurrent Agent cases": "Số vụ việc Agent đồng thời",
+    "Agent retry count": "Số lần Agent thử lại"
   }
 }

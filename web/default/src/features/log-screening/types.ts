@@ -487,6 +487,8 @@ export interface RiskControlSetting {
   judge_model: string
   agent_min_rule_score: number
   max_agent_cases_per_run: number
+  agent_concurrency: number
+  agent_retry_count: number
   judge_min_final_score: number
   triage_prompt_template: string
   judge_prompt_template: string
