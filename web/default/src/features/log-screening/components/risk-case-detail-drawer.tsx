@@ -562,10 +562,12 @@ function ActionPanel(props: {
               })
             }
           >
-            <SelectTrigger>
-              <SelectValue />
+            <SelectTrigger className='w-full'>
+              <SelectValue>
+                {t(actionLabel(props.actionForm.action))}
+              </SelectValue>
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent alignItemWithTrigger={false}>
               {props.allowedActions.map((action) => (
                 <SelectItem key={action} value={action}>
                   {t(actionLabel(action))}
