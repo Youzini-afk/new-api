@@ -636,6 +636,10 @@ func generateErrorInsightRulesWithAI(c *gin.Context, cfg *system_setting.ErrorIn
 func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonOutputParams json.RawMessage, prompt string) (string, error) {
 	const maxAIResponseBytes = 2 << 20
 
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return "", errors.New("AI model is not configured")
+	}
 	channel, err := model.GetChannelById(channelID, true)
 	if err != nil {
 		return "", errors.New("failed to load AI channel")
@@ -676,7 +680,10 @@ func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonO
 	if err := helper.ModelMappedHelper(relayCtx, info, request); err != nil {
 		return "", err
 	}
-	request.SetModelName(info.UpstreamModelName)
+	outboundModel, err := ensureErrorInsightAIModel(request, info, modelName)
+	if err != nil {
+		return "", err
+	}
 	adaptor := relay.GetAdaptor(apiType)
 	if adaptor == nil {
 		return "", errors.New("invalid AI channel adaptor")
@@ -690,6 +697,13 @@ func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonO
 	if err != nil {
 		return "", err
 	}
+	bodyModel, bodyCarriesModel, err := getErrorInsightAIRequestModel(jsonData)
+	if err != nil {
+		return "", err
+	}
+	if bodyModel == "" {
+		bodyModel = outboundModel
+	}
 	if len(info.ParamOverride) > 0 {
 		jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
 		if err != nil {
@@ -699,6 +713,16 @@ func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonO
 	jsonData, err = mergeErrorInsightAIJSONParams(jsonData, jsonOutputParams)
 	if err != nil {
 		return "", err
+	}
+	if bodyCarriesModel {
+		var repaired bool
+		jsonData, repaired, err = ensureErrorInsightAIRequestModel(jsonData, bodyModel)
+		if err != nil {
+			return "", err
+		}
+		if repaired {
+			common.SysLog(fmt.Sprintf("restored missing model in internal AI request: channel_id=%d", channelID))
+		}
 	}
 	reqBody := bytes.NewBuffer(jsonData)
 	relayCtx.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
@@ -723,6 +747,79 @@ func invokeErrorInsightAI(c *gin.Context, channelID int, modelName string, jsonO
 		return "", errors.New("AI channel response is too large")
 	}
 	return extractErrorInsightAIContent(body)
+}
+
+func ensureErrorInsightAIModel(request *dto.GeneralOpenAIRequest, info *relaycommon.RelayInfo, configuredModel string) (string, error) {
+	configuredModel = strings.TrimSpace(configuredModel)
+	if request == nil || info == nil {
+		return "", errors.New("failed to prepare AI request model")
+	}
+
+	resolvedModel := ""
+	if info.ChannelMeta != nil {
+		resolvedModel = strings.TrimSpace(info.UpstreamModelName)
+	}
+	if resolvedModel == "" {
+		resolvedModel = strings.TrimSpace(request.Model)
+	}
+	if resolvedModel == "" {
+		resolvedModel = configuredModel
+	}
+	if resolvedModel == "" {
+		return "", errors.New("AI model is not configured")
+	}
+
+	if info.ChannelMeta == nil {
+		info.ChannelMeta = &relaycommon.ChannelMeta{}
+	}
+	info.UpstreamModelName = resolvedModel
+	if strings.TrimSpace(info.OriginModelName) == "" {
+		info.OriginModelName = configuredModel
+	}
+	request.Model = resolvedModel
+	return resolvedModel, nil
+}
+
+func getErrorInsightAIRequestModel(jsonData []byte) (string, bool, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(jsonData, &payload); err != nil {
+		return "", false, err
+	}
+	rawModel, exists := payload["model"]
+	if !exists {
+		return "", false, nil
+	}
+	var modelName string
+	if err := json.Unmarshal(rawModel, &modelName); err != nil {
+		return "", true, nil
+	}
+	return strings.TrimSpace(modelName), true, nil
+}
+
+func ensureErrorInsightAIRequestModel(jsonData []byte, fallbackModel string) ([]byte, bool, error) {
+	fallbackModel = strings.TrimSpace(fallbackModel)
+	if fallbackModel == "" {
+		return nil, false, errors.New("AI request model is empty")
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(jsonData, &payload); err != nil {
+		return nil, false, err
+	}
+	if rawModel, exists := payload["model"]; exists {
+		var modelName string
+		if err := json.Unmarshal(rawModel, &modelName); err == nil && strings.TrimSpace(modelName) != "" {
+			return jsonData, false, nil
+		}
+	}
+
+	rawModel, err := json.Marshal(fallbackModel)
+	if err != nil {
+		return nil, false, err
+	}
+	payload["model"] = rawModel
+	repaired, err := json.Marshal(payload)
+	return repaired, true, err
 }
 
 func applyErrorInsightAIJSONParams(request *dto.GeneralOpenAIRequest, params json.RawMessage) error {
