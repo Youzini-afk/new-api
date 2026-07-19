@@ -5702,6 +5702,19 @@
     "Failed to load ban patrol status. Click Refresh status to retry.": "Failed to load ban patrol status. Click Refresh status to retry.",
     "Eligibility updated": "Eligibility updated",
     "Batch size must be an integer between 50 and 100000.": "Batch size must be an integer between 50 and 100000.",
-    "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.": "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol."
+    "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.": "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.",
+    "Channel Traffic Control": "チャネル流量制御",
+    "Limit concurrency and requests per minute for this channel with a bounded waiting queue.": "このチャネルの同時実行数と1分あたりのリクエスト数を、上限付き待機キューで制限します。",
+    "Enable channel traffic control": "チャネル流量制御を有効にする",
+    "Limits apply to actual upstream requests, including retries and split batches. Streaming requests hold a concurrency slot until completion.": "制限は再試行や分割バッチを含む実際の上流リクエストに適用されます。ストリーミングリクエストは完了まで同時実行枠を保持します。",
+    "Maximum concurrency": "最大同時実行数",
+    "0 means unlimited.": "0 は無制限です。",
+    "Queue capacity": "キュー容量",
+    "0 rejects immediately when the channel is busy.": "0 の場合、チャネルが混雑していると即座に拒否します。",
+    "Queue timeout (seconds)": "キュータイムアウト（秒）",
+    "Requests leave the queue with a service unavailable error after this time.": "この時間を超えると、サービス利用不可エラーでキューから退出します。",
+    "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis が利用可能な場合はノード間で制限を共有します。Redis がない場合、各インスタンスが独自のキューを管理します。",
+    "Set maximum concurrency or requests per minute when traffic control is enabled.": "流量制御を有効にする場合、最大同時実行数または1分あたりのリクエスト数を設定してください。",
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "キュー容量を有効にする場合、キュータイムアウトは0より大きくする必要があります。"
   }
 }

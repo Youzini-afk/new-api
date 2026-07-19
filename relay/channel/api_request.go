@@ -386,9 +386,17 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		targetHeader.Set(key, value)
 	}
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+	trafficLease, err := AcquireChannelTraffic(c, info)
+	if err != nil {
+		return nil, err
+	}
 	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
+		trafficLease.Release()
 		return nil, fmt.Errorf("dial failed to %s: %w", fullRequestURL, err)
+	}
+	if trafficLease != nil {
+		info.ChannelTrafficRelease = trafficLease.Release
 	}
 	// send request body
 	//all, err := io.ReadAll(requestBody)
@@ -484,6 +492,26 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
+
+// AcquireChannelTraffic applies the configured channel admission limits to a
+// provider request. It is exported for adaptors that use provider SDKs instead
+// of the shared HTTP request path.
+func AcquireChannelTraffic(c *gin.Context, info *common.RelayInfo) (*service.ChannelTrafficLease, error) {
+	if info == nil {
+		return nil, nil
+	}
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	lease, err := service.AcquireChannelTraffic(ctx, info.ChannelId, info.ChannelOtherSettings.TrafficControl)
+	if err != nil {
+		return nil, err
+	}
+	service.RecordChannelTrafficAdmission(c, lease)
+	return lease, nil
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	var client *http.Client
 	var err error
@@ -494,6 +522,10 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	} else {
 		client = service.GetHttpClient()
+	}
+	trafficLease, err := AcquireChannelTraffic(c, info)
+	if err != nil {
+		return nil, err
 	}
 
 	var stopPinger context.CancelFunc
@@ -516,12 +548,15 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 
 	resp, err := client.Do(req)
 	if err != nil {
+		trafficLease.Release()
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
+		trafficLease.Release()
 		return nil, errors.New("resp is nil")
 	}
+	resp.Body = service.HoldChannelTrafficUntilResponseClosed(resp.Body, trafficLease)
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)

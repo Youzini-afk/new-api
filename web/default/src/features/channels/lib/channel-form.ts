@@ -136,6 +136,24 @@ const DEFAULT_AVAILABILITY_WINDOWS = [
     end: '08:00',
   },
 ]
+const MAX_CHANNEL_TRAFFIC_CONCURRENCY = 100_000
+const MAX_CHANNEL_TRAFFIC_RPM = 10_000_000
+const MAX_CHANNEL_TRAFFIC_QUEUE_SIZE = 10_000
+const MAX_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS = 3_600
+const DEFAULT_CHANNEL_TRAFFIC_QUEUE_SIZE = 100
+const DEFAULT_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS = 30
+
+function normalizeNonNegativeInteger(
+  value: unknown,
+  fallback: number,
+  maximum: number
+): number {
+  const normalized = Number(value)
+  if (!Number.isInteger(normalized) || normalized < 0 || normalized > maximum) {
+    return fallback
+  }
+  return normalized
+}
 
 export const channelFormSchema = z
   .object({
@@ -229,6 +247,32 @@ export const channelFormSchema = z
         })
       )
       .max(32)
+      .optional(),
+    // Channel traffic control (stored in settings JSON)
+    traffic_control_enabled: z.boolean().optional(),
+    traffic_max_concurrency: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CHANNEL_TRAFFIC_CONCURRENCY)
+      .optional(),
+    traffic_rpm: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CHANNEL_TRAFFIC_RPM)
+      .optional(),
+    traffic_queue_size: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CHANNEL_TRAFFIC_QUEUE_SIZE)
+      .optional(),
+    traffic_queue_timeout_seconds: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS)
       .optional(),
   })
   .superRefine((data, ctx) => {
@@ -359,6 +403,26 @@ export const channelFormSchema = z
         }
       })
     }
+
+    if (data.traffic_control_enabled) {
+      if (!data.traffic_max_concurrency && !data.traffic_rpm) {
+        addRequiredIssue(
+          ctx,
+          'traffic_max_concurrency',
+          'Set maximum concurrency or requests per minute when traffic control is enabled.'
+        )
+      }
+      if (
+        (data.traffic_queue_size || 0) > 0 &&
+        (data.traffic_queue_timeout_seconds || 0) <= 0
+      ) {
+        addRequiredIssue(
+          ctx,
+          'traffic_queue_timeout_seconds',
+          'Queue timeout must be greater than 0 when queue capacity is enabled.'
+        )
+      }
+    }
   })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -419,6 +483,11 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   availability_schedule_enabled: false,
   availability_schedule_timezone: 'Asia/Shanghai',
   availability_schedule_windows: DEFAULT_AVAILABILITY_WINDOWS,
+  traffic_control_enabled: false,
+  traffic_max_concurrency: 0,
+  traffic_rpm: 0,
+  traffic_queue_size: DEFAULT_CHANNEL_TRAFFIC_QUEUE_SIZE,
+  traffic_queue_timeout_seconds: DEFAULT_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS,
   advanced_custom: '',
 }
 
@@ -479,6 +548,11 @@ export function transformChannelToFormDefaults(
   let availabilityScheduleWindows = DEFAULT_AVAILABILITY_WINDOWS.map(
     (window) => ({ ...window, weekdays: [...window.weekdays] })
   )
+  let trafficControlEnabled = false
+  let trafficMaxConcurrency = 0
+  let trafficRpm = 0
+  let trafficQueueSize = DEFAULT_CHANNEL_TRAFFIC_QUEUE_SIZE
+  let trafficQueueTimeoutSeconds = DEFAULT_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS
   let advancedCustom = ''
 
   if (channel.settings) {
@@ -553,6 +627,29 @@ export function transformChannelToFormDefaults(
           }
         }
       }
+      if (isJsonObjectValue(parsed.traffic_control)) {
+        trafficControlEnabled = parsed.traffic_control.enabled === true
+        trafficMaxConcurrency = normalizeNonNegativeInteger(
+          parsed.traffic_control.max_concurrency,
+          0,
+          MAX_CHANNEL_TRAFFIC_CONCURRENCY
+        )
+        trafficRpm = normalizeNonNegativeInteger(
+          parsed.traffic_control.rpm,
+          0,
+          MAX_CHANNEL_TRAFFIC_RPM
+        )
+        trafficQueueSize = normalizeNonNegativeInteger(
+          parsed.traffic_control.queue_size,
+          DEFAULT_CHANNEL_TRAFFIC_QUEUE_SIZE,
+          MAX_CHANNEL_TRAFFIC_QUEUE_SIZE
+        )
+        trafficQueueTimeoutSeconds = normalizeNonNegativeInteger(
+          parsed.traffic_control.queue_timeout_seconds,
+          DEFAULT_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS,
+          MAX_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS
+        )
+      }
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
@@ -608,6 +705,11 @@ export function transformChannelToFormDefaults(
     availability_schedule_enabled: availabilityScheduleEnabled,
     availability_schedule_timezone: availabilityScheduleTimezone,
     availability_schedule_windows: availabilityScheduleWindows,
+    traffic_control_enabled: trafficControlEnabled,
+    traffic_max_concurrency: trafficMaxConcurrency,
+    traffic_rpm: trafficRpm,
+    traffic_queue_size: trafficQueueSize,
+    traffic_queue_timeout_seconds: trafficQueueTimeoutSeconds,
     advanced_custom: advancedCustom,
   }
 }
@@ -749,6 +851,21 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     }
   } else if ('availability_schedule' in settingsObj) {
     delete settingsObj.availability_schedule
+  }
+
+  const hadTrafficControl = isJsonObjectValue(settingsObj.traffic_control)
+  if (formData.traffic_control_enabled || hadTrafficControl) {
+    settingsObj.traffic_control = {
+      enabled: formData.traffic_control_enabled === true,
+      max_concurrency: Number(formData.traffic_max_concurrency || 0),
+      rpm: Number(formData.traffic_rpm || 0),
+      queue_size: Number(formData.traffic_queue_size || 0),
+      queue_timeout_seconds: Number(
+        formData.traffic_queue_timeout_seconds || 0
+      ),
+    }
+  } else if ('traffic_control' in settingsObj) {
+    delete settingsObj.traffic_control
   }
 
   if (formData.type === CHANNEL_TYPE_ADVANCED_CUSTOM) {

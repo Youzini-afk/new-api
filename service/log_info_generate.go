@@ -74,6 +74,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	}
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
+	appendChannelTrafficAdminInfo(ctx, adminInfo)
 	if relayInfo.BatchSplit != nil {
 		adminInfo["batch_split"] = relayInfo.BatchSplit.AdminMap()
 	}

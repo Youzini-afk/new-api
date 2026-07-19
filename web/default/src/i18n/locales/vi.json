@@ -5702,6 +5702,19 @@
     "Failed to load ban patrol status. Click Refresh status to retry.": "Failed to load ban patrol status. Click Refresh status to retry.",
     "Eligibility updated": "Eligibility updated",
     "Batch size must be an integer between 50 and 100000.": "Batch size must be an integer between 50 and 100000.",
-    "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.": "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol."
+    "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.": "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.",
+    "Channel Traffic Control": "Kiểm soát lưu lượng kênh",
+    "Limit concurrency and requests per minute for this channel with a bounded waiting queue.": "Giới hạn số yêu cầu đồng thời và số yêu cầu mỗi phút cho kênh này bằng hàng đợi có giới hạn.",
+    "Enable channel traffic control": "Bật kiểm soát lưu lượng kênh",
+    "Limits apply to actual upstream requests, including retries and split batches. Streaming requests hold a concurrency slot until completion.": "Giới hạn áp dụng cho các yêu cầu thực tế gửi lên thượng nguồn, bao gồm thử lại và các lô đã chia nhỏ. Yêu cầu truyền luồng giữ một suất đồng thời cho đến khi hoàn tất.",
+    "Maximum concurrency": "Số yêu cầu đồng thời tối đa",
+    "0 means unlimited.": "0 nghĩa là không giới hạn.",
+    "Queue capacity": "Sức chứa hàng đợi",
+    "0 rejects immediately when the channel is busy.": "0 sẽ từ chối ngay khi kênh đang bận.",
+    "Queue timeout (seconds)": "Thời gian chờ hàng đợi (giây)",
+    "Requests leave the queue with a service unavailable error after this time.": "Sau thời gian này, yêu cầu rời hàng đợi với lỗi dịch vụ không khả dụng.",
+    "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis phối hợp giới hạn giữa các nút. Nếu không có Redis, mỗi phiên bản duy trì hàng đợi riêng.",
+    "Set maximum concurrency or requests per minute when traffic control is enabled.": "Khi bật kiểm soát lưu lượng, hãy đặt số đồng thời tối đa hoặc số yêu cầu mỗi phút.",
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "Thời gian chờ phải lớn hơn 0 khi bật sức chứa hàng đợi."
   }
 }

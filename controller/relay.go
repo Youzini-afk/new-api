@@ -654,6 +654,13 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
 	}
+	if types.IsChannelTrafficControlError(openaiErr) {
+		if retryTimes <= 0 {
+			return false
+		}
+		_, specificChannel := c.Get("specific_channel_id")
+		return !specificChannel
+	}
 	if types.IsChannelError(openaiErr) {
 		return true
 	}

@@ -122,6 +122,15 @@ export interface ChannelOtherSettings {
   upstream_model_update_last_detected_models?: string[]
   advanced_custom?: AdvancedCustomConfig
   availability_schedule?: ChannelAvailabilitySchedule
+  traffic_control?: ChannelTrafficControl
+}
+
+export interface ChannelTrafficControl {
+  enabled?: boolean
+  max_concurrency?: number
+  rpm?: number
+  queue_size?: number
+  queue_timeout_seconds?: number
 }
 
 export interface ChannelAvailabilitySchedule {

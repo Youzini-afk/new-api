@@ -14,6 +14,12 @@ import (
 
 func WssHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
+	defer func() {
+		if info.ChannelTrafficRelease != nil {
+			info.ChannelTrafficRelease()
+			info.ChannelTrafficRelease = nil
+		}
+	}()
 
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {

@@ -5702,6 +5702,19 @@
     "Failed to load ban patrol status. Click Refresh status to retry.": "Failed to load ban patrol status. Click Refresh status to retry.",
     "Eligibility updated": "Eligibility updated",
     "Batch size must be an integer between 50 and 100000.": "Batch size must be an integer between 50 and 100000.",
-    "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.": "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol."
+    "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.": "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.",
+    "Channel Traffic Control": "Contrôle du trafic du canal",
+    "Limit concurrency and requests per minute for this channel with a bounded waiting queue.": "Limitez la concurrence et les requêtes par minute pour ce canal avec une file d’attente bornée.",
+    "Enable channel traffic control": "Activer le contrôle du trafic du canal",
+    "Limits apply to actual upstream requests, including retries and split batches. Streaming requests hold a concurrency slot until completion.": "Les limites s’appliquent aux requêtes réelles vers l’amont, y compris les nouvelles tentatives et les lots fractionnés. Les requêtes en streaming occupent un emplacement de concurrence jusqu’à leur fin.",
+    "Maximum concurrency": "Concurrence maximale",
+    "0 means unlimited.": "0 signifie illimité.",
+    "Queue capacity": "Capacité de la file",
+    "0 rejects immediately when the channel is busy.": "0 rejette immédiatement lorsque le canal est occupé.",
+    "Queue timeout (seconds)": "Délai d’attente de la file (secondes)",
+    "Requests leave the queue with a service unavailable error after this time.": "Après ce délai, les requêtes quittent la file avec une erreur de service indisponible.",
+    "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis coordonne les limites entre les nœuds. Sans Redis, chaque instance maintient sa propre file.",
+    "Set maximum concurrency or requests per minute when traffic control is enabled.": "Définissez la concurrence maximale ou les requêtes par minute lorsque le contrôle du trafic est activé.",
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "Le délai de la file doit être supérieur à 0 lorsque sa capacité est activée."
   }
 }

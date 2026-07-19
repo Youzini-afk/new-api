@@ -5862,6 +5862,19 @@
     "Clearing a restriction does not re-enable a frozen token or banned account.": "Clearing a restriction does not re-enable a frozen token or banned account.",
     "Maximum Agent cases per run": "Maximum Agent cases per run",
     "Suggested fingerprint": "Suggested fingerprint",
-    "Automatic permanent bans require a Judge model": "Automatic permanent bans require a Judge model"
+    "Automatic permanent bans require a Judge model": "Automatic permanent bans require a Judge model",
+    "Channel Traffic Control": "Channel Traffic Control",
+    "Limit concurrency and requests per minute for this channel with a bounded waiting queue.": "Limit concurrency and requests per minute for this channel with a bounded waiting queue.",
+    "Enable channel traffic control": "Enable channel traffic control",
+    "Limits apply to actual upstream requests, including retries and split batches. Streaming requests hold a concurrency slot until completion.": "Limits apply to actual upstream requests, including retries and split batches. Streaming requests hold a concurrency slot until completion.",
+    "Maximum concurrency": "Maximum concurrency",
+    "0 means unlimited.": "0 means unlimited.",
+    "Queue capacity": "Queue capacity",
+    "0 rejects immediately when the channel is busy.": "0 rejects immediately when the channel is busy.",
+    "Queue timeout (seconds)": "Queue timeout (seconds)",
+    "Requests leave the queue with a service unavailable error after this time.": "Requests leave the queue with a service unavailable error after this time.",
+    "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.",
+    "Set maximum concurrency or requests per minute when traffic control is enabled.": "Set maximum concurrency or requests per minute when traffic control is enabled.",
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "Queue timeout must be greater than 0 when queue capacity is enabled."
   }
 }

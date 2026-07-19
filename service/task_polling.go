@@ -234,9 +234,12 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 		return errors.New("adaptor not found")
 	}
 	proxy := ch.GetSetting().Proxy
-	resp, err := adaptor.FetchTask(*ch.BaseURL, ch.Key, map[string]any{
-		"ids": taskIds,
-	}, proxy)
+	otherSettings := ch.GetOtherSettings()
+	resp, err := DoChannelTrafficHTTPRequest(ctx, ch.Id, otherSettings.TrafficControl, func() (*http.Response, error) {
+		return adaptor.FetchTask(*ch.BaseURL, ch.Key, map[string]any{
+			"ids": taskIds,
+		}, proxy)
+	})
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Get Task Do req error: %v", err))
 		return err
@@ -421,10 +424,13 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if privateData.Key != "" {
 		key = privateData.Key
 	}
-	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
-		"task_id": task.GetUpstreamTaskID(),
-		"action":  task.Action,
-	}, proxy)
+	otherSettings := ch.GetOtherSettings()
+	resp, err := DoChannelTrafficHTTPRequest(ctx, ch.Id, otherSettings.TrafficControl, func() (*http.Response, error) {
+		return adaptor.FetchTask(baseURL, key, map[string]any{
+			"task_id": task.GetUpstreamTaskID(),
+			"action":  task.Action,
+		}, proxy)
+	})
 	if err != nil {
 		return fmt.Errorf("fetchTask failed for task %s: %w", taskId, err)
 	}

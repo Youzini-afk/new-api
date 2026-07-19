@@ -40,11 +40,26 @@ func getAwsErrorStatusCode(err error) int {
 	return http.StatusInternalServerError
 }
 
-func newAwsInvokeContext() (context.Context, context.CancelFunc) {
-	if common.RelayTimeout <= 0 {
-		return context.Background(), func() {}
+func newAwsInvokeContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
 	}
-	return context.WithTimeout(context.Background(), time.Duration(common.RelayTimeout)*time.Second)
+	if common.RelayTimeout <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, time.Duration(common.RelayTimeout)*time.Second)
+}
+
+func acquireAwsChannelTraffic(c *gin.Context, info *relaycommon.RelayInfo) (*service.ChannelTrafficLease, *types.NewAPIError) {
+	lease, err := channel.AcquireChannelTraffic(c, info)
+	if err == nil {
+		return lease, nil
+	}
+	var newAPIError *types.NewAPIError
+	if errors.As(err, &newAPIError) {
+		return nil, newAPIError
+	}
+	return nil, types.NewError(err, types.ErrorCodeChannelAwsClientError)
 }
 
 func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.Client, error) {
@@ -222,8 +237,15 @@ func getAwsModelID(requestModel string) string {
 }
 
 func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	trafficLease, trafficErr := acquireAwsChannelTraffic(c, info)
+	if trafficErr != nil {
+		return trafficErr, nil
+	}
+	if trafficLease != nil {
+		defer trafficLease.Release()
+	}
 
-	ctx, cancel := newAwsInvokeContext()
+	ctx, cancel := newAwsInvokeContext(c.Request.Context())
 	defer cancel()
 
 	awsResp, err := a.AwsClient.InvokeModel(ctx, a.AwsReq.(*bedrockruntime.InvokeModelInput))
@@ -253,7 +275,15 @@ func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types
 }
 
 func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
-	ctx, cancel := newAwsInvokeContext()
+	trafficLease, trafficErr := acquireAwsChannelTraffic(c, info)
+	if trafficErr != nil {
+		return trafficErr, nil
+	}
+	if trafficLease != nil {
+		defer trafficLease.Release()
+	}
+
+	ctx, cancel := newAwsInvokeContext(c.Request.Context())
 	defer cancel()
 
 	awsResp, err := a.AwsClient.InvokeModelWithResponseStream(ctx, a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput))
@@ -295,8 +325,15 @@ func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (
 
 // Nova模型处理函数
 func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	trafficLease, trafficErr := acquireAwsChannelTraffic(c, info)
+	if trafficErr != nil {
+		return trafficErr, nil
+	}
+	if trafficLease != nil {
+		defer trafficLease.Release()
+	}
 
-	ctx, cancel := newAwsInvokeContext()
+	ctx, cancel := newAwsInvokeContext(c.Request.Context())
 	defer cancel()
 
 	awsResp, err := a.AwsClient.InvokeModel(ctx, a.AwsReq.(*bedrockruntime.InvokeModelInput))

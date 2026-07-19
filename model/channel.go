@@ -969,6 +969,9 @@ func (channel *Channel) ValidateSettings() error {
 			return err
 		}
 	}
+	if err := channelOtherSettings.TrafficControl.Validate(); err != nil {
+		return err
+	}
 	return nil
 }
 

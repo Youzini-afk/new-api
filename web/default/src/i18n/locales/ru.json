@@ -5702,6 +5702,19 @@
     "Failed to load ban patrol status. Click Refresh status to retry.": "Failed to load ban patrol status. Click Refresh status to retry.",
     "Eligibility updated": "Eligibility updated",
     "Batch size must be an integer between 50 and 100000.": "Batch size must be an integer between 50 and 100000.",
-    "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.": "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol."
+    "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.": "Shares Discord API rate limits and saved max batch size / worker / RPS settings with the full gate patrol.",
+    "Channel Traffic Control": "Управление трафиком канала",
+    "Limit concurrency and requests per minute for this channel with a bounded waiting queue.": "Ограничьте параллелизм и число запросов в минуту для этого канала с помощью ограниченной очереди ожидания.",
+    "Enable channel traffic control": "Включить управление трафиком канала",
+    "Limits apply to actual upstream requests, including retries and split batches. Streaming requests hold a concurrency slot until completion.": "Ограничения применяются к фактическим запросам к вышестоящему сервису, включая повторы и разделённые пакеты. Потоковые запросы занимают слот до завершения.",
+    "Maximum concurrency": "Максимальный параллелизм",
+    "0 means unlimited.": "0 означает без ограничений.",
+    "Queue capacity": "Ёмкость очереди",
+    "0 rejects immediately when the channel is busy.": "При значении 0 запрос сразу отклоняется, если канал занят.",
+    "Queue timeout (seconds)": "Тайм-аут очереди (секунды)",
+    "Requests leave the queue with a service unavailable error after this time.": "По истечении этого времени запрос покидает очередь с ошибкой недоступности сервиса.",
+    "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis координирует ограничения между узлами. Без Redis каждый экземпляр ведёт собственную очередь.",
+    "Set maximum concurrency or requests per minute when traffic control is enabled.": "При включённом управлении трафиком задайте максимальный параллелизм или число запросов в минуту.",
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "Тайм-аут очереди должен быть больше 0, если включена очередь."
   }
 }

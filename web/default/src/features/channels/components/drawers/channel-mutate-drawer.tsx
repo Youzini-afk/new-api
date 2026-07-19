@@ -166,6 +166,7 @@ import {
   ChannelBasicSection,
   ChannelEditorLoadingState,
   ChannelModelsSection,
+  ChannelTrafficControlSection,
 } from './sections'
 
 type ChannelMutateDrawerProps = {
@@ -1217,6 +1218,8 @@ export function ChannelMutateDrawer({
                       currentRow?.availability_schedule_state
                     }
                   />
+
+                  <ChannelTrafficControlSection form={form} />
 
                   {/* ── API Access ── */}
                   <ChannelApiAccessSection>

@@ -5862,6 +5862,19 @@
     "Clearing a restriction does not re-enable a frozen token or banned account.": "解除限制不会自动重新启用已冻结的令牌或已封禁的账号。",
     "Maximum Agent cases per run": "每轮最多分析案件数",
     "Suggested fingerprint": "建议特征规则",
-    "Automatic permanent bans require a Judge model": "自动永久封禁需要配置复核模型"
+    "Automatic permanent bans require a Judge model": "自动永久封禁需要配置复核模型",
+    "Channel Traffic Control": "渠道流量控制",
+    "Limit concurrency and requests per minute for this channel with a bounded waiting queue.": "为该渠道限制并发数和每分钟请求数，并使用有界等待队列。",
+    "Enable channel traffic control": "启用渠道流量控制",
+    "Limits apply to actual upstream requests, including retries and split batches. Streaming requests hold a concurrency slot until completion.": "限制作用于实际上游请求，包括重试和拆分批次。流式请求会持续占用并发槽，直到响应结束。",
+    "Maximum concurrency": "最大并发数",
+    "0 means unlimited.": "0 表示不限制。",
+    "Queue capacity": "队列容量",
+    "0 rejects immediately when the channel is busy.": "设为 0 时，渠道繁忙会立即拒绝请求。",
+    "Queue timeout (seconds)": "队列超时（秒）",
+    "Requests leave the queue with a service unavailable error after this time.": "超过此时间仍未出队时，将返回服务暂不可用错误。",
+    "Redis coordinates limits across nodes. Without Redis, each instance maintains its own queue.": "Redis 可在多节点间协调限制；未启用 Redis 时，每个实例维护自己的队列。",
+    "Set maximum concurrency or requests per minute when traffic control is enabled.": "启用流量控制时，请至少设置最大并发数或每分钟请求数。",
+    "Queue timeout must be greater than 0 when queue capacity is enabled.": "启用队列容量时，队列超时必须大于 0。"
   }
 }

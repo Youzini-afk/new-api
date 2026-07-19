@@ -49,6 +49,57 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateIgnoredModels      []string                     `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
 	AdvancedCustom                        *AdvancedCustomConfig        `json:"advanced_custom,omitempty"`
 	AvailabilitySchedule                  *ChannelAvailabilitySchedule `json:"availability_schedule,omitempty"`
+	TrafficControl                        *ChannelTrafficControl       `json:"traffic_control,omitempty"`
+}
+
+const (
+	MaxChannelTrafficConcurrency = 100000
+	MaxChannelTrafficRPM         = 10000000
+	MaxChannelTrafficQueueSize   = 10000
+	MaxChannelTrafficQueueWait   = 3600
+)
+
+// ChannelTrafficControl limits actual upstream HTTP requests for one channel.
+// A zero concurrency or RPM value disables only that dimension. QueueSize zero
+// keeps admission fail-fast instead of waiting.
+type ChannelTrafficControl struct {
+	Enabled             bool `json:"enabled,omitempty"`
+	MaxConcurrency      int  `json:"max_concurrency,omitempty"`
+	RPM                 int  `json:"rpm,omitempty"`
+	QueueSize           int  `json:"queue_size,omitempty"`
+	QueueTimeoutSeconds int  `json:"queue_timeout_seconds,omitempty"`
+}
+
+func (c *ChannelTrafficControl) Effective() bool {
+	return c != nil && c.Enabled && (c.MaxConcurrency > 0 || c.RPM > 0)
+}
+
+func (c *ChannelTrafficControl) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if c.MaxConcurrency < 0 || c.MaxConcurrency > MaxChannelTrafficConcurrency {
+		return fmt.Errorf("traffic_control.max_concurrency must be between 0 and %d", MaxChannelTrafficConcurrency)
+	}
+	if c.RPM < 0 || c.RPM > MaxChannelTrafficRPM {
+		return fmt.Errorf("traffic_control.rpm must be between 0 and %d", MaxChannelTrafficRPM)
+	}
+	if c.QueueSize < 0 || c.QueueSize > MaxChannelTrafficQueueSize {
+		return fmt.Errorf("traffic_control.queue_size must be between 0 and %d", MaxChannelTrafficQueueSize)
+	}
+	if c.QueueTimeoutSeconds < 0 || c.QueueTimeoutSeconds > MaxChannelTrafficQueueWait {
+		return fmt.Errorf("traffic_control.queue_timeout_seconds must be between 0 and %d", MaxChannelTrafficQueueWait)
+	}
+	if !c.Enabled {
+		return nil
+	}
+	if c.MaxConcurrency == 0 && c.RPM == 0 {
+		return fmt.Errorf("traffic_control requires max_concurrency or rpm")
+	}
+	if c.QueueSize > 0 && c.QueueTimeoutSeconds == 0 {
+		return fmt.Errorf("traffic_control.queue_timeout_seconds is required when queue_size is greater than 0")
+	}
+	return nil
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
