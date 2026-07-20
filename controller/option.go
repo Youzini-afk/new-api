@@ -182,7 +182,7 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
-	case "discord.register_gate":
+	case "discord.register_gate", "discord.login_gate", "discord.patrol_gate":
 		// Phase 6.1 — validate the typed gate config JSON before persisting.
 		// No ban_sync semantics: only groups/ban_groups/role_match/min_join_hours.
 		if _, err := system_setting.ParseAndValidateDiscordRegisterGate(option.Value.(string)); err != nil {

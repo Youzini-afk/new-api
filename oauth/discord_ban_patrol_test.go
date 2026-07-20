@@ -28,6 +28,19 @@ func TestEvaluateDiscordBanPatrolOldMemberOnlyGuildBan(t *testing.T) {
 	assert.Equal(t, DiscordPatrolOutcomeBanMatched, outcome.Result)
 }
 
+func TestNormalizedDiscordBanPatrolConfigUsesPatrolGate(t *testing.T) {
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGate = system_setting.DiscordRegisterGateConfig{BanGroups: []system_setting.DiscordGateGroup{{Rules: []system_setting.DiscordGateRule{{GuildID: "legacy-ban", RoleMatch: "any"}}}}}
+		patrol := system_setting.DiscordRegisterGateConfig{BanGroups: []system_setting.DiscordGateGroup{{Rules: []system_setting.DiscordGateRule{{GuildID: "patrol-ban", RoleMatch: "any"}}}}}
+		settings.PatrolGate = &patrol
+	})
+
+	cfg, err := normalizedDiscordBanPatrolConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.BanGroups, 1)
+	assert.Equal(t, "patrol-ban", cfg.BanGroups[0].Rules[0].GuildID)
+}
+
 func TestEvaluateDiscordBanPatrolUnknownScopeGuildBanProbesMemberEndpoint(t *testing.T) {
 	withDiscordMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/users/@me/guilds/banned-guild/member", r.URL.Path)

@@ -354,7 +354,7 @@ func (discordGatePatrolHandler) Type() string { return model.SystemTaskTypeDisco
 
 func (discordGatePatrolHandler) Enabled() bool {
 	settings := system_setting.GetDiscordSettings()
-	return settings.Enabled && settings.LoginGatePatrolEnabled && (settings.RegisterGateEnabled || settings.LoginGateEnabled)
+	return settings.Enabled && settings.LoginGatePatrolEnabled && system_setting.DiscordGateConfigHasRules(system_setting.GetDiscordPatrolGateConfig())
 }
 
 func (discordGatePatrolHandler) Interval() time.Duration {

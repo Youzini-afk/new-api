@@ -131,7 +131,7 @@ func RecheckDiscordGate(ctx context.Context, user *model.User) (DiscordGateReche
 		extraUpdates["discord_refresh_token"] = encrypted
 	}
 	addDiscordScopeUpdates(token, extraUpdates)
-	cfg, cfgErr := normalizedDiscordGateConfig()
+	cfg, cfgErr := normalizedDiscordLoginGateConfig()
 	if cfgErr != nil {
 		outcome.Result = discordGateResultError
 		outcome.Reason = "invalid_config"
@@ -314,8 +314,15 @@ func refreshDiscordAccessToken(ctx context.Context, refreshToken string) (*OAuth
 	}, false, nil
 }
 
-func normalizedDiscordGateConfig() (system_setting.DiscordRegisterGateConfig, error) {
-	cfg := system_setting.GetDiscordSettings().RegisterGate
+func normalizedDiscordLoginGateConfig() (system_setting.DiscordRegisterGateConfig, error) {
+	return normalizedDiscordGateConfig(system_setting.GetDiscordLoginGateConfig())
+}
+
+func normalizedDiscordPatrolGateConfig() (system_setting.DiscordRegisterGateConfig, error) {
+	return normalizedDiscordGateConfig(system_setting.GetDiscordPatrolGateConfig())
+}
+
+func normalizedDiscordGateConfig(cfg system_setting.DiscordRegisterGateConfig) (system_setting.DiscordRegisterGateConfig, error) {
 	system_setting.NormalizeDiscordRegisterGate(&cfg)
 	if err := system_setting.ValidateDiscordRegisterGate(cfg); err != nil {
 		return cfg, err

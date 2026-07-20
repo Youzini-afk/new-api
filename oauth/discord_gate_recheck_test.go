@@ -73,6 +73,23 @@ func TestRecheckDiscordGate_ExemptDoesNotCallDiscord(t *testing.T) {
 	assert.False(t, called, "exempt recheck must not call Discord")
 }
 
+func TestNormalizedDiscordGateConfigsUseDedicatedScopes(t *testing.T) {
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGate = discordGateConfig("register-guild", "register-role")
+		login := discordGateConfig("login-guild", "login-role")
+		patrol := discordGateConfig("patrol-guild", "patrol-role")
+		settings.LoginGate = &login
+		settings.PatrolGate = &patrol
+	})
+
+	login, err := normalizedDiscordLoginGateConfig()
+	require.NoError(t, err)
+	patrol, err := normalizedDiscordPatrolGateConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "login-guild", login.Groups[0].Rules[0].GuildID)
+	assert.Equal(t, "patrol-guild", patrol.Groups[0].Rules[0].GuildID)
+}
+
 func TestRecheckDiscordGate_MissingRefreshTokenReauthRequired(t *testing.T) {
 	withDiscordGateRecheckDB(t)
 	user := createDiscordGateUser(t, model.User{DiscordId: "discord-1", DiscordGatePassed: true})

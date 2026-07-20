@@ -41,6 +41,8 @@ const defaultAuthSettings: AuthSettings = {
   'discord.register_gate_enabled': false,
   'discord.register_gate': '',
   'discord.login_gate_enabled': false,
+  'discord.login_gate': 'null',
+  'discord.patrol_gate': 'null',
   'discord.login_gate_patrol_enabled': false,
   'discord.login_gate_patrol_interval_minutes': 2,
   'discord.login_gate_patrol_target_sweep_hours': 12,

@@ -228,6 +228,8 @@ export type AuthSettings = {
   'discord.register_gate_enabled': boolean
   'discord.register_gate': string
   'discord.login_gate_enabled': boolean
+  'discord.login_gate': string
+  'discord.patrol_gate': string
   'discord.login_gate_patrol_enabled': boolean
   'discord.login_gate_patrol_interval_minutes': number
   'discord.login_gate_patrol_target_sweep_hours': number

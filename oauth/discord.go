@@ -462,11 +462,14 @@ func (p *DiscordProvider) PreUserMutation(ctx context.Context, preCtx PreUserMut
 
 	settings := system_setting.GetDiscordSettings()
 	gateEnabled := false
+	cfg := system_setting.DiscordRegisterGateConfig{}
 	switch preCtx.Flow {
 	case OAuthFlowCreate, OAuthFlowBind:
 		gateEnabled = settings.RegisterGateEnabled
+		cfg = system_setting.GetDiscordRegisterGateConfig()
 	case OAuthFlowLogin, OAuthFlowExisting:
 		gateEnabled = settings.LoginGateEnabled
+		cfg = system_setting.GetDiscordLoginGateConfig()
 	}
 	if !gateEnabled {
 		fillDiscordScopeResult(preCtx.Token, preCtx.Result)
@@ -480,7 +483,6 @@ func (p *DiscordProvider) PreUserMutation(ctx context.Context, preCtx PreUserMut
 		return &AccessDeniedError{Message: discordGateServiceUnavailableMessage}
 	}
 
-	cfg := settings.RegisterGate
 	system_setting.NormalizeDiscordRegisterGate(&cfg)
 	if err := system_setting.ValidateDiscordRegisterGate(cfg); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] invalid gate config: %s", err.Error()))

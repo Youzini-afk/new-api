@@ -96,7 +96,7 @@ func PatrolDiscordBanOnly(ctx context.Context, user *model.User) (DiscordPatrolO
 }
 
 func normalizedDiscordBanPatrolConfig() (system_setting.DiscordRegisterGateConfig, error) {
-	cfg := system_setting.GetDiscordSettings().RegisterGate
+	cfg := system_setting.GetDiscordPatrolGateConfig()
 	system_setting.NormalizeDiscordRegisterGate(&cfg)
 	cfg.Groups = nil
 	if err := system_setting.ValidateDiscordRegisterGate(cfg); err != nil {

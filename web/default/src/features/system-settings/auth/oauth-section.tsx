@@ -89,6 +89,8 @@ const oauthSchema = z.object({
     register_gate_enabled: z.boolean(),
     register_gate: z.string(),
     login_gate_enabled: z.boolean(),
+    login_gate: z.string(),
+    patrol_gate: z.string(),
     login_gate_patrol_enabled: z.boolean(),
     login_gate_patrol_interval_minutes: z.coerce.number().int().min(1).max(60),
     login_gate_patrol_target_sweep_hours: z.coerce
@@ -140,6 +142,8 @@ type FlatOAuthDefaults = {
   'discord.register_gate_enabled': boolean
   'discord.register_gate': string
   'discord.login_gate_enabled': boolean
+  'discord.login_gate': string
+  'discord.patrol_gate': string
   'discord.login_gate_patrol_enabled': boolean
   'discord.login_gate_patrol_interval_minutes': number
   'discord.login_gate_patrol_target_sweep_hours': number
@@ -170,6 +174,16 @@ type FlatOAuthDefaults = {
 const oauthTabContentClassName =
   'grid min-w-0 gap-x-5 gap-y-6 lg:grid-cols-2 [&>[data-slot=form-item]]:min-w-0 lg:[&>[data-slot=form-item]:has([data-slot=switch])]:col-span-2'
 
+const normalizeOptionalDiscordGate = (value: string) => {
+  const normalized = value.trim()
+  return normalized === '' ? 'null' : normalized
+}
+
+const displayOptionalDiscordGate = (value: string) => {
+  const normalized = (value ?? '').trim()
+  return normalized === 'null' ? '' : value
+}
+
 const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormInput => ({
   GitHubOAuthEnabled: defaults.GitHubOAuthEnabled,
   GitHubClientId: defaults.GitHubClientId ?? '',
@@ -181,6 +195,8 @@ const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormInput => ({
     register_gate_enabled: defaults['discord.register_gate_enabled'],
     register_gate: defaults['discord.register_gate'] ?? '',
     login_gate_enabled: defaults['discord.login_gate_enabled'],
+    login_gate: displayOptionalDiscordGate(defaults['discord.login_gate']),
+    patrol_gate: displayOptionalDiscordGate(defaults['discord.patrol_gate']),
     login_gate_patrol_enabled: defaults['discord.login_gate_patrol_enabled'],
     login_gate_patrol_interval_minutes:
       defaults['discord.login_gate_patrol_interval_minutes'],
@@ -226,6 +242,10 @@ const normalizeFormValues = (values: OAuthFormValues): FlatOAuthDefaults => ({
   'discord.register_gate_enabled': values.discord.register_gate_enabled,
   'discord.register_gate': values.discord.register_gate,
   'discord.login_gate_enabled': values.discord.login_gate_enabled,
+  'discord.login_gate': normalizeOptionalDiscordGate(values.discord.login_gate),
+  'discord.patrol_gate': normalizeOptionalDiscordGate(
+    values.discord.patrol_gate
+  ),
   'discord.login_gate_patrol_enabled': values.discord.login_gate_patrol_enabled,
   'discord.login_gate_patrol_interval_minutes':
     values.discord.login_gate_patrol_interval_minutes,
@@ -608,18 +628,49 @@ export function OAuthSection(props: OAuthSectionProps) {
                   )}
                 />
 
+                <FormField
+                  control={form.control}
+                  name='discord.login_gate'
+                  render={({ field }) => (
+                    <FormItem className='lg:col-span-2'>
+                      <FormLabel>{t('Login Gate Config')}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder={t(
+                            '{"groups":[{"rules":[{"guild_id":"...","role_ids":["..."],"role_match":"any","min_join_hours":0}]}]}'
+                          )}
+                          className='min-h-28 font-mono text-xs'
+                          value={field.value ?? ''}
+                          onChange={(event) =>
+                            field.onChange(event.target.value)
+                          }
+                          name={field.name}
+                          onBlur={field.onBlur}
+                          ref={field.ref}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Clear this field to inherit the registration gate configuration.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <div className='text-muted-foreground space-y-2 rounded-lg border p-3 text-sm lg:col-span-2'>
                   <p className='text-foreground font-medium'>
                     {t('Discord Gate runtime notes')}
                   </p>
                   <p>
                     {t(
-                      'Login Gate uses the same Discord Gate config as Register Gate. OAuth login only passes on a confirmed Discord Gate match; temporary Discord API errors require retrying later.'
+                      'Registration, login, and patrol use independent Discord Gate configurations. Existing installations inherit the registration configuration until a dedicated configuration is saved.'
                     )}
                   </p>
                   <p>
                     {t(
-                      'Invite restriction has no separate backend option in this version.'
+                      'Manual rechecks use the login gate configuration. Scheduled patrols and banned-server patrols use the patrol gate configuration.'
                     )}
                   </p>
                   <p>
@@ -637,10 +688,41 @@ export function OAuthSection(props: OAuthSectionProps) {
                       </h4>
                       <p className='text-muted-foreground text-sm'>
                         {t(
-                          'Periodically rechecks existing Discord users against the configured gate: banned guilds and required guild/role conditions. Users missing the guilds scope only need to reauthorize — their API tokens are not disabled.'
+                          'Periodically rechecks existing Discord users against the patrol gate configuration: banned guilds and required guild/role conditions. Users missing the guilds scope only need to reauthorize — their API tokens are not disabled.'
                         )}
                       </p>
                     </div>
+
+                    <FormField
+                      control={form.control}
+                      name='discord.patrol_gate'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Patrol Gate Config')}</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder={t(
+                                '{"groups":[{"rules":[{"guild_id":"...","role_ids":["..."],"role_match":"any","min_join_hours":0}]}],"ban_groups":[]}'
+                              )}
+                              className='min-h-28 font-mono text-xs'
+                              value={field.value ?? ''}
+                              onChange={(event) =>
+                                field.onChange(event.target.value)
+                              }
+                              name={field.name}
+                              onBlur={field.onBlur}
+                              ref={field.ref}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'Clear this field to inherit the registration gate configuration.'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
 
                     <FormField
                       control={form.control}
@@ -1345,9 +1427,9 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
   const [eligibility, setEligibility] =
     useState<DiscordGatePatrolEligibility | null>(null)
   const [eligibilityLoadError, setEligibilityLoadError] = useState(false)
-  const [eligibilityUpdatedAt, setEligibilityUpdatedAt] = useState<number | null>(
-    null
-  )
+  const [eligibilityUpdatedAt, setEligibilityUpdatedAt] = useState<
+    number | null
+  >(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingEligibility, setIsLoadingEligibility] = useState(false)
   const [isStarting, setIsStarting] = useState(false)
@@ -1433,8 +1515,7 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
     }
     setIsStarting(true)
     try {
-      const request =
-        parsed === undefined ? undefined : { batch_size: parsed }
+      const request = parsed === undefined ? undefined : { batch_size: parsed }
       const res = await startDiscordGatePatrolTask(request)
       if (!res.success || !res.data) {
         throw new Error(res.message || t('Failed to start patrol batch'))
@@ -1496,9 +1577,7 @@ function DiscordGatePatrolControls(props: { children: ReactNode }) {
       <>
         <div className='text-muted-foreground mb-2 grid gap-1 text-xs sm:grid-cols-3'>
           <div>
-            <span className='text-foreground font-medium'>
-              {t('Mode')}:{' '}
-            </span>
+            <span className='text-foreground font-medium'>{t('Mode')}: </span>
             {t(patrolModeLabelKey(mode))}
           </div>
           <div>
@@ -1850,8 +1929,7 @@ function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
     }
     setIsStarting(true)
     try {
-      const request =
-        parsed === undefined ? undefined : { batch_size: parsed }
+      const request = parsed === undefined ? undefined : { batch_size: parsed }
       const res = await startDiscordBanPatrolTask(request)
       if (!res.success || !res.data) {
         throw new Error(res.message || t('Failed to start ban patrol batch'))
@@ -1904,11 +1982,9 @@ function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
   } else {
     banStatusBody = (
       <>
-        <div className='text-muted-foreground mb-2 mt-3 grid gap-1 text-xs sm:grid-cols-3'>
+        <div className='text-muted-foreground mt-3 mb-2 grid gap-1 text-xs sm:grid-cols-3'>
           <div>
-            <span className='text-foreground font-medium'>
-              {t('Mode')}:{' '}
-            </span>
+            <span className='text-foreground font-medium'>{t('Mode')}: </span>
             {t(patrolModeLabelKey(mode))}
           </div>
           <div>
@@ -1966,7 +2042,7 @@ function DiscordBanPatrolPanel(props: DiscordBanPatrolPanelProps) {
     <div className='rounded-md border border-rose-500/30 bg-rose-500/[0.03] p-3'>
       <div className='mb-2 flex items-center justify-between gap-3 text-sm'>
         <span className='flex items-center gap-2 font-medium'>
-          <span className='inline-flex items-center rounded-sm bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400'>
+          <span className='inline-flex items-center rounded-sm bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-rose-600 uppercase dark:text-rose-400'>
             {t('Ban')}
           </span>
           {t('Banned-server patrol')}

@@ -35,3 +35,21 @@ func TestDiscordBanPatrolHandlerTypeAndManualBatchSize(t *testing.T) {
 	assert.Equal(t, 50000, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeManualBatch, 0, 100, settings))
 	assert.Equal(t, 200, discordGatePatrolEffectiveBatchSize(discordGatePatrolModeManualBatch, 200, 100, settings))
 }
+
+func TestDiscordGatePatrolHandlerUsesIndependentPatrolConfig(t *testing.T) {
+	settings := system_setting.GetDiscordSettings()
+	original := *settings
+	t.Cleanup(func() { *settings = original })
+
+	patrol := system_setting.DiscordRegisterGateConfig{Groups: []system_setting.DiscordGateGroup{{Rules: []system_setting.DiscordGateRule{{GuildID: "patrol", RoleIDs: []string{"role"}, RoleMatch: "any"}}}}}
+	settings.Enabled = true
+	settings.RegisterGateEnabled = false
+	settings.LoginGateEnabled = false
+	settings.LoginGatePatrolEnabled = true
+	settings.PatrolGate = &patrol
+	assert.True(t, discordGatePatrolHandler{}.Enabled())
+
+	empty := system_setting.DiscordRegisterGateConfig{}
+	settings.PatrolGate = &empty
+	assert.False(t, discordGatePatrolHandler{}.Enabled())
+}

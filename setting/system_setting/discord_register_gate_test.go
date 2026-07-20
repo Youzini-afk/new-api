@@ -3,6 +3,7 @@ package system_setting
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -187,4 +188,47 @@ func TestValidateDiscordPatrolSetting(t *testing.T) {
 	require.NoError(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_max_batch_size", 100000))
 	require.Error(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_max_batch_size", 100001))
 	require.NoError(t, ValidateDiscordPatrolSetting("discord.login_gate_patrol_max_retries", 0))
+}
+
+func TestDiscordGateScopedConfigsFallbackAndOverride(t *testing.T) {
+	settings := GetDiscordSettings()
+	original := *settings
+	t.Cleanup(func() { *settings = original })
+
+	register := DiscordRegisterGateConfig{Groups: []DiscordGateGroup{{Rules: []DiscordGateRule{{GuildID: "register", RoleIDs: []string{"register-role"}, RoleMatch: "any"}}}}}
+	login := DiscordRegisterGateConfig{Groups: []DiscordGateGroup{{Rules: []DiscordGateRule{{GuildID: "login", RoleIDs: []string{"login-role"}, RoleMatch: "any"}}}}}
+	patrol := DiscordRegisterGateConfig{BanGroups: []DiscordGateGroup{{Rules: []DiscordGateRule{{GuildID: "patrol-ban", RoleMatch: "any"}}}}}
+
+	settings.RegisterGate = register
+	settings.LoginGate = nil
+	settings.PatrolGate = nil
+	assert.Equal(t, "register", GetDiscordLoginGateConfig().Groups[0].Rules[0].GuildID)
+	assert.Equal(t, "register", GetDiscordPatrolGateConfig().Groups[0].Rules[0].GuildID)
+
+	settings.LoginGate = &login
+	settings.PatrolGate = &patrol
+	assert.Equal(t, "login", GetDiscordLoginGateConfig().Groups[0].Rules[0].GuildID)
+	assert.Equal(t, "patrol-ban", GetDiscordPatrolGateConfig().BanGroups[0].Rules[0].GuildID)
+
+	resolved := GetDiscordLoginGateConfig()
+	resolved.Groups[0].Rules[0].GuildID = "mutated-copy"
+	assert.Equal(t, "login", settings.LoginGate.Groups[0].Rules[0].GuildID)
+
+	empty := DiscordRegisterGateConfig{}
+	settings.LoginGate = &empty
+	assert.False(t, DiscordGateConfigHasRules(GetDiscordLoginGateConfig()), "explicit empty config must not inherit the legacy gate")
+}
+
+func TestDiscordOptionalGateConfigSerializationPreservesInheritance(t *testing.T) {
+	settings := DiscordSettings{}
+	values, err := config.ConfigToMap(&settings)
+	require.NoError(t, err)
+	assert.Equal(t, "null", values["login_gate"])
+	assert.Equal(t, "null", values["patrol_gate"])
+
+	login := DiscordRegisterGateConfig{Groups: []DiscordGateGroup{{Rules: []DiscordGateRule{{GuildID: "login", RoleIDs: []string{"role"}, RoleMatch: "any"}}}}}
+	settings.LoginGate = &login
+	values, err = config.ConfigToMap(&settings)
+	require.NoError(t, err)
+	assert.Contains(t, values["login_gate"], `"guild_id":"login"`)
 }

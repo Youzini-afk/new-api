@@ -290,6 +290,31 @@ func TestDiscordPreUserMutation_LoginUnknownBlocksAlreadyPassedUser(t *testing.T
 	assert.False(t, result.HasDiscordGateUpdate, "transient unknown must not clear or rewrite passed state")
 }
 
+func TestDiscordPreUserMutation_LoginUsesDedicatedGateConfig(t *testing.T) {
+	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
+		settings.RegisterGateEnabled = true
+		settings.LoginGateEnabled = true
+		settings.RegisterGate = discordGateConfig("register-guild", "register-role")
+		login := discordGateConfig("login-guild", "login-role")
+		settings.LoginGate = &login
+	})
+	withDiscordMemberServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/users/@me/guilds/login-guild/member", r.URL.Path)
+		_, _ = w.Write([]byte(discordTestMemberJSON(time.Now(), "login-role")))
+	})
+
+	result := &PreUserMutationResult{}
+	err := (&DiscordProvider{}).PreUserMutation(context.Background(), PreUserMutationContext{
+		Flow:        OAuthFlowLogin,
+		Token:       &OAuthToken{AccessToken: "access-token"},
+		CurrentUser: &model.User{Id: 1, DiscordRefreshToken: "stored-refresh-token"},
+		Result:      result,
+	})
+	require.NoError(t, err)
+	assert.True(t, result.HasDiscordGateUpdate)
+	assert.True(t, result.DiscordGatePassed)
+}
+
 func TestDiscordPreUserMutation_LoginUnknownBlocksUnpassedUser(t *testing.T) {
 	withDiscordSettings(t, func(settings *system_setting.DiscordSettings) {
 		settings.RegisterGateEnabled = false

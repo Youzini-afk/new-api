@@ -58,6 +58,8 @@ const AUTH_SECTIONS = [
             settings['discord.register_gate_enabled'],
           'discord.register_gate': settings['discord.register_gate'],
           'discord.login_gate_enabled': settings['discord.login_gate_enabled'],
+          'discord.login_gate': settings['discord.login_gate'],
+          'discord.patrol_gate': settings['discord.patrol_gate'],
           'discord.login_gate_patrol_enabled':
             settings['discord.login_gate_patrol_enabled'],
           'discord.login_gate_patrol_interval_minutes':

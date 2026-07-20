@@ -313,30 +313,28 @@ func TestUpdateOption_SensitiveRegexValidation(t *testing.T) {
 	assert.Contains(t, resp.Message, "不能为空")
 }
 
-// TestUpdateOption_DiscordRegisterGateRoleMatch verifies the controller
-// persistence path for the nested "discord.register_gate" contract: an illegal
-// rule-level role_match value like "foo" must be rejected before it reaches the
-// DB, while valid values ("any"/"all"/empty) are accepted.
-func TestUpdateOption_DiscordRegisterGateRoleMatch(t *testing.T) {
+// TestUpdateOption_DiscordGateConfigsValidateRoleMatch verifies all three
+// scoped Discord gate option keys share the same typed validation contract.
+func TestUpdateOption_DiscordGateConfigsValidateRoleMatch(t *testing.T) {
 	setupLogScreeningTestDB(t)
 	model.InitOptionMap()
 
-	// "foo" -> rejected by ParseAndValidate before persistence.
-	ctx, recorder := newOptionUpdateContext(t, "discord.register_gate", `{"groups":[{"rules":[{"guild_id":"g1","role_ids":["r1"],"role_match":"foo"}]}]}`)
-	UpdateOption(ctx)
-	resp := decodeLogScreeningResponse(t, recorder)
-	assert.False(t, resp.Success, "illegal role_match 'foo' must be rejected")
-	assert.Contains(t, resp.Message, "role_match must be")
+	for _, key := range []string{"discord.register_gate", "discord.login_gate", "discord.patrol_gate"} {
+		ctx, recorder := newOptionUpdateContext(t, key, `{"groups":[{"rules":[{"guild_id":"g1","role_ids":["r1"],"role_match":"foo"}]}]}`)
+		UpdateOption(ctx)
+		resp := decodeLogScreeningResponse(t, recorder)
+		assert.False(t, resp.Success, "illegal role_match must be rejected for %s", key)
+		assert.Contains(t, resp.Message, "role_match must be")
 
-	// Not persisted.
-	var count int64
-	require.NoError(t, model.DB.Model(&model.Option{}).Where("key = ?", "discord.register_gate").Count(&count).Error)
-	assert.Equal(t, int64(0), count, "rejected role_match must not be persisted")
+		var count int64
+		require.NoError(t, model.DB.Model(&model.Option{}).Where("key = ?", key).Count(&count).Error)
+		assert.Equal(t, int64(0), count, "rejected role_match must not be persisted for %s", key)
+	}
 
 	// Empty role_match -> accepted (normalized to "any").
-	ctx, recorder = newOptionUpdateContext(t, "discord.register_gate", `{"groups":[{"rules":[{"guild_id":"g1","role_ids":["r1"],"role_match":""}]}]}`)
+	ctx, recorder := newOptionUpdateContext(t, "discord.register_gate", `{"groups":[{"rules":[{"guild_id":"g1","role_ids":["r1"],"role_match":""}]}]}`)
 	UpdateOption(ctx)
-	resp = decodeLogScreeningResponse(t, recorder)
+	resp := decodeLogScreeningResponse(t, recorder)
 	require.True(t, resp.Success, "empty role_match should be accepted: %s", resp.Message)
 
 	// "any" -> accepted.

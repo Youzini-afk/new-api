@@ -7,9 +7,10 @@ import (
 )
 
 // DiscordSettings holds Discord OAuth credentials and the Discord gate
-// contract. Register/login gate toggles share the nested RegisterGate rule set;
-// runtime OAuth checks and manual rechecks fail closed when the gate is enabled
-// but the rule set or refresh-token state is invalid.
+// contract. LoginGate and PatrolGate are pointers so nil can retain backward
+// compatibility with installations that only have discord.register_gate:
+// nil inherits RegisterGate, while an explicitly saved empty object remains an
+// independent fail-closed configuration.
 type DiscordSettings struct {
 	Enabled      bool   `json:"enabled"`
 	ClientId     string `json:"client_id"`
@@ -24,6 +25,14 @@ type DiscordSettings struct {
 
 	// LoginGateEnabled gates login of existing Discord-bound users.
 	LoginGateEnabled bool `json:"login_gate_enabled"`
+	// LoginGate is stored as JSON under "discord.login_gate". Nil inherits the
+	// legacy RegisterGate configuration.
+	LoginGate *DiscordRegisterGateConfig `json:"login_gate"`
+
+	// PatrolGate is stored as JSON under "discord.patrol_gate" and is used by
+	// scheduled/manual patrol plus the banned-server patrol. Nil inherits the
+	// legacy RegisterGate configuration.
+	PatrolGate *DiscordRegisterGateConfig `json:"patrol_gate"`
 
 	LoginGatePatrolEnabled          bool `json:"login_gate_patrol_enabled"`
 	LoginGatePatrolIntervalMinutes  int  `json:"login_gate_patrol_interval_minutes"`
@@ -52,6 +61,53 @@ func init() {
 func GetDiscordSettings() *DiscordSettings {
 	NormalizeDiscordPatrolSettings(&defaultDiscordSettings)
 	return &defaultDiscordSettings
+}
+
+func GetDiscordRegisterGateConfig() DiscordRegisterGateConfig {
+	return cloneDiscordGateConfig(GetDiscordSettings().RegisterGate)
+}
+
+func GetDiscordLoginGateConfig() DiscordRegisterGateConfig {
+	settings := GetDiscordSettings()
+	if settings.LoginGate != nil {
+		return cloneDiscordGateConfig(*settings.LoginGate)
+	}
+	return cloneDiscordGateConfig(settings.RegisterGate)
+}
+
+func GetDiscordPatrolGateConfig() DiscordRegisterGateConfig {
+	settings := GetDiscordSettings()
+	if settings.PatrolGate != nil {
+		return cloneDiscordGateConfig(*settings.PatrolGate)
+	}
+	return cloneDiscordGateConfig(settings.RegisterGate)
+}
+
+func DiscordGateConfigHasRules(cfg DiscordRegisterGateConfig) bool {
+	return len(cfg.Groups) > 0 || len(cfg.BanGroups) > 0
+}
+
+func cloneDiscordGateConfig(cfg DiscordRegisterGateConfig) DiscordRegisterGateConfig {
+	cloned := cfg
+	cloned.Groups = cloneDiscordGateGroups(cfg.Groups)
+	cloned.BanGroups = cloneDiscordGateGroups(cfg.BanGroups)
+	return cloned
+}
+
+func cloneDiscordGateGroups(groups []DiscordGateGroup) []DiscordGateGroup {
+	if len(groups) == 0 {
+		return nil
+	}
+	cloned := make([]DiscordGateGroup, len(groups))
+	for groupIndex, group := range groups {
+		cloned[groupIndex] = group
+		cloned[groupIndex].Rules = make([]DiscordGateRule, len(group.Rules))
+		for ruleIndex, rule := range group.Rules {
+			cloned[groupIndex].Rules[ruleIndex] = rule
+			cloned[groupIndex].Rules[ruleIndex].RoleIDs = append([]string(nil), rule.RoleIDs...)
+		}
+	}
+	return cloned
 }
 
 func NormalizeDiscordPatrolSettings(settings *DiscordSettings) {

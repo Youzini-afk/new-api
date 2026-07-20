@@ -101,7 +101,7 @@ func PatrolDiscordGate(ctx context.Context, user *model.User) (DiscordPatrolOutc
 	if scopeStatus != model.DiscordGateScopeStatusOK {
 		return markDiscordPatrolReauth(ctx, user, evaluatedDiscordID, currentEncryptedRefreshToken, scopeStatus, scopeStatus)
 	}
-	cfg, err := normalizedDiscordGateConfig()
+	cfg, err := normalizedDiscordPatrolGateConfig()
 	if err != nil {
 		return DiscordPatrolOutcome{UserID: user.Id, Result: DiscordPatrolOutcomeSkipped, Reason: "invalid_config", Message: discordGateInvalidConfigMessage}, nil
 	}
