@@ -72,6 +72,7 @@ import {
   buildGovernanceRows,
   serializeGovernanceConfig,
 } from './constants'
+import { getCustomRuleConflicts } from './error-governance-conflicts'
 import type {
   ErrorGovernanceAIOrganizeResult,
   ErrorGovernanceAISetting,
@@ -122,58 +123,6 @@ function parseGovernanceConfig(raw: string): RelayErrorGovernanceConfig | null {
   }
 }
 
-function normalizePattern(rule: RelayErrorCustomRule) {
-  return (rule.match_pattern || '').trim().toLowerCase()
-}
-
-function getCustomRuleConflicts(
-  rule: RelayErrorCustomRule,
-  index: number,
-  rules: RelayErrorCustomRule[]
-) {
-  const conflicts: string[] = []
-  const pattern = normalizePattern(rule)
-  for (let i = 0; i < rules.length; i += 1) {
-    if (i === index) continue
-    const other = rules[i]
-    const otherPattern = normalizePattern(other)
-    if (!pattern || !otherPattern) continue
-    if (rule.rule_code && rule.rule_code === other.rule_code) {
-      conflicts.push(`duplicate code: ${other.rule_code}`)
-      continue
-    }
-    if (rule.match_type === other.match_type && pattern === otherPattern) {
-      conflicts.push(`same pattern: ${other.rule_code}`)
-      continue
-    }
-    if (rule.match_type === 'contains' && other.match_type === 'contains') {
-      if (pattern.includes(otherPattern) || otherPattern.includes(pattern)) {
-        conflicts.push(`overlap: ${other.rule_code}`)
-      }
-      continue
-    }
-    if (rule.match_type === 'regex') {
-      try {
-        if (new RegExp(rule.match_pattern).test(otherPattern)) {
-          conflicts.push(`regex overlaps: ${other.rule_code}`)
-        }
-      } catch {
-        conflicts.push('invalid regex')
-      }
-    }
-    if (other.match_type === 'regex') {
-      try {
-        if (new RegExp(other.match_pattern).test(pattern)) {
-          conflicts.push(`covered by: ${other.rule_code}`)
-        }
-      } catch {
-        conflicts.push(`other invalid regex: ${other.rule_code}`)
-      }
-    }
-  }
-  return Array.from(new Set(conflicts))
-}
-
 export function ErrorGovernanceSection({
   defaultValue,
 }: ErrorGovernanceSectionProps) {
@@ -209,9 +158,12 @@ export function ErrorGovernanceSection({
 
   const effectiveEnabled = draftEnabled ?? parsed?.enabled ?? false
   const effectiveRows = draftRows ?? parsedRows
-  const customRules = draftCustomRules ?? parsed?.custom_rules ?? []
+  const customRules = useMemo(
+    () => draftCustomRules ?? parsed?.custom_rules ?? [],
+    [draftCustomRules, parsed]
+  )
   const customRuleConflicts = useMemo(
-    () => customRules.map((rule, index) => getCustomRuleConflicts(rule, index, customRules)),
+    () => getCustomRuleConflicts(customRules),
     [customRules]
   )
   const hasChanges = draftEnabled !== null || draftRows !== null || draftCustomRules !== null
