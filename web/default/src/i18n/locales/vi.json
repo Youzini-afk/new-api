@@ -4009,6 +4009,7 @@
     "Status & Sync": "Trạng thái & Đồng bộ",
     "Status Code": "Mã trạng thái",
     "Status Code Mapping": "Ánh xạ mã trạng thái",
+    "Status code must be an integer between 400 and 599.": "Mã trạng thái phải là số nguyên từ 400 đến 599.",
     "Status Page Slug": "Đường dẫn phụ trang trạng thái",
     "Status code mapping must use valid HTTP status codes": "Ánh xạ mã trạng thái phải dùng mã trạng thái HTTP hợp lệ",
     "Status short": "TT",

@@ -4009,6 +4009,7 @@
     "Status & Sync": "Statut et synchronisation",
     "Status Code": "Code de statut",
     "Status Code Mapping": "Mappage des codes d'état",
+    "Status code must be an integer between 400 and 599.": "Le code de statut doit être un entier compris entre 400 et 599.",
     "Status Page Slug": "Slug de la page d'état",
     "Status code mapping must use valid HTTP status codes": "Le mappage des codes d'état doit utiliser des codes d'état HTTP valides",
     "Status short": "État",

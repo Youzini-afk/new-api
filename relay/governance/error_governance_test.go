@@ -2,8 +2,11 @@ package governance
 
 import (
 	"net/http"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -174,6 +177,153 @@ func TestSanitizedStreamErrorMessage(t *testing.T) {
 	assert.NotEmpty(t, msg)
 	assert.NotEmpty(t, code)
 	assert.NotContains(t, msg, "upstream")
+}
+
+func TestSafeRuleMessageTruncatesUTF8ByRunes(t *testing.T) {
+	message := safeRuleMessage(strings.Repeat("测", system_setting.RelayErrorGovernanceMessageMaxLength+1))
+	assert.True(t, utf8.ValidString(message))
+	assert.Equal(t, system_setting.RelayErrorGovernanceMessageMaxLength, utf8.RuneCountInString(message))
+	assert.Empty(t, safeRuleMessage("{Original_Error}"))
+}
+
+func TestCustomRuleSafeErrorCodeControlsClientCode(t *testing.T) {
+	withRelayErrorGovernanceCustomRules(t, []system_setting.RelayErrorGovernanceCustomRuleConfig{
+		{
+			Enabled:          true,
+			RuleCode:         "ai_overload_rule",
+			MatchType:        "contains",
+			MatchPattern:     "provider overloaded uniquely",
+			SafeErrorCode:    "upstream_overloaded",
+			SafeErrorType:    "service_unavailable",
+			SafeErrorMessage: "上游服务繁忙。",
+			StatusCode:       http.StatusServiceUnavailable,
+		},
+	})
+
+	in := RelayErrorInput{Message: "provider overloaded uniquely"}
+	classification := ClassifyRelayError(in)
+	assert.Equal(t, "ai_overload_rule", classification.AdviceCode)
+	assert.Equal(t, "upstream_overloaded", classification.Code)
+
+	err := types.NewOpenAIError(typesErrorWithBody(in.Message), types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable)
+	safe := SanitizeRelayErrorForClient(nil, err)
+	assert.Equal(t, "upstream_overloaded", safe.OpenAIError.Code)
+	assert.Equal(t, "service_unavailable", safe.OpenAIError.Type)
+	assert.Equal(t, "上游服务繁忙。", safe.OpenAIError.Message)
+	assert.Equal(t, http.StatusServiceUnavailable, safe.StatusCode)
+}
+
+func TestCustomRuleSafeErrorCodeDoesNotDriveRuleLookup(t *testing.T) {
+	withRelayErrorGovernanceCustomRules(t, []system_setting.RelayErrorGovernanceCustomRuleConfig{
+		{
+			Enabled:          true,
+			RuleCode:         "rule_a",
+			MatchType:        "contains",
+			MatchPattern:     "match rule a uniquely",
+			SafeErrorCode:    "rule_b",
+			SafeErrorType:    "a_error",
+			SafeErrorMessage: "规则 A 的文案。",
+			StatusCode:       http.StatusTeapot,
+		},
+		{
+			Enabled:          true,
+			RuleCode:         "rule_b",
+			MatchType:        "contains",
+			MatchPattern:     "match rule b uniquely",
+			SafeErrorCode:    "public_b",
+			SafeErrorType:    "b_error",
+			SafeErrorMessage: "规则 B 的文案。",
+			StatusCode:       http.StatusServiceUnavailable,
+		},
+	})
+
+	err := types.NewOpenAIError(typesErrorWithBody("match rule a uniquely"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway)
+	safe := SanitizeRelayErrorForClient(nil, err)
+	assert.Equal(t, "rule_b", safe.OpenAIError.Code)
+	assert.Equal(t, "a_error", safe.OpenAIError.Type)
+	assert.Equal(t, "规则 A 的文案。", safe.OpenAIError.Message)
+	assert.Equal(t, http.StatusTeapot, safe.StatusCode)
+}
+
+func TestCustomRuleMissingSafeErrorCodeFallsBackToRuleCode(t *testing.T) {
+	withRelayErrorGovernanceCustomRules(t, []system_setting.RelayErrorGovernanceCustomRuleConfig{
+		{
+			Enabled:          true,
+			RuleCode:         "legacy_custom_rule",
+			MatchType:        "contains",
+			MatchPattern:     "legacy custom failure",
+			SafeErrorMessage: "自定义错误。",
+			SafeErrorType:    "custom_error",
+			StatusCode:       http.StatusBadRequest,
+		},
+	})
+
+	classification := ClassifyRelayError(RelayErrorInput{Message: "legacy custom failure"})
+	assert.Equal(t, "legacy_custom_rule", classification.AdviceCode)
+	assert.Equal(t, "legacy_custom_rule", classification.Code)
+}
+
+func TestLegacyCustomRuleCannotOverrideBuiltinRule(t *testing.T) {
+	withRelayErrorGovernanceCustomRules(t, []system_setting.RelayErrorGovernanceCustomRuleConfig{
+		{
+			Enabled:          true,
+			RuleCode:         RelayRuleInternalError,
+			MatchType:        "contains",
+			MatchPattern:     "legacy override attempt",
+			SafeErrorCode:    "attacker_controlled_code",
+			SafeErrorType:    "attacker_controlled_type",
+			SafeErrorMessage: "不应出现的文案。",
+			StatusCode:       http.StatusTeapot,
+		},
+	})
+
+	classification := ClassifyRelayError(RelayErrorInput{Message: "legacy override attempt"})
+	assert.Equal(t, RelayRuleInternalError, classification.AdviceCode)
+	assert.Equal(t, RelayRuleInternalError, classification.Code)
+	assert.False(t, classification.RuleMatched)
+}
+
+func TestAnalyzeRelayErrorFingerprintUsesInternalRuleCode(t *testing.T) {
+	rules := []system_setting.RelayErrorGovernanceCustomRuleConfig{
+		{
+			Enabled:          true,
+			RuleCode:         "stable_internal_rule",
+			MatchType:        "contains",
+			MatchPattern:     "stable fingerprint failure",
+			SafeErrorCode:    "public_code_v1",
+			SafeErrorType:    "custom_error",
+			SafeErrorMessage: "安全错误。",
+			StatusCode:       http.StatusBadRequest,
+		},
+	}
+	withRelayErrorGovernanceCustomRules(t, rules)
+	in := RelayErrorInput{Message: "stable fingerprint failure"}
+	first := AnalyzeRelayError(in, "relay", "response")
+
+	rules[0].SafeErrorCode = "public_code_v2"
+	system_setting.PublishRelayErrorGovernanceRuntime(system_setting.RelayErrorGovernanceSetting{
+		Enabled:     true,
+		CustomRules: rules,
+	})
+	second := AnalyzeRelayError(in, "relay", "response")
+	assert.Equal(t, "stable_internal_rule", first.AdviceCode)
+	assert.Equal(t, "stable_internal_rule", second.AdviceCode)
+	assert.Equal(t, "public_code_v1", first.Code)
+	assert.Equal(t, "public_code_v2", second.Code)
+	assert.Equal(t, first.NormalizedSignature, second.NormalizedSignature)
+}
+
+func withRelayErrorGovernanceCustomRules(t *testing.T, rules []system_setting.RelayErrorGovernanceCustomRuleConfig) {
+	t.Helper()
+	cfg := system_setting.GetRelayErrorGovernanceSetting()
+	original := *cfg
+	t.Cleanup(func() {
+		system_setting.PublishRelayErrorGovernanceRuntime(original)
+	})
+	system_setting.PublishRelayErrorGovernanceRuntime(system_setting.RelayErrorGovernanceSetting{
+		Enabled:     true,
+		CustomRules: rules,
+	})
 }
 
 // typesErrorWithBody is a minimal error type for test inputs.

@@ -1,8 +1,11 @@
 package model
 
 import (
+	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,6 +22,8 @@ type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
 	Value string `json:"value"`
 }
+
+var relayErrorGovernanceUpdateMutex sync.Mutex
 
 func AllOption() ([]*Option, error) {
 	var options []*Option
@@ -228,16 +233,31 @@ func isBannedBanSyncOptionKey(key string) bool {
 }
 
 func loadOptionsFromDatabase() {
+	relayErrorGovernanceUpdateMutex.Lock()
+	defer relayErrorGovernanceUpdateMutex.Unlock()
 	options, _ := AllOption()
+	relayErrorGovernanceValues := make(map[string]string, 4)
 	for _, option := range options {
 		if isBannedBanSyncOptionKey(option.Key) {
 			// Deprecated ban_sync legacy keys must never re-enter OptionMap.
 			common.SysLog("skipping deprecated ban_sync option key on load: " + option.Key)
 			continue
 		}
+		if system_setting.IsRelayErrorGovernanceOptionKey(option.Key) {
+			relayErrorGovernanceValues[option.Key] = option.Value
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
+		}
+	}
+	if len(relayErrorGovernanceValues) > 0 {
+		prepared, err := prepareRelayErrorGovernanceRuntimeLoad(relayErrorGovernanceValues)
+		if err != nil {
+			common.SysLog("failed to rebuild relay error governance config: " + err.Error())
+		} else if err := applyRelayErrorGovernanceRuntimeOptions(prepared); err != nil {
+			common.SysLog("failed to publish relay error governance config: " + err.Error())
 		}
 	}
 }
@@ -259,6 +279,12 @@ func UpdateOption(key string, value string) error {
 		common.SysLog("rejecting deprecated ban_sync option key on update: " + key)
 		return nil
 	}
+	// Relay error governance is a multi-key configuration. Route every aggregate
+	// or dotted write through the bulk snapshot path so a caller cannot update one
+	// runtime field while leaving the persisted aggregate stale.
+	if system_setting.IsRelayErrorGovernanceOptionKey(key) {
+		return UpdateOptionsBulk(map[string]string{key: value})
+	}
 	// Validate sensitive regex options before writing to DB so internal callers
 	// that bypass the controller cannot persist illegal regex/status/code.
 	if err := setting.ValidateSensitiveRegexOptions(key, value); err != nil {
@@ -274,6 +300,10 @@ func UpdateOption(key string, value string) error {
 		return err
 	}
 	normalizedValue, err = system_setting.NormalizeRelayBatchSplitOption(key, normalizedValue)
+	if err != nil {
+		return err
+	}
+	normalizedValue, err = system_setting.NormalizeRelayErrorGovernanceOption(key, normalizedValue)
 	if err != nil {
 		return err
 	}
@@ -305,9 +335,38 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
+	hasRelayErrorGovernance := false
+	for key := range values {
+		if system_setting.IsRelayErrorGovernanceOptionKey(key) {
+			hasRelayErrorGovernance = true
+			break
+		}
+	}
+	if hasRelayErrorGovernance {
+		relayErrorGovernanceUpdateMutex.Lock()
+		defer relayErrorGovernanceUpdateMutex.Unlock()
+		if config.GlobalConfig.Get(system_setting.RelayErrorGovernanceOptionKey) == nil {
+			return fmt.Errorf("relay error governance config is not registered")
+		}
+		for key := range values {
+			if !system_setting.IsRelayErrorGovernanceOptionKey(key) && !isBannedBanSyncOptionKey(key) {
+				return fmt.Errorf("relay error governance options cannot be mixed with unrelated option %q", key)
+			}
+		}
+	}
+
+	preparedValues := values
+	var relayErrorGovernanceSetting *system_setting.RelayErrorGovernanceSetting
+	if hasRelayErrorGovernance {
+		var err error
+		preparedValues, relayErrorGovernanceSetting, err = prepareRelayErrorGovernanceBulk(values)
+		if err != nil {
+			return err
+		}
+	}
 	// Filter out deprecated ban_sync legacy keys before touching the DB.
-	filtered := make(map[string]string, len(values))
-	for k, v := range values {
+	filtered := make(map[string]string, len(preparedValues))
+	for k, v := range preparedValues {
 		if isBannedBanSyncOptionKey(k) {
 			common.SysLog("rejecting deprecated ban_sync option key on bulk update: " + k)
 			continue
@@ -326,6 +385,10 @@ func UpdateOptionsBulk(values map[string]string) error {
 			return err
 		}
 		normalizedValue, err = system_setting.NormalizeRelayBatchSplitOption(k, normalizedValue)
+		if err != nil {
+			return err
+		}
+		normalizedValue, err = system_setting.NormalizeRelayErrorGovernanceOption(k, normalizedValue)
 		if err != nil {
 			return err
 		}
@@ -350,11 +413,257 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if err != nil {
 		return err
 	}
+	if relayErrorGovernanceSetting != nil {
+		governanceValues := make(map[string]string, 4)
+		for key, value := range filtered {
+			if system_setting.IsRelayErrorGovernanceOptionKey(key) {
+				governanceValues[key] = value
+			}
+		}
+		if err := applyRelayErrorGovernanceRuntimeOptions(governanceValues); err != nil {
+			return err
+		}
+	}
 	for k, v := range filtered {
+		if system_setting.IsRelayErrorGovernanceOptionKey(k) {
+			continue
+		}
 		if err := updateOptionMap(k, v); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// UpdateRelayErrorGovernanceSetting validates and atomically persists the
+// aggregate governance setting together with the dotted keys that drive the
+// live config. All callers use this helper so no write path can silently drift
+// from the runtime configuration.
+func UpdateRelayErrorGovernanceSetting(input system_setting.RelayErrorGovernanceSetting) (system_setting.RelayErrorGovernanceSetting, error) {
+	normalized, err := system_setting.NormalizeRelayErrorGovernanceSetting(input)
+	if err != nil {
+		return system_setting.RelayErrorGovernanceSetting{}, err
+	}
+	values, err := marshalRelayErrorGovernanceOptions(normalized)
+	if err != nil {
+		return system_setting.RelayErrorGovernanceSetting{}, err
+	}
+	if err := UpdateOptionsBulk(values); err != nil {
+		return system_setting.RelayErrorGovernanceSetting{}, err
+	}
+	return normalized, nil
+}
+
+// prepareRelayErrorGovernanceRuntimeLoad keeps legacy reads deliberately more
+// permissive than writes: syntactically valid historical rules are loaded even
+// when the current strict writer would reject their status/pattern/code. The
+// runtime classifier still applies its defensive fallbacks. At the same time we
+// rebuild one coherent four-key snapshot so malformed or stale aggregate values
+// cannot make DB, OptionMap, registered config, and runtime disagree.
+func prepareRelayErrorGovernanceRuntimeLoad(values map[string]string) (map[string]string, error) {
+	current := system_setting.GetRelayErrorGovernanceSetting()
+	if current == nil {
+		return nil, fmt.Errorf("relay error governance runtime is unavailable")
+	}
+	candidate := *current
+	hasDotted := false
+	for _, key := range []string{
+		system_setting.RelayErrorGovernanceEnabledOptionKey,
+		system_setting.RelayErrorGovernanceRulesOptionKey,
+		system_setting.RelayErrorGovernanceCustomRulesOptionKey,
+	} {
+		if _, ok := values[key]; ok {
+			hasDotted = true
+			break
+		}
+	}
+	if raw, ok := values[system_setting.RelayErrorGovernanceOptionKey]; ok {
+		var aggregate system_setting.RelayErrorGovernanceSetting
+		if err := common.UnmarshalJsonStr(raw, &aggregate); err != nil {
+			if !hasDotted {
+				return nil, fmt.Errorf("persisted %s must be valid JSON: %w", system_setting.RelayErrorGovernanceOptionKey, err)
+			}
+			common.SysLog("ignoring malformed persisted relay_error_governance aggregate because dotted runtime keys are available")
+		} else {
+			candidate = aggregate
+		}
+	}
+	if raw, ok := values[system_setting.RelayErrorGovernanceEnabledOptionKey]; ok {
+		enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+		if err != nil {
+			return nil, fmt.Errorf("persisted %s must be a boolean", system_setting.RelayErrorGovernanceEnabledOptionKey)
+		}
+		candidate.Enabled = enabled
+	}
+	if raw, ok := values[system_setting.RelayErrorGovernanceRulesOptionKey]; ok {
+		var rules map[string]system_setting.RelayErrorGovernanceRuleConfig
+		if err := common.UnmarshalJsonStr(raw, &rules); err != nil {
+			return nil, fmt.Errorf("persisted %s must be valid JSON: %w", system_setting.RelayErrorGovernanceRulesOptionKey, err)
+		}
+		candidate.Rules = rules
+	}
+	if raw, ok := values[system_setting.RelayErrorGovernanceCustomRulesOptionKey]; ok {
+		var customRules []system_setting.RelayErrorGovernanceCustomRuleConfig
+		if err := common.UnmarshalJsonStr(raw, &customRules); err != nil {
+			return nil, fmt.Errorf("persisted %s must be valid JSON: %w", system_setting.RelayErrorGovernanceCustomRulesOptionKey, err)
+		}
+		candidate.CustomRules = customRules
+	}
+	return marshalRelayErrorGovernanceOptions(candidate)
+}
+
+func prepareRelayErrorGovernanceBulk(values map[string]string) (map[string]string, *system_setting.RelayErrorGovernanceSetting, error) {
+	current := system_setting.GetRelayErrorGovernanceSetting()
+	if current == nil {
+		return nil, nil, fmt.Errorf("relay error governance runtime is unavailable")
+	}
+	candidate := *current
+	aggregateSupplied := false
+	if raw, ok := values[system_setting.RelayErrorGovernanceOptionKey]; ok {
+		parsed, _, err := system_setting.ParseAndValidateRelayErrorGovernanceSetting(raw)
+		if err != nil {
+			return nil, nil, err
+		}
+		candidate = parsed
+		aggregateSupplied = true
+	}
+
+	for key := range values {
+		if !system_setting.IsRelayErrorGovernanceOptionKey(key) {
+			continue
+		}
+		if _, err := system_setting.NormalizeRelayErrorGovernanceOption(key, values[key]); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	for _, key := range []string{
+		system_setting.RelayErrorGovernanceEnabledOptionKey,
+		system_setting.RelayErrorGovernanceRulesOptionKey,
+		system_setting.RelayErrorGovernanceCustomRulesOptionKey,
+	} {
+		raw, ok := values[key]
+		if !ok {
+			continue
+		}
+		updated, err := applyRelayErrorGovernanceOption(candidate, key, raw)
+		if err != nil {
+			return nil, nil, err
+		}
+		if aggregateSupplied && !relayErrorGovernanceFieldEqual(candidate, updated, key) {
+			return nil, nil, fmt.Errorf("%s conflicts with %s", key, system_setting.RelayErrorGovernanceOptionKey)
+		}
+		candidate = updated
+	}
+
+	normalized, err := system_setting.NormalizeRelayErrorGovernanceSetting(candidate)
+	if err != nil {
+		return nil, nil, err
+	}
+	governanceValues, err := marshalRelayErrorGovernanceOptions(normalized)
+	if err != nil {
+		return nil, nil, err
+	}
+	prepared := make(map[string]string, len(values)+4)
+	for key, value := range values {
+		if !system_setting.IsRelayErrorGovernanceOptionKey(key) {
+			prepared[key] = value
+		}
+	}
+	for key, value := range governanceValues {
+		prepared[key] = value
+	}
+	return prepared, &normalized, nil
+}
+
+func applyRelayErrorGovernanceOption(setting system_setting.RelayErrorGovernanceSetting, key string, value string) (system_setting.RelayErrorGovernanceSetting, error) {
+	normalized, err := system_setting.NormalizeRelayErrorGovernanceOption(key, value)
+	if err != nil {
+		return system_setting.RelayErrorGovernanceSetting{}, err
+	}
+	switch key {
+	case system_setting.RelayErrorGovernanceEnabledOptionKey:
+		setting.Enabled, err = strconv.ParseBool(normalized)
+	case system_setting.RelayErrorGovernanceRulesOptionKey:
+		err = common.UnmarshalJsonStr(normalized, &setting.Rules)
+	case system_setting.RelayErrorGovernanceCustomRulesOptionKey:
+		err = common.UnmarshalJsonStr(normalized, &setting.CustomRules)
+	default:
+		return system_setting.RelayErrorGovernanceSetting{}, fmt.Errorf("unsupported relay error governance option %q", key)
+	}
+	if err != nil {
+		return system_setting.RelayErrorGovernanceSetting{}, err
+	}
+	return setting, nil
+}
+
+func relayErrorGovernanceFieldEqual(left system_setting.RelayErrorGovernanceSetting, right system_setting.RelayErrorGovernanceSetting, key string) bool {
+	switch key {
+	case system_setting.RelayErrorGovernanceEnabledOptionKey:
+		return left.Enabled == right.Enabled
+	case system_setting.RelayErrorGovernanceRulesOptionKey:
+		if len(left.Rules) == 0 && len(right.Rules) == 0 {
+			return true
+		}
+		return reflect.DeepEqual(left.Rules, right.Rules)
+	case system_setting.RelayErrorGovernanceCustomRulesOptionKey:
+		if len(left.CustomRules) == 0 && len(right.CustomRules) == 0 {
+			return true
+		}
+		return reflect.DeepEqual(left.CustomRules, right.CustomRules)
+	default:
+		return false
+	}
+}
+
+func marshalRelayErrorGovernanceOptions(setting system_setting.RelayErrorGovernanceSetting) (map[string]string, error) {
+	rules, err := common.Marshal(setting.Rules)
+	if err != nil {
+		return nil, err
+	}
+	customRules, err := common.Marshal(setting.CustomRules)
+	if err != nil {
+		return nil, err
+	}
+	full, err := common.Marshal(setting)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		system_setting.RelayErrorGovernanceEnabledOptionKey:     strconv.FormatBool(setting.Enabled),
+		system_setting.RelayErrorGovernanceRulesOptionKey:       string(rules),
+		system_setting.RelayErrorGovernanceCustomRulesOptionKey: string(customRules),
+		system_setting.RelayErrorGovernanceOptionKey:            string(full),
+	}, nil
+}
+
+func applyRelayErrorGovernanceRuntimeOptions(values map[string]string) error {
+	configMap := make(map[string]string, 3)
+	if value, ok := values[system_setting.RelayErrorGovernanceEnabledOptionKey]; ok {
+		configMap["enabled"] = value
+	}
+	if value, ok := values[system_setting.RelayErrorGovernanceRulesOptionKey]; ok {
+		configMap["rules"] = value
+	}
+	if value, ok := values[system_setting.RelayErrorGovernanceCustomRulesOptionKey]; ok {
+		configMap["custom_rules"] = value
+	}
+	if len(configMap) == 0 {
+		return fmt.Errorf("relay error governance runtime options are incomplete")
+	}
+	found, err := config.GlobalConfig.Update(system_setting.RelayErrorGovernanceOptionKey, configMap)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("relay error governance config is not registered")
+	}
+	system_setting.RebuildRelayErrorGovernanceRuntime()
+	common.OptionMapRWMutex.Lock()
+	for key, value := range values {
+		common.OptionMap[key] = value
+	}
+	common.OptionMapRWMutex.Unlock()
 	return nil
 }
 
@@ -727,17 +1036,15 @@ func handleConfigUpdate(key, value string) bool {
 	configName := parts[0]
 	configKey := parts[1]
 
-	// 获取配置对象
-	cfg := config.GlobalConfig.Get(configName)
-	if cfg == nil {
+	// Apply the field while holding the config manager lock. Returning a live
+	// pointer from Get and mutating it here used to race with config exports and
+	// runtime readers.
+	handled, err := config.GlobalConfig.Update(configName, map[string]string{
+		configKey: value,
+	})
+	if err != nil || !handled {
 		return false // 未注册的配置
 	}
-
-	// 更新配置
-	configMap := map[string]string{
-		configKey: value,
-	}
-	config.UpdateConfigFromMap(cfg, configMap)
 
 	// 特定配置的后处理
 	if configName == "performance_setting" {
@@ -751,6 +1058,8 @@ func handleConfigUpdate(key, value string) bool {
 		system_setting.UpdateAndSyncTheme()
 	} else if configName == "relay_batch_split" {
 		system_setting.RebuildRelayBatchSplitRuntime()
+	} else if configName == system_setting.RelayErrorGovernanceOptionKey {
+		system_setting.RebuildRelayErrorGovernanceRuntime()
 	}
 
 	return true // 已处理

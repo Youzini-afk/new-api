@@ -61,27 +61,26 @@ func TestGetOptions_IncludesRelayErrorGovernanceWhenFullKeyMissing(t *testing.T)
 	model.InitOptionMap()
 
 	cfg := system_setting.GetRelayErrorGovernanceSetting()
-	originalEnabled := cfg.Enabled
-	originalRules := cfg.Rules
-	originalCustomRules := append([]system_setting.RelayErrorGovernanceCustomRuleConfig(nil), cfg.CustomRules...)
+	original := *cfg
 	t.Cleanup(func() {
-		cfg.Enabled = originalEnabled
-		cfg.Rules = originalRules
-		cfg.CustomRules = originalCustomRules
+		_, _ = model.UpdateRelayErrorGovernanceSetting(original)
 	})
 
-	cfg.Enabled = true
-	cfg.CustomRules = []system_setting.RelayErrorGovernanceCustomRuleConfig{
-		{
-			Enabled:          true,
-			RuleCode:         "ai_test_rule",
-			MatchType:        "contains",
-			MatchPattern:     "upstream overloaded",
-			SafeErrorCode:    "upstream_overloaded",
-			SafeErrorType:    "upstream_error",
-			SafeErrorMessage: "Upstream is overloaded.",
+	_, err := model.UpdateRelayErrorGovernanceSetting(system_setting.RelayErrorGovernanceSetting{
+		Enabled: true,
+		CustomRules: []system_setting.RelayErrorGovernanceCustomRuleConfig{
+			{
+				Enabled:          true,
+				RuleCode:         "ai_test_rule",
+				MatchType:        "contains",
+				MatchPattern:     "upstream overloaded",
+				SafeErrorCode:    "upstream_overloaded",
+				SafeErrorType:    "upstream_error",
+				SafeErrorMessage: "Upstream is overloaded.",
+			},
 		},
-	}
+	})
+	require.NoError(t, err)
 	common.OptionMapRWMutex.Lock()
 	delete(common.OptionMap, "relay_error_governance")
 	common.OptionMapRWMutex.Unlock()
@@ -114,27 +113,28 @@ func TestSaveErrorInsightCustomAIRule_SyncsRelayErrorGovernanceConfig(t *testing
 	model.InitOptionMap()
 
 	cfg := system_setting.GetRelayErrorGovernanceSetting()
-	originalEnabled := cfg.Enabled
-	originalRules := cfg.Rules
-	originalCustomRules := append([]system_setting.RelayErrorGovernanceCustomRuleConfig(nil), cfg.CustomRules...)
+	original := *cfg
 	t.Cleanup(func() {
-		cfg.Enabled = originalEnabled
-		cfg.Rules = originalRules
-		cfg.CustomRules = originalCustomRules
+		_, _ = model.UpdateRelayErrorGovernanceSetting(original)
 	})
 
-	cfg.Enabled = true
-	cfg.Rules = map[string]system_setting.RelayErrorGovernanceRuleConfig{}
-	cfg.CustomRules = nil
+	_, err := model.UpdateRelayErrorGovernanceSetting(system_setting.RelayErrorGovernanceSetting{
+		Enabled: true,
+		Rules:   map[string]system_setting.RelayErrorGovernanceRuleConfig{},
+	})
+	require.NoError(t, err)
 
-	body := `{"rule":{"rule_code":"ai_saved_rule","category":"upstream","match_type":"contains","match_pattern":"upstream overloaded","safe_error_code":"upstream_overloaded","safe_error_type":"upstream_error","safe_error_message":"Upstream service is busy. Please try again later."}}`
+	body := `{"rule":{"rule_code":"ai_saved_rule","category":"parameter_validation","match_type":"contains","match_pattern":"invalid request parameter","safe_error_code":"invalid_request","safe_error_type":"invalid_request_error","safe_error_message":"Request parameters are invalid.","status_code":400}}`
 	ctx, recorder := newLogScreeningAdminContext(t, http.MethodPost, "/api/error_insight/ai/rules", body)
 	SaveErrorInsightCustomAIRule(ctx)
 
 	resp := decodeLogScreeningResponse(t, recorder)
 	require.True(t, resp.Success, resp.Message)
+	cfg = system_setting.GetRelayErrorGovernanceSetting()
 	require.Len(t, cfg.CustomRules, 1)
 	assert.Equal(t, "ai_saved_rule", cfg.CustomRules[0].RuleCode)
+	assert.Equal(t, "invalid_request", cfg.CustomRules[0].SafeErrorCode)
+	assert.Equal(t, http.StatusBadRequest, cfg.CustomRules[0].StatusCode)
 
 	recorder = httptest.NewRecorder()
 	ctx, _ = gin.CreateTestContext(recorder)
@@ -155,6 +155,8 @@ func TestSaveErrorInsightCustomAIRule_SyncsRelayErrorGovernanceConfig(t *testing
 		require.NoError(t, json.Unmarshal([]byte(option.Value), &parsed))
 		require.Len(t, parsed.CustomRules, 1)
 		assert.Equal(t, "ai_saved_rule", parsed.CustomRules[0].RuleCode)
+		assert.Equal(t, "invalid_request", parsed.CustomRules[0].SafeErrorCode)
+		assert.Equal(t, http.StatusBadRequest, parsed.CustomRules[0].StatusCode)
 	}
 	assert.True(t, found)
 }
@@ -220,7 +222,230 @@ func TestParseErrorGovernanceAIOrganization_NormalizesRules(t *testing.T) {
 	assert.Equal(t, "merged duplicates", result.Summary)
 	require.Len(t, result.Rules, 1)
 	assert.Equal(t, "ai_rule", result.Rules[0].RuleCode)
+	assert.True(t, result.Rules[0].Enabled)
 	assert.Equal(t, http.StatusServiceUnavailable, result.Rules[0].StatusCode)
+
+	result, err = parseErrorGovernanceAIOrganization(`{"summary":"disabled","rules":[{"enabled":false,"rule_code":"disabled_rule","category":"parameter_validation","match_type":"contains","match_pattern":"disabled pattern","safe_error_message":"Disabled."}]}`)
+	require.NoError(t, err)
+	require.Len(t, result.Rules, 1)
+	assert.False(t, result.Rules[0].Enabled)
+}
+
+func TestParseErrorInsightAISuggestionsPreservesAndInfersStatus(t *testing.T) {
+	rules, _, err := parseErrorInsightAISuggestions(`{"rules":[{"rule_code":"invalid_parameter_rule","category":"parameter_validation","match_type":"contains","match_pattern":"invalid parameter","safe_error_code":"invalid_request","safe_error_type":"invalid_request_error","safe_error_message":"Invalid parameter.","status_code":418,"confidence":0.9,"reason":"specific"},{"rule_code":"upstream_timeout_rule","category":"upstream_timeout","match_type":"contains","match_pattern":"deadline exceeded","safe_error_code":"upstream_timeout","safe_error_type":"service_unavailable","safe_error_message":"Upstream timed out.","confidence":0.8,"reason":"timeout"}]}`)
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+	assert.Equal(t, http.StatusTeapot, rules[0].StatusCode)
+	assert.Equal(t, http.StatusGatewayTimeout, rules[1].StatusCode)
+}
+
+func TestParseErrorGovernanceAIOrganizationRejectsInvalidStatusAndDuplicates(t *testing.T) {
+	_, err := parseErrorGovernanceAIOrganization(`{"summary":"bad","rules":[{"enabled":true,"rule_code":"bad_status","category":"parameter_validation","match_type":"contains","match_pattern":"bad","safe_error_code":"bad_request","safe_error_type":"invalid_request_error","safe_error_message":"Bad request.","status_code":200}]}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "400 and 599")
+
+	_, err = parseErrorGovernanceAIOrganization(`{"summary":"duplicate","rules":[{"enabled":true,"rule_code":"same_rule","category":"parameter_validation","match_type":"contains","match_pattern":"first","safe_error_message":"First."},{"enabled":true,"rule_code":"same_rule","category":"parameter_validation","match_type":"contains","match_pattern":"second","safe_error_message":"Second."}]}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate")
+}
+
+func TestUpdateOptionRelayErrorGovernanceRejectsInvalidCustomRules(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+
+	tests := []struct {
+		name    string
+		config  string
+		message string
+	}{
+		{
+			name:    "duplicate rule code",
+			config:  `{"enabled":true,"custom_rules":[{"enabled":true,"rule_code":"duplicate_rule","match_type":"contains","match_pattern":"first","safe_error_message":"First."},{"enabled":true,"rule_code":"duplicate_rule","match_type":"contains","match_pattern":"second","safe_error_message":"Second."}]}`,
+			message: "duplicate",
+		},
+		{
+			name:    "built-in rule conflict",
+			config:  `{"enabled":true,"custom_rules":[{"enabled":true,"rule_code":"internal_error","match_type":"contains","match_pattern":"override","safe_error_message":"Override."}]}`,
+			message: "built-in",
+		},
+		{
+			name:    "invalid regex",
+			config:  `{"enabled":true,"custom_rules":[{"enabled":true,"rule_code":"invalid_regex","match_type":"regex","match_pattern":"(","safe_error_message":"Invalid."}]}`,
+			message: "valid Go regex",
+		},
+		{
+			name:    "invalid status",
+			config:  `{"enabled":true,"custom_rules":[{"enabled":true,"rule_code":"invalid_status","match_type":"contains","match_pattern":"bad","safe_error_message":"Invalid.","status_code":600}]}`,
+			message: "400 and 599",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, recorder := newOptionUpdateContext(t, "relay_error_governance", test.config)
+			UpdateOption(ctx)
+			resp := decodeLogScreeningResponse(t, recorder)
+			assert.False(t, resp.Success)
+			assert.Contains(t, resp.Message, test.message)
+		})
+	}
+}
+
+func TestUpdateOptionsBulkRejectsInvalidRelayErrorGovernanceDottedKey(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+	err := model.UpdateOptionsBulk(map[string]string{
+		"relay_error_governance.custom_rules": `[{"enabled":true,"rule_code":"bad_status","match_type":"contains","match_pattern":"bad","safe_error_message":"Bad.","status_code":200}]`,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "400 and 599")
+}
+
+func TestRelayErrorGovernanceDottedWritesCannotBypassValidation(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+	invalid := `[{"enabled":true,"rule_code":"bad_status","match_type":"contains","match_pattern":"bad","safe_error_message":"Bad.","status_code":200}]`
+
+	err := model.UpdateOption(system_setting.RelayErrorGovernanceCustomRulesOptionKey, invalid)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "400 and 599")
+
+	ctx, recorder := newOptionUpdateContext(t, system_setting.RelayErrorGovernanceCustomRulesOptionKey, invalid)
+	UpdateOption(ctx)
+	resp := decodeLogScreeningResponse(t, recorder)
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Message, "400 and 599")
+}
+
+func TestUpdateOptionsBulkRejectsConflictingRelayErrorGovernanceSnapshot(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+	before := *system_setting.GetRelayErrorGovernanceSetting()
+
+	err := model.UpdateOptionsBulk(map[string]string{
+		system_setting.RelayErrorGovernanceOptionKey:        `{"enabled":true}`,
+		system_setting.RelayErrorGovernanceEnabledOptionKey: "false",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "conflicts")
+	after := system_setting.GetRelayErrorGovernanceSetting()
+	assert.Equal(t, before.Enabled, after.Enabled)
+}
+
+func TestUpdateOptionRelayErrorGovernanceDottedKeyPersistsCompleteSnapshot(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+	original := *system_setting.GetRelayErrorGovernanceSetting()
+	t.Cleanup(func() {
+		_, _ = model.UpdateRelayErrorGovernanceSetting(original)
+	})
+
+	require.NoError(t, model.UpdateOption(system_setting.RelayErrorGovernanceEnabledOptionKey, "false"))
+	assert.False(t, system_setting.GetRelayErrorGovernanceSetting().Enabled)
+
+	var aggregate model.Option
+	require.NoError(t, model.DB.Where("key = ?", system_setting.RelayErrorGovernanceOptionKey).First(&aggregate).Error)
+	var persisted system_setting.RelayErrorGovernanceSetting
+	require.NoError(t, json.Unmarshal([]byte(aggregate.Value), &persisted))
+	assert.False(t, persisted.Enabled)
+}
+
+func TestInitOptionMapLoadsLegacyAggregateAsCoherentRuntimeSnapshot(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	original := *system_setting.GetRelayErrorGovernanceSetting()
+	t.Cleanup(func() {
+		_, _ = model.UpdateRelayErrorGovernanceSetting(original)
+	})
+
+	legacy := `{"enabled":false,"custom_rules":[{"enabled":true,"rule_code":"legacy_bad_status","match_type":"contains","match_pattern":"legacy failure","safe_error_message":"Legacy failure.","status_code":200}]}`
+	require.NoError(t, model.DB.Create(&model.Option{
+		Key:   system_setting.RelayErrorGovernanceOptionKey,
+		Value: legacy,
+	}).Error)
+
+	model.InitOptionMap()
+	cfg := system_setting.GetRelayErrorGovernanceSetting()
+	assert.False(t, cfg.Enabled)
+	require.Len(t, cfg.CustomRules, 1)
+	assert.Equal(t, 200, cfg.CustomRules[0].StatusCode)
+
+	common.OptionMapRWMutex.RLock()
+	dotted := common.OptionMap[system_setting.RelayErrorGovernanceCustomRulesOptionKey]
+	aggregate := common.OptionMap[system_setting.RelayErrorGovernanceOptionKey]
+	common.OptionMapRWMutex.RUnlock()
+	assert.Contains(t, dotted, "legacy_bad_status")
+	var persisted system_setting.RelayErrorGovernanceSetting
+	require.NoError(t, json.Unmarshal([]byte(aggregate), &persisted))
+	assert.False(t, persisted.Enabled)
+	require.Len(t, persisted.CustomRules, 1)
+}
+
+func TestInitOptionMapRejectsMalformedLegacyDottedSnapshotWithoutPartialApply(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	model.InitOptionMap()
+	original := *system_setting.GetRelayErrorGovernanceSetting()
+	t.Cleanup(func() {
+		_, _ = model.UpdateRelayErrorGovernanceSetting(original)
+	})
+	baseline, err := model.UpdateRelayErrorGovernanceSetting(system_setting.RelayErrorGovernanceSetting{Enabled: true})
+	require.NoError(t, err)
+
+	require.NoError(t, model.DB.Model(&model.Option{}).
+		Where("key = ?", system_setting.RelayErrorGovernanceCustomRulesOptionKey).
+		Update("value", "{not-json").Error)
+	model.InitOptionMap()
+
+	cfg := system_setting.GetRelayErrorGovernanceSetting()
+	assert.Equal(t, baseline.Enabled, cfg.Enabled)
+	assert.Empty(t, cfg.CustomRules)
+	common.OptionMapRWMutex.RLock()
+	dotted := common.OptionMap[system_setting.RelayErrorGovernanceCustomRulesOptionKey]
+	common.OptionMapRWMutex.RUnlock()
+	assert.NotEqual(t, "{not-json", dotted)
+}
+
+func TestInitOptionMapUsesDottedGovernanceValuesOverStaleAggregate(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	original := *system_setting.GetRelayErrorGovernanceSetting()
+	t.Cleanup(func() {
+		_, _ = model.UpdateRelayErrorGovernanceSetting(original)
+	})
+	require.NoError(t, model.DB.Create(&model.Option{
+		Key:   system_setting.RelayErrorGovernanceOptionKey,
+		Value: `{"enabled":true}`,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Option{
+		Key:   system_setting.RelayErrorGovernanceEnabledOptionKey,
+		Value: "false",
+	}).Error)
+
+	model.InitOptionMap()
+	assert.False(t, system_setting.GetRelayErrorGovernanceSetting().Enabled)
+	common.OptionMapRWMutex.RLock()
+	aggregate := common.OptionMap[system_setting.RelayErrorGovernanceOptionKey]
+	common.OptionMapRWMutex.RUnlock()
+	var persisted system_setting.RelayErrorGovernanceSetting
+	require.NoError(t, json.Unmarshal([]byte(aggregate), &persisted))
+	assert.False(t, persisted.Enabled)
+}
+
+func TestInitOptionMapUsesValidDottedGovernanceWhenAggregateIsMalformed(t *testing.T) {
+	setupLogScreeningTestDB(t)
+	original := *system_setting.GetRelayErrorGovernanceSetting()
+	t.Cleanup(func() {
+		_, _ = model.UpdateRelayErrorGovernanceSetting(original)
+	})
+	require.NoError(t, model.DB.Create(&model.Option{
+		Key:   system_setting.RelayErrorGovernanceOptionKey,
+		Value: "{not-json",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Option{
+		Key:   system_setting.RelayErrorGovernanceEnabledOptionKey,
+		Value: "false",
+	}).Error)
+
+	model.InitOptionMap()
+	assert.False(t, system_setting.GetRelayErrorGovernanceSetting().Enabled)
 }
 
 // TestUpdateOption_SensitiveRegexValidation verifies the controller wires

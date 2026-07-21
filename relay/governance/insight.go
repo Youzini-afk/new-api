@@ -60,7 +60,7 @@ func RecordRelayErrorInsight(c *gin.Context, originalErr *types.NewAPIError, saf
 		ClientStatusCode:   safe.StatusCode,
 		UpstreamStatusCode: in.StatusCode,
 
-		RuleCode:        analysis.Code,
+		RuleCode:        analysis.AdviceCode,
 		RuleMatched:     analysis.RuleMatched,
 		MatchSource:     analysis.MatchSource,
 		UnmatchedReason: analysis.UnmatchedReason,

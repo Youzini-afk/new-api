@@ -38,6 +38,37 @@ func (cm *ConfigManager) Get(name string) interface{} {
 	return cm.configs[name]
 }
 
+// Update applies one or more fields to a registered configuration while
+// holding the manager lock. Callers should prefer this over Get followed by
+// UpdateConfigFromMap, because the latter mutates the returned live pointer
+// outside the manager's synchronization boundary.
+func (cm *ConfigManager) Update(name string, configMap map[string]string) (bool, error) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+	config, ok := cm.configs[name]
+	if !ok {
+		return false, nil
+	}
+	return true, updateConfigFromMap(config, configMap)
+}
+
+// Snapshot copies a registered configuration into target under the manager's
+// read lock. JSON round-tripping keeps maps and slices detached from the live
+// object so callers can safely publish an immutable runtime snapshot.
+func (cm *ConfigManager) Snapshot(name string, target interface{}) (bool, error) {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+	config, ok := cm.configs[name]
+	if !ok {
+		return false, nil
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		return true, err
+	}
+	return true, json.Unmarshal(data, target)
+}
+
 // LoadFromDB 从数据库加载配置
 func (cm *ConfigManager) LoadFromDB(options map[string]string) error {
 	cm.mutex.Lock()

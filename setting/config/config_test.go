@@ -94,3 +94,39 @@ func TestUpdateConfigFromMap_ScalarFieldsUnchanged(t *testing.T) {
 		t.Errorf("Modes should be unchanged, got %v", cfg.Modes)
 	}
 }
+
+func TestConfigManagerUpdateAndSnapshotAreDetached(t *testing.T) {
+	manager := NewConfigManager()
+	live := &testConfigWithMap{
+		Modes: map[string]string{"model-a": "old"},
+		Name:  "before",
+	}
+	manager.Register("test", live)
+
+	found, err := manager.Update("test", map[string]string{
+		"modes": `{"model-b":"new"}`,
+		"name":  "after",
+	})
+	if err != nil || !found {
+		t.Fatalf("Update failed: found=%v err=%v", found, err)
+	}
+
+	var snapshot testConfigWithMap
+	found, err = manager.Snapshot("test", &snapshot)
+	if err != nil || !found {
+		t.Fatalf("Snapshot failed: found=%v err=%v", found, err)
+	}
+	if snapshot.Name != "after" || snapshot.Modes["model-b"] != "new" {
+		t.Fatalf("unexpected snapshot: %+v", snapshot)
+	}
+	snapshot.Modes["model-b"] = "mutated"
+
+	var second testConfigWithMap
+	_, err = manager.Snapshot("test", &second)
+	if err != nil {
+		t.Fatalf("second Snapshot failed: %v", err)
+	}
+	if second.Modes["model-b"] != "new" {
+		t.Fatalf("snapshot mutation leaked into live config: %+v", second)
+	}
+}

@@ -28,6 +28,9 @@ const DefaultErrorGovernanceAIPromptTemplate = `你是 API 网关中继错误治
 5. 保留必要规则，删除或禁用明显重复、被覆盖、冲突严重的规则。
 6. safe_error_message 必须适合展示给普通用户。
 7. 如果无法判断，保守保留原规则并在 summary 中说明。
+8. status_code 只能是 400-599，并应保留原规则中明确合理的状态码：参数/格式/内容政策通常为 400，认证为 401，额度不足为 402，权限或封禁为 403，不存在为 404，站内限流为 429，上游响应异常为 502，上游不可用或上游限流为 503，上游超时为 504。
+9. 不得为了方便把所有规则统一写成 503；无法可靠判断时可以省略 status_code，由服务端根据规则语义推断。
+10. rule_code 必须唯一，且不得使用系统内置规则码；rule_code、safe_error_code、safe_error_type 仅允许字母、数字、点、下划线和短横线，长度不超过 64。
 
 当前治理配置：
 {{governance_config}}
@@ -48,7 +51,7 @@ const DefaultErrorGovernanceAIPromptTemplate = `你是 API 网关中继错误治
       "safe_error_code": "string",
       "safe_error_type": "string",
       "safe_error_message": "string",
-      "status_code": 503
+      "status_code": 400
     }
   ]
 }`

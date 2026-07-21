@@ -157,6 +157,7 @@ export interface ErrorInsightAIRuleSuggestion {
   safe_error_code: string
   safe_error_type: string
   safe_error_message: string
+  status_code?: number
   confidence: number
   reason: string
 }

@@ -4009,6 +4009,7 @@
     "Status & Sync": "Status & Sync",
     "Status Code": "Status Code",
     "Status Code Mapping": "Status Code Mapping",
+    "Status code must be an integer between 400 and 599.": "Status code must be an integer between 400 and 599.",
     "Status Page Slug": "Status Page Slug",
     "Status code mapping must use valid HTTP status codes": "Status code mapping must use valid HTTP status codes",
     "Status short": "Status",

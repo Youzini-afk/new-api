@@ -34,26 +34,26 @@ const RelayErrorGovernanceRuleVersion = 1
 
 // Rule codes — the canonical classification vocabulary.
 const (
-	RelayRuleInsufficientUserQuota = "insufficient_user_quota"
-	RelayRuleInvalidMaxTokens      = "invalid_max_tokens"
-	RelayRuleMaxTokensNeedStream   = "max_tokens_requires_stream"
-	RelayRuleInvalidBudgetTokens   = "invalid_budget_tokens"
-	RelayRuleInvalidStreamOptions  = "invalid_stream_options"
-	RelayRuleInvalidMessageRole    = "invalid_message_role"
-	RelayRuleInvalidImageURL       = "invalid_image_url"
-	RelayRuleContextLengthExceeded = "context_length_exceeded"
-	RelayRuleContentFiltered       = "content_filtered"
-	RelayRuleModelNotFound         = "model_not_found"
-	RelayRuleNoAvailableChannel    = "no_available_channel"
-	RelayRuleModelNotPermitted     = "model_not_permitted"
-	RelayRuleRiskControlRestricted = "risk_control_restricted"
-	RelayRuleBehaviorBanned        = "behavior_banned"
-	RelayRuleUpstreamRateLimited   = "upstream_rate_limited"
-	RelayRuleUpstreamTimeout       = "upstream_timeout"
-	RelayRuleUpstreamBadResponse   = "upstream_bad_response"
-	RelayRuleUpstreamUnavailable   = "upstream_unavailable"
-	RelayRuleStreamInterrupted     = "stream_interrupted"
-	RelayRuleInternalError         = "internal_error"
+	RelayRuleInsufficientUserQuota = system_setting.RelayErrorRuleInsufficientUserQuota
+	RelayRuleInvalidMaxTokens      = system_setting.RelayErrorRuleInvalidMaxTokens
+	RelayRuleMaxTokensNeedStream   = system_setting.RelayErrorRuleMaxTokensNeedStream
+	RelayRuleInvalidBudgetTokens   = system_setting.RelayErrorRuleInvalidBudgetTokens
+	RelayRuleInvalidStreamOptions  = system_setting.RelayErrorRuleInvalidStreamOptions
+	RelayRuleInvalidMessageRole    = system_setting.RelayErrorRuleInvalidMessageRole
+	RelayRuleInvalidImageURL       = system_setting.RelayErrorRuleInvalidImageURL
+	RelayRuleContextLengthExceeded = system_setting.RelayErrorRuleContextLengthExceeded
+	RelayRuleContentFiltered       = system_setting.RelayErrorRuleContentFiltered
+	RelayRuleModelNotFound         = system_setting.RelayErrorRuleModelNotFound
+	RelayRuleNoAvailableChannel    = system_setting.RelayErrorRuleNoAvailableChannel
+	RelayRuleModelNotPermitted     = system_setting.RelayErrorRuleModelNotPermitted
+	RelayRuleRiskControlRestricted = system_setting.RelayErrorRuleRiskControlRestricted
+	RelayRuleBehaviorBanned        = system_setting.RelayErrorRuleBehaviorBanned
+	RelayRuleUpstreamRateLimited   = system_setting.RelayErrorRuleUpstreamRateLimited
+	RelayRuleUpstreamTimeout       = system_setting.RelayErrorRuleUpstreamTimeout
+	RelayRuleUpstreamBadResponse   = system_setting.RelayErrorRuleUpstreamBadResponse
+	RelayRuleUpstreamUnavailable   = system_setting.RelayErrorRuleUpstreamUnavailable
+	RelayRuleStreamInterrupted     = system_setting.RelayErrorRuleStreamInterrupted
+	RelayRuleInternalError         = system_setting.RelayErrorRuleInternalError
 )
 
 // Match sources — how a rule was matched.
@@ -135,10 +135,14 @@ type relayRule struct {
 // table. It is used both for client response generation (EG-1) and for error
 // insight analytics (EG-2).
 type Classification struct {
-	AdviceCode      string
+	// AdviceCode is the internal rule identifier used for rule lookup,
+	// analytics, enable/disable handling, and fingerprints.
+	AdviceCode string
+	// Code is the client-safe error code. For custom rules it comes from
+	// safe_error_code and may intentionally differ from AdviceCode.
+	Code            string
 	StatusCode      int
 	Type            string
-	Code            string
 	Param           string
 	RuleMatched     bool
 	MatchSource     string
@@ -259,7 +263,8 @@ func SanitizeRelayErrorForClient(c *gin.Context, err *types.NewAPIError) SafeErr
 
 	in := ExtractRelayErrorInput(err)
 
-	if !governanceEnabled() {
+	governanceSetting := system_setting.GetRelayErrorGovernanceSetting()
+	if !governanceEnabled(governanceSetting) {
 		// Governance disabled: preserve pre-existing behavior (masked message +
 		// original status), but strip upstream request-ids and attach local one.
 		oai := err.ToOpenAIError()
@@ -267,18 +272,18 @@ func SanitizeRelayErrorForClient(c *gin.Context, err *types.NewAPIError) SafeErr
 		return SafeErrorPayload{StatusCode: normalizedStatusFallback(in), OpenAIError: oai}
 	}
 
-	rules := effectiveRules()
-	cls := classifyWithRules(in, rules)
-	effectiveCode := firstEnabledAdviceCode(cls.Code, rules)
+	rules := effectiveRulesForSetting(governanceSetting)
+	cls := classifyWithRules(in, rules, governanceSetting)
+	effectiveRuleCode := firstEnabledAdviceCode(cls.AdviceCode, rules)
 
 	oai := types.OpenAIError{
-		Message: withLocalRequestID(c, effectiveMessage(effectiveCode, rules)),
-		Type:    ruleType(effectiveCode, rules),
-		Code:    effectiveCode,
-		Param:   ruleParam(effectiveCode, rules),
+		Message: withLocalRequestID(c, effectiveMessage(effectiveRuleCode, rules)),
+		Type:    ruleType(effectiveRuleCode, rules),
+		Code:    safeErrorCodeForRule(effectiveRuleCode, rules),
+		Param:   ruleParam(effectiveRuleCode, rules),
 	}
 	return SafeErrorPayload{
-		StatusCode:  normalizedStatusFor(effectiveCode, in.StatusCode, cls.StatusCode, rules),
+		StatusCode:  normalizedStatusFor(effectiveRuleCode, in.StatusCode, cls.StatusCode, rules),
 		OpenAIError: oai,
 	}
 }
@@ -305,12 +310,13 @@ func firstEnabledAdviceCode(adviceCode string, rules map[string]effectiveRelayRu
 // --- Classification engine ---
 
 func ClassifyRelayError(in RelayErrorInput) Classification {
-	return classifyWithRules(in, effectiveRules())
+	setting := system_setting.GetRelayErrorGovernanceSetting()
+	return classifyWithRules(in, effectiveRulesForSetting(setting), setting)
 }
 
 func AnalyzeRelayError(in RelayErrorInput, source string, stage string) RelayErrorAnalysis {
 	cls := classifyWithContext(in, source, stage)
-	fp := NormalizeRelayErrorForAnalytics(in, cls.Code, source, stage)
+	fp := NormalizeRelayErrorForAnalytics(in, cls.AdviceCode, source, stage)
 	return RelayErrorAnalysis{
 		Classification:      cls,
 		ErrorSource:         source,
@@ -331,8 +337,8 @@ func NormalizeRelayErrorForAnalytics(in RelayErrorInput, ruleCode string, source
 	}
 }
 
-func classifyWithRules(in RelayErrorInput, rules map[string]effectiveRelayRule) Classification {
-	if match, ok := matchCustomRelayError(in, rules); ok {
+func classifyWithRules(in RelayErrorInput, rules map[string]effectiveRelayRule, setting *system_setting.RelayErrorGovernanceSetting) Classification {
+	if match, ok := matchCustomRelayError(in, rules, setting); ok {
 		return byMatchWithRules(match, rules)
 	}
 	match := classifyMatchWithContext(in, "", "")
@@ -343,8 +349,9 @@ func classifyWithRules(in RelayErrorInput, rules map[string]effectiveRelayRule) 
 }
 
 func classifyWithContext(in RelayErrorInput, source string, stage string) Classification {
-	rules := effectiveRules()
-	if match, ok := matchCustomRelayError(in, rules); ok {
+	setting := system_setting.GetRelayErrorGovernanceSetting()
+	rules := effectiveRulesForSetting(setting)
+	if match, ok := matchCustomRelayError(in, rules, setting); ok {
 		return byMatchWithRules(match, rules)
 	}
 	match := classifyMatchWithContext(in, source, stage)
@@ -354,12 +361,11 @@ func classifyWithContext(in RelayErrorInput, source string, stage string) Classi
 	return byMatchWithRules(match, rules)
 }
 
-func matchCustomRelayError(in RelayErrorInput, rules map[string]effectiveRelayRule) (relayErrorMatch, bool) {
+func matchCustomRelayError(in RelayErrorInput, rules map[string]effectiveRelayRule, cfg *system_setting.RelayErrorGovernanceSetting) (relayErrorMatch, bool) {
 	msg := lowerJoin(in.Message, in.Param, in.Code, in.Type)
 	if strings.TrimSpace(msg) == "" {
 		return relayErrorMatch{}, false
 	}
-	cfg := system_setting.GetRelayErrorGovernanceSetting()
 	if cfg == nil {
 		return relayErrorMatch{}, false
 	}
@@ -552,7 +558,7 @@ func byMatch(match relayErrorMatch) Classification {
 func byMatchWithRules(match relayErrorMatch, rules map[string]effectiveRelayRule) Classification {
 	if rule, ok := rules[match.Code]; ok {
 		return Classification{
-			AdviceCode:      rule.Code,
+			AdviceCode:      match.Code,
 			StatusCode:      rule.Status,
 			Type:            rule.Type,
 			Code:            rule.Code,
@@ -572,7 +578,7 @@ func byMatchWithRules(match relayErrorMatch, rules map[string]effectiveRelayRule
 		match.UnmatchedReason = RelayUnmatchedReasonLocalSystemError
 	}
 	return Classification{
-		AdviceCode:      rule.Code,
+		AdviceCode:      match.Code,
 		StatusCode:      rule.Status,
 		Type:            rule.Type,
 		Code:            rule.Code,
@@ -587,7 +593,9 @@ func byMatchWithRules(match relayErrorMatch, rules map[string]effectiveRelayRule
 // --- Rule resolution helpers ---
 
 type effectiveRelayRule struct {
-	Enabled      bool
+	Enabled bool
+	// Code is the client-safe error code. The map key remains the internal rule
+	// code so multiple rules may safely share one public error code.
 	Code         string
 	Status       int
 	Type         string
@@ -639,6 +647,13 @@ func ruleParam(code string, rules map[string]effectiveRelayRule) string {
 		return rule.Param
 	}
 	return ""
+}
+
+func safeErrorCodeForRule(code string, rules map[string]effectiveRelayRule) string {
+	if rule, ok := rules[code]; ok && rule.Code != "" {
+		return rule.Code
+	}
+	return RelayRuleInternalError
 }
 
 func effectiveMessage(code string, rules map[string]effectiveRelayRule) string {
@@ -791,20 +806,18 @@ func containsAny(value string, needles ...string) bool {
 //
 // The RELAY_ERROR_GOVERNANCE_ENABLED=false env var still overrides to disable
 // for emergency rollback scenarios.
-func governanceEnabled() bool {
+func governanceEnabled(cfg *system_setting.RelayErrorGovernanceSetting) bool {
 	if os.Getenv("RELAY_ERROR_GOVERNANCE_ENABLED") == "false" {
 		return false
 	}
-	cfg := system_setting.GetRelayErrorGovernanceSetting()
-	return cfg.Enabled
+	return cfg != nil && cfg.Enabled
 }
 
 // effectiveRules merges the built-in default rules with admin-configured
 // overrides from the system setting. Only Enabled and Message can be
 // overridden — Status/Type/Code/Param are fixed in code for security.
-func effectiveRules() map[string]effectiveRelayRule {
+func effectiveRulesForSetting(cfg *system_setting.RelayErrorGovernanceSetting) map[string]effectiveRelayRule {
 	rules := defaultEffectiveRules()
-	cfg := system_setting.GetRelayErrorGovernanceSetting()
 	if cfg == nil {
 		return rules
 	}
@@ -828,7 +841,9 @@ func effectiveRules() map[string]effectiveRelayRule {
 		if code == "" || strings.TrimSpace(custom.MatchPattern) == "" {
 			continue
 		}
-		if rule, ok := rules[code]; ok && rule.Custom {
+		// Never allow legacy custom configuration to replace a built-in rule, and
+		// keep the first valid custom definition when old data contains duplicates.
+		if _, ok := rules[code]; ok {
 			continue
 		}
 		matchType := strings.TrimSpace(custom.MatchType)
@@ -850,7 +865,7 @@ func effectiveRules() map[string]effectiveRelayRule {
 		}
 		rules[code] = effectiveRelayRule{
 			Enabled:      custom.Enabled,
-			Code:         code,
+			Code:         safeCustomErrorToken(custom.SafeErrorCode, code),
 			Status:       status,
 			Type:         safeCustomErrorToken(custom.SafeErrorType, relayRules[RelayRuleInternalError].Type),
 			Message:      message,
@@ -864,7 +879,7 @@ func effectiveRules() map[string]effectiveRelayRule {
 
 func safeCustomRuleCode(code string) string {
 	code = strings.TrimSpace(code)
-	if code == "" || len(code) > 80 {
+	if code == "" || len(code) > system_setting.RelayErrorGovernanceTokenMaxLength {
 		return ""
 	}
 	if !safeAnalyticsTokenPattern.MatchString(code) {
@@ -875,7 +890,7 @@ func safeCustomRuleCode(code string) string {
 
 func safeCustomErrorToken(value string, fallback string) string {
 	value = strings.TrimSpace(value)
-	if value == "" || len(value) > safeAnalyticsTokenMaxLen || !safeAnalyticsTokenPattern.MatchString(value) {
+	if value == "" || len(value) > system_setting.RelayErrorGovernanceTokenMaxLength || !safeAnalyticsTokenPattern.MatchString(value) {
 		return fallback
 	}
 	return value
@@ -889,12 +904,14 @@ func safeRuleMessage(msg string) string {
 	if msg == "" {
 		return ""
 	}
-	if len(msg) > 500 {
-		msg = msg[:500]
+	runes := []rune(msg)
+	if len(runes) > system_setting.RelayErrorGovernanceMessageMaxLength {
+		msg = string(runes[:system_setting.RelayErrorGovernanceMessageMaxLength])
 	}
 	// Reject messages containing template placeholders that could inject
 	// original error content into the client response.
-	if strings.Contains(msg, "{original") || strings.Contains(msg, "{upstream") {
+	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "{original") || strings.Contains(lower, "{upstream") {
 		return ""
 	}
 	return msg
@@ -903,7 +920,7 @@ func safeRuleMessage(msg string) string {
 // --- Stream error sanitization ---
 
 // SanitizedStreamErrorMessage classifies a stream-mid error and returns the
-// safe message + rule code. Used by stream handlers that need to emit an SSE
+// safe message + client-safe error code. Used by stream handlers that need to emit an SSE
 // error chunk after headers are already sent.
 func SanitizedStreamErrorMessage(c *gin.Context, err error) (message, code string) {
 	in := RelayErrorInput{
@@ -915,10 +932,12 @@ func SanitizedStreamErrorMessage(c *gin.Context, err error) (message, code strin
 	if err != nil {
 		in.Message = err.Error()
 	}
-	cls := ClassifyRelayError(in)
-	codeStr := cls.Code
-	if codeStr == "" {
-		codeStr = RelayRuleStreamInterrupted
+	setting := system_setting.GetRelayErrorGovernanceSetting()
+	rules := effectiveRulesForSetting(setting)
+	cls := classifyWithRules(in, rules, setting)
+	ruleCode := cls.AdviceCode
+	if ruleCode == "" {
+		ruleCode = RelayRuleStreamInterrupted
 	}
-	return withLocalRequestID(c, effectiveMessage(codeStr, effectiveRules())), codeStr
+	return withLocalRequestID(c, effectiveMessage(ruleCode, rules)), safeErrorCodeForRule(ruleCode, rules)
 }

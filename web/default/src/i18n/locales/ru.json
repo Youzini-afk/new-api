@@ -4009,6 +4009,7 @@
     "Status & Sync": "Статус и синхронизация",
     "Status Code": "Код статуса",
     "Status Code Mapping": "Сопоставление кодов состояния",
+    "Status code must be an integer between 400 and 599.": "Код состояния должен быть целым числом от 400 до 599.",
     "Status Page Slug": "Slug страницы статуса",
     "Status code mapping must use valid HTTP status codes": "Сопоставление кодов состояния должно использовать допустимые HTTP-коды",
     "Status short": "Стат.",

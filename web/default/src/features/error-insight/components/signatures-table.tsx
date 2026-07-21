@@ -81,6 +81,13 @@ interface SignaturesTableProps {
   onOpenAISettings?: () => void
 }
 
+function isValidOptionalStatusCode(value?: number) {
+  return (
+    value === undefined ||
+    (Number.isInteger(value) && value >= 400 && value <= 599)
+  )
+}
+
 export function SignaturesTable(props: SignaturesTableProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -668,6 +675,15 @@ export function SignaturesTable(props: SignaturesTableProps) {
                           updateEditableRule(index, { safe_error_type: value })
                         }
                       />
+                      <RuleNumberInput
+                        label={t('Status Code')}
+                        value={rule.status_code}
+                        min={400}
+                        max={599}
+                        onChange={(value) =>
+                          updateEditableRule(index, { status_code: value })
+                        }
+                      />
                       <RuleTextarea
                         label={t('Safe Error Message')}
                         value={rule.safe_error_message}
@@ -689,7 +705,17 @@ export function SignaturesTable(props: SignaturesTableProps) {
                     <div className='mt-5 flex justify-end'>
                       <Button
                         disabled={saveRuleMutation.isPending}
-                        onClick={() => saveRuleMutation.mutate(rule)}
+                        onClick={() => {
+                          if (!isValidOptionalStatusCode(rule.status_code)) {
+                            toast.error(
+                              t(
+                                'Status code must be an integer between 400 and 599.'
+                              )
+                            )
+                            return
+                          }
+                          saveRuleMutation.mutate(rule)
+                        }}
                       >
                         {saveRuleMutation.isPending && (
                           <Loader2 className='size-4 animate-spin' />
@@ -747,6 +773,35 @@ function RuleTextarea(props: {
         value={props.value || ''}
         className='border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-24 w-full rounded-md border px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
         onChange={(event) => props.onChange(event.target.value)}
+      />
+    </div>
+  )
+}
+
+function RuleNumberInput(props: {
+  label: string
+  value?: number
+  min: number
+  max: number
+  onChange: (value: number | undefined) => void
+}) {
+  return (
+    <div className='space-y-1.5'>
+      <p className='text-muted-foreground text-xs font-semibold'>
+        {props.label}
+      </p>
+      <input
+        type='number'
+        value={props.value ?? ''}
+        min={props.min}
+        max={props.max}
+        step={1}
+        aria-invalid={!isValidOptionalStatusCode(props.value)}
+        className='border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
+        onChange={(event) => {
+          const value = event.target.value
+          props.onChange(value === '' ? undefined : Number(value))
+        }}
       />
     </div>
   )

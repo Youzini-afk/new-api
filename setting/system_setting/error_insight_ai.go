@@ -30,6 +30,9 @@ const DefaultErrorInsightAIPromptTemplate = `你是 API 网关错误治理规则
 4. 如果样本不足以生成可靠规则，返回 confidence 低并说明原因。
 5. safe_error_message 必须适合展示给普通用户。
 6. original_error_pattern 应尽量匹配稳定片段，不要依赖 request_id、时间戳、随机 ID。
+7. status_code 只能是 400-599：参数/格式/内容政策通常为 400，认证为 401，额度不足为 402，权限或封禁为 403，不存在为 404，站内限流为 429，上游响应异常为 502，上游不可用或上游限流为 503，上游超时为 504。
+8. 不得为了方便把所有规则统一写成 503；无法可靠判断时可以省略 status_code，由服务端根据规则语义推断。
+9. rule_code、safe_error_code、safe_error_type 仅允许字母、数字、点、下划线和短横线，长度不超过 64。
 
 签名：
 {{signature}}
@@ -48,6 +51,7 @@ const DefaultErrorInsightAIPromptTemplate = `你是 API 网关错误治理规则
       "safe_error_code": "string",
       "safe_error_type": "string",
       "safe_error_message": "string",
+      "status_code": 400,
       "confidence": 0.0,
       "reason": "string"
     }

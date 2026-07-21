@@ -418,31 +418,16 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 		option.Value = normalized
-	case "relay_error_governance":
-		var cfg system_setting.RelayErrorGovernanceSetting
-		if err := common.UnmarshalJsonStr(option.Value.(string), &cfg); err != nil {
+	case system_setting.RelayErrorGovernanceOptionKey:
+		cfg, _, err := system_setting.ParseAndValidateRelayErrorGovernanceSetting(option.Value.(string))
+		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
-				"message": "中继错误治理配置必须是合法 JSON",
+				"message": err.Error(),
 			})
 			return
 		}
-		rules, err := common.Marshal(cfg.Rules)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		customRules, err := common.Marshal(cfg.CustomRules)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		if err := model.UpdateOptionsBulk(map[string]string{
-			"relay_error_governance.enabled":      strconv.FormatBool(cfg.Enabled),
-			"relay_error_governance.rules":        string(rules),
-			"relay_error_governance.custom_rules": string(customRules),
-			"relay_error_governance":              option.Value.(string),
-		}); err != nil {
+		if _, err := model.UpdateRelayErrorGovernanceSetting(cfg); err != nil {
 			common.ApiError(c, err)
 			return
 		}

@@ -4009,6 +4009,7 @@
     "Status & Sync": "状态与同步",
     "Status Code": "状态码",
     "Status Code Mapping": "状态码映射",
+    "Status code must be an integer between 400 and 599.": "状态码必须是 400 到 599 之间的整数。",
     "Status Page Slug": "状态页面 Slug",
     "Status code mapping must use valid HTTP status codes": "状态码映射必须使用有效的 HTTP 状态码",
     "Status short": "状态",

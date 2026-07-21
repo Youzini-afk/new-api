@@ -388,8 +388,10 @@ func SaveErrorInsightCustomAIRule(c *gin.Context) {
 	updated := false
 	for _, existing := range cfg.CustomRules {
 		if existing.RuleCode == rule.RuleCode {
-			customRules = append(customRules, rule)
-			updated = true
+			if !updated {
+				customRules = append(customRules, rule)
+				updated = true
+			}
 			continue
 		}
 		customRules = append(customRules, existing)
@@ -402,21 +404,17 @@ func SaveErrorInsightCustomAIRule(c *gin.Context) {
 		Rules:       cfg.Rules,
 		CustomRules: customRules,
 	}
-	value, err := json.Marshal(merged)
+	normalized, err := model.UpdateRelayErrorGovernanceSetting(merged)
 	if err != nil {
-		common.SysError("failed to encode error insight custom rule: " + err.Error())
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "failed to save rule"})
-		return
-	}
-	if err := model.UpdateOptionsBulk(map[string]string{
-		"relay_error_governance.enabled":      strconv.FormatBool(merged.Enabled),
-		"relay_error_governance.rules":        mustMarshalString(merged.Rules),
-		"relay_error_governance.custom_rules": string(mustMarshalBytes(merged.CustomRules)),
-		"relay_error_governance":              string(value),
-	}); err != nil {
 		common.SysError("failed to save error insight custom rule: " + err.Error())
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 		return
+	}
+	for _, savedRule := range normalized.CustomRules {
+		if savedRule.RuleCode == rule.RuleCode {
+			rule = savedRule
+			break
+		}
 	}
 	if signature := strings.TrimSpace(req.Signature); model.ValidateNormalizedSignature(signature) {
 		if err := model.MarkErrorInsightAIResultApproved(c.Request.Context(), signature); err != nil {
@@ -553,77 +551,50 @@ func buildErrorGovernanceAIConflictSummary(rules []system_setting.RelayErrorGove
 
 func parseErrorGovernanceAIOrganization(content string) (ErrorGovernanceAIOrganizeResult, error) {
 	trimmed := normalizeErrorInsightAIJSONContent(content)
+	type aiOrganizationRule struct {
+		Enabled          *bool  `json:"enabled"`
+		RuleCode         string `json:"rule_code"`
+		Category         string `json:"category,omitempty"`
+		MatchType        string `json:"match_type"`
+		MatchPattern     string `json:"match_pattern"`
+		SafeErrorCode    string `json:"safe_error_code"`
+		SafeErrorType    string `json:"safe_error_type"`
+		SafeErrorMessage string `json:"safe_error_message"`
+		StatusCode       int    `json:"status_code,omitempty"`
+	}
 	var payload struct {
-		Summary string                                                `json:"summary"`
-		Rules   []system_setting.RelayErrorGovernanceCustomRuleConfig `json:"rules"`
+		Summary string               `json:"summary"`
+		Rules   []aiOrganizationRule `json:"rules"`
 	}
 	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
 		return ErrorGovernanceAIOrganizeResult{}, errors.New("AI response is not valid JSON")
 	}
-	for i := range payload.Rules {
-		rule, err := normalizeErrorGovernanceAICustomRule(payload.Rules[i])
-		if err != nil {
-			return ErrorGovernanceAIOrganizeResult{}, err
+	rules := make([]system_setting.RelayErrorGovernanceCustomRuleConfig, 0, len(payload.Rules))
+	for _, input := range payload.Rules {
+		enabled := true
+		if input.Enabled != nil {
+			enabled = *input.Enabled
 		}
-		payload.Rules[i] = rule
+		rules = append(rules, system_setting.RelayErrorGovernanceCustomRuleConfig{
+			Enabled:          enabled,
+			RuleCode:         input.RuleCode,
+			Category:         input.Category,
+			MatchType:        input.MatchType,
+			MatchPattern:     input.MatchPattern,
+			SafeErrorCode:    input.SafeErrorCode,
+			SafeErrorType:    input.SafeErrorType,
+			SafeErrorMessage: input.SafeErrorMessage,
+			StatusCode:       input.StatusCode,
+		})
 	}
-	if payload.Rules == nil {
-		payload.Rules = []system_setting.RelayErrorGovernanceCustomRuleConfig{}
+	normalizedRules, err := system_setting.NormalizeRelayErrorGovernanceCustomRules(rules)
+	if err != nil {
+		return ErrorGovernanceAIOrganizeResult{}, err
 	}
-	return ErrorGovernanceAIOrganizeResult{Summary: strings.TrimSpace(payload.Summary), Rules: payload.Rules, Raw: json.RawMessage(trimmed)}, nil
-}
-
-func normalizeErrorGovernanceAICustomRule(input system_setting.RelayErrorGovernanceCustomRuleConfig) (system_setting.RelayErrorGovernanceCustomRuleConfig, error) {
-	ruleCode := strings.TrimSpace(input.RuleCode)
-	if ruleCode == "" || !errorInsightAIRuleCodePattern.MatchString(ruleCode) {
-		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("rule code must contain only letters, numbers, dot, underscore, or dash")
+	if normalizedRules == nil {
+		normalizedRules = []system_setting.RelayErrorGovernanceCustomRuleConfig{}
 	}
-	matchType := strings.TrimSpace(input.MatchType)
-	if matchType != "contains" && matchType != "regex" {
-		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match type must be contains or regex")
-	}
-	matchPattern := strings.TrimSpace(input.MatchPattern)
-	if matchPattern == "" {
-		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern is required")
-	}
-	if len(matchPattern) > 1000 {
-		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern is too long")
-	}
-	if matchType == "regex" {
-		if _, err := regexp.Compile(matchPattern); err != nil {
-			return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern must be a valid regex")
-		}
-	}
-	safeMessage := strings.TrimSpace(input.SafeErrorMessage)
-	if safeMessage == "" {
-		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("safe error message is required")
-	}
-	if len(safeMessage) > 500 {
-		safeMessage = safeMessage[:500]
-	}
-	safeCode := strings.TrimSpace(input.SafeErrorCode)
-	if safeCode == "" || !errorInsightAIRuleCodePattern.MatchString(safeCode) {
-		safeCode = ruleCode
-	}
-	safeType := strings.TrimSpace(input.SafeErrorType)
-	if safeType == "" || !errorInsightAIRuleCodePattern.MatchString(safeType) {
-		safeType = "service_unavailable"
-	}
-	statusCode := input.StatusCode
-	if statusCode == 0 {
-		statusCode = http.StatusServiceUnavailable
-	}
-	return system_setting.RelayErrorGovernanceCustomRuleConfig{
-		Enabled:          input.Enabled,
-		RuleCode:         ruleCode,
-		Category:         strings.TrimSpace(input.Category),
-		MatchType:        matchType,
-		MatchPattern:     matchPattern,
-		SafeErrorCode:    safeCode,
-		SafeErrorType:    safeType,
-		SafeErrorMessage: safeMessage,
-		StatusCode:       statusCode,
-	}, nil
+	return ErrorGovernanceAIOrganizeResult{Summary: strings.TrimSpace(payload.Summary), Rules: normalizedRules, Raw: json.RawMessage(trimmed)}, nil
 }
 
 func generateErrorInsightRulesWithAI(c *gin.Context, cfg *system_setting.ErrorInsightAISetting, signature string, logs []*model.ErrorLog) (string, error) {
@@ -1077,6 +1048,7 @@ type ErrorInsightAIRuleSuggestion struct {
 	SafeErrorCode    string  `json:"safe_error_code"`
 	SafeErrorType    string  `json:"safe_error_type"`
 	SafeErrorMessage string  `json:"safe_error_message"`
+	StatusCode       int     `json:"status_code,omitempty"`
 	Confidence       float64 `json:"confidence"`
 	Reason           string  `json:"reason"`
 }
@@ -1087,20 +1059,25 @@ func parseErrorInsightAISuggestions(content string) ([]ErrorInsightAIRuleSuggest
 	if err != nil {
 		return nil, nil, errors.New("AI response is not valid JSON")
 	}
+	seenRuleCodes := make(map[string]struct{}, len(rules))
 	for i := range rules {
-		rules[i].RuleCode = strings.TrimSpace(rules[i].RuleCode)
-		rules[i].Category = strings.TrimSpace(rules[i].Category)
-		rules[i].MatchType = strings.TrimSpace(rules[i].MatchType)
-		rules[i].MatchPattern = strings.TrimSpace(rules[i].MatchPattern)
-		rules[i].SafeErrorCode = strings.TrimSpace(rules[i].SafeErrorCode)
-		rules[i].SafeErrorType = strings.TrimSpace(rules[i].SafeErrorType)
-		rules[i].SafeErrorMessage = strings.TrimSpace(rules[i].SafeErrorMessage)
-		rules[i].Reason = strings.TrimSpace(rules[i].Reason)
-		if rules[i].MatchType == "regex" && rules[i].MatchPattern != "" {
-			if _, err := regexp.Compile(rules[i].MatchPattern); err != nil {
-				return nil, nil, fmt.Errorf("AI generated invalid regex for rule %s", rules[i].RuleCode)
-			}
+		normalized, err := normalizeErrorInsightCustomRule(rules[i])
+		if err != nil {
+			return nil, nil, fmt.Errorf("AI generated invalid rule %q: %w", rules[i].RuleCode, err)
 		}
+		rules[i].RuleCode = normalized.RuleCode
+		rules[i].Category = normalized.Category
+		rules[i].MatchType = normalized.MatchType
+		rules[i].MatchPattern = normalized.MatchPattern
+		rules[i].SafeErrorCode = normalized.SafeErrorCode
+		rules[i].SafeErrorType = normalized.SafeErrorType
+		rules[i].SafeErrorMessage = normalized.SafeErrorMessage
+		rules[i].StatusCode = normalized.StatusCode
+		rules[i].Reason = strings.TrimSpace(rules[i].Reason)
+		if _, ok := seenRuleCodes[normalized.RuleCode]; ok {
+			return nil, nil, fmt.Errorf("AI generated duplicate rule_code %q", normalized.RuleCode)
+		}
+		seenRuleCodes[normalized.RuleCode] = struct{}{}
 	}
 	if rules == nil {
 		rules = []ErrorInsightAIRuleSuggestion{}
@@ -1154,69 +1131,21 @@ func decodeErrorInsightAIRules(data []byte) ([]ErrorInsightAIRuleSuggestion, err
 	return []ErrorInsightAIRuleSuggestion{}, nil
 }
 
-var errorInsightAIRuleCodePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,80}$`)
-
 func normalizeErrorInsightCustomRule(input ErrorInsightAIRuleSuggestion) (system_setting.RelayErrorGovernanceCustomRuleConfig, error) {
 	ruleCode := strings.TrimSpace(input.RuleCode)
 	if ruleCode == "" {
 		ruleCode = "ai_" + strings.TrimSpace(input.Category)
 	}
 	ruleCode = strings.ReplaceAll(ruleCode, " ", "_")
-	if !errorInsightAIRuleCodePattern.MatchString(ruleCode) {
-		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("rule code must contain only letters, numbers, dot, underscore, or dash")
-	}
-	matchType := strings.TrimSpace(input.MatchType)
-	if matchType != "contains" && matchType != "regex" {
-		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match type must be contains or regex")
-	}
-	matchPattern := strings.TrimSpace(input.MatchPattern)
-	if matchPattern == "" {
-		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern is required")
-	}
-	if len(matchPattern) > 1000 {
-		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern is too long")
-	}
-	if matchType == "regex" {
-		if _, err := regexp.Compile(matchPattern); err != nil {
-			return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("match pattern must be a valid regex")
-		}
-	}
-	safeMessage := strings.TrimSpace(input.SafeErrorMessage)
-	if safeMessage == "" {
-		return system_setting.RelayErrorGovernanceCustomRuleConfig{}, errors.New("safe error message is required")
-	}
-	if len(safeMessage) > 500 {
-		safeMessage = safeMessage[:500]
-	}
-	safeCode := strings.TrimSpace(input.SafeErrorCode)
-	if safeCode == "" || !errorInsightAIRuleCodePattern.MatchString(safeCode) {
-		safeCode = ruleCode
-	}
-	safeType := strings.TrimSpace(input.SafeErrorType)
-	if safeType == "" || !errorInsightAIRuleCodePattern.MatchString(safeType) {
-		safeType = "service_unavailable"
-	}
-	return system_setting.RelayErrorGovernanceCustomRuleConfig{
+	return system_setting.NormalizeRelayErrorGovernanceCustomRule(system_setting.RelayErrorGovernanceCustomRuleConfig{
 		Enabled:          true,
 		RuleCode:         ruleCode,
-		Category:         strings.TrimSpace(input.Category),
-		MatchType:        matchType,
-		MatchPattern:     matchPattern,
-		SafeErrorCode:    safeCode,
-		SafeErrorType:    safeType,
-		SafeErrorMessage: safeMessage,
-		StatusCode:       http.StatusServiceUnavailable,
-	}, nil
-}
-
-func mustMarshalString(value any) string {
-	return string(mustMarshalBytes(value))
-}
-
-func mustMarshalBytes(value any) []byte {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return []byte("null")
-	}
-	return data
+		Category:         input.Category,
+		MatchType:        input.MatchType,
+		MatchPattern:     input.MatchPattern,
+		SafeErrorCode:    input.SafeErrorCode,
+		SafeErrorType:    input.SafeErrorType,
+		SafeErrorMessage: input.SafeErrorMessage,
+		StatusCode:       input.StatusCode,
+	})
 }

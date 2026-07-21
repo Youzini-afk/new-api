@@ -4009,6 +4009,7 @@
     "Status & Sync": "ステータスと同期",
     "Status Code": "ステータスコード",
     "Status Code Mapping": "ステータスコードマッピング",
+    "Status code must be an integer between 400 and 599.": "ステータスコードは400から599までの整数である必要があります。",
     "Status Page Slug": "ステータスページスラッグ",
     "Status code mapping must use valid HTTP status codes": "ステータスコードマッピングには有効な HTTP ステータスコードを使用する必要があります",
     "Status short": "状態",
