@@ -65,6 +65,7 @@ export function useDashboardContentVisibility() {
   const hasStatus = Boolean(status)
 
   return {
+    setupGuide: hasStatus && status?.setup_guide_enabled !== false,
     apiInfo: hasStatus && status?.api_info_enabled !== false,
     announcements: hasStatus && status?.announcements_enabled !== false,
     faq: hasStatus && status?.faq_enabled !== false,

@@ -4791,6 +4791,7 @@
     "What would you like to know?": "何を知りたいですか？",
     "When a token uses the auto group, the system tries groups from top to bottom until it finds an available group.": "トークンが auto グループを使用すると、システムは上から順に利用可能なグループを探します。",
     "When conditions match, the final price is multiplied by X. Multiple matches multiply together; values < 1 act as discounts.": "条件に一致したとき、最終価格に X を掛けます。複数一致は掛け合わさり、1 未満は割引として効きます。",
+    "When disabled, the entire setup guide, including its collapsed bar, is hidden for all users.": "無効にすると、折りたたみバーを含む設定ガイド全体がすべてのユーザーに表示されなくなります。",
     "When enabled, MjProxy callbacks are accepted (reveals server IP).": "有効にすると、MjProxy のコールバックを受け入れます (サーバーの IP を公開します)。",
     "When enabled, if channels in the current group fail, it will try channels in the next group in order.": "有効にすると、現在のグループのチャネルが失敗した場合、次のグループのチャネルを順番に試します。",
     "When enabled, keep the affinity entry even if the affinity channel is disabled or no longer usable for the current group/model. Leave it off to delete the entry and select another channel.": "有効にすると、アフィニティチャネルが無効化された、または現在のグループ/モデルで利用できなくなった場合でも、そのアフィニティエントリを保持します。無効のままにすると、エントリを削除して別のチャネルを選択します。",

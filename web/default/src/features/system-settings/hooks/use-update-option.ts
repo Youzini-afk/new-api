@@ -40,6 +40,7 @@ const STATUS_RELATED_KEYS = [
   'checkin_setting.enabled',
   'game_setting.lottery_enabled',
   'game_setting.roulette_enabled',
+  'console_setting.setup_guide_enabled',
 ]
 
 const LOTTERY_STATUS_RELATED_KEYS = [

@@ -4791,6 +4791,7 @@
     "What would you like to know?": "Bạn muốn biết gì?",
     "When a token uses the auto group, the system tries groups from top to bottom until it finds an available group.": "Khi token dùng nhóm auto, hệ thống thử các nhóm từ trên xuống dưới cho đến khi tìm được nhóm khả dụng.",
     "When conditions match, the final price is multiplied by X. Multiple matches multiply together; values < 1 act as discounts.": "Khi thỏa điều kiện, giá cuối nhân với X. Nhiều điều kiện khớp nhân lại với nhau; giá trị < 1 hoạt động như giảm giá.",
+    "When disabled, the entire setup guide, including its collapsed bar, is hidden for all users.": "Khi tắt, toàn bộ hướng dẫn thiết lập, bao gồm cả thanh thu gọn, sẽ bị ẩn đối với tất cả người dùng.",
     "When enabled, MjProxy callbacks are accepted (reveals server IP).": "Khi được bật, các callback của MjProxy được chấp nhận (lộ IP máy chủ).",
     "When enabled, if channels in the current group fail, it will try channels in the next group in order.": "Khi được bật, nếu các kênh trong nhóm hiện tại thất bại, hệ thống sẽ thử các kênh của nhóm tiếp theo theo thứ tự.",
     "When enabled, keep the affinity entry even if the affinity channel is disabled or no longer usable for the current group/model. Leave it off to delete the entry and select another channel.": "Khi bật, giữ mục ưu tiên ngay cả khi kênh ưu tiên bị tắt hoặc không còn dùng được cho nhóm/mô hình hiện tại. Để tắt để xóa mục đó và chọn kênh khác.",

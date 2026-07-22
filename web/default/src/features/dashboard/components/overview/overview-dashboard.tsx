@@ -457,6 +457,7 @@ export function OverviewDashboard() {
   const user = useAuthStore((state) => state.auth.user)
   const { items: apiInfoItems } = useApiInfo()
   const {
+    setupGuide: showSetupGuide,
     apiInfo: showApiInfoPanel,
     announcements: showAnnouncementsPanel,
     faq: showFAQPanel,
@@ -614,7 +615,13 @@ export function OverviewDashboard() {
   return (
     <div className='flex flex-col gap-4'>
       {setupGuideExpanded ? (
-        <CardStaggerContainer className='grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]'>
+        <CardStaggerContainer
+          className={
+            showSetupGuide
+              ? 'grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]'
+              : 'hidden'
+          }
+        >
           <CardStaggerItem className='bg-card h-full overflow-hidden rounded-2xl border shadow-xs'>
             <div className='relative h-full overflow-hidden p-4 sm:p-5'>
               <SetupGuideBackdrop />
@@ -690,7 +697,9 @@ export function OverviewDashboard() {
           </CardStaggerItem>
         </CardStaggerContainer>
       ) : (
-        <CardStaggerContainer>
+        <CardStaggerContainer
+          className={showSetupGuide ? undefined : 'hidden'}
+        >
           <CardStaggerItem className='bg-card overflow-hidden rounded-2xl border shadow-xs'>
             <div className='relative overflow-hidden px-4 py-3 sm:px-5'>
               <SetupGuideBackdrop compact />
