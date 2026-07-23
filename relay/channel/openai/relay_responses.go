@@ -26,12 +26,18 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
+	if upstreamErr := parseUpstreamErrorEnvelope(responseBody); upstreamErr != nil {
+		return nil, upstreamErr
+	}
 	err = common.Unmarshal(responseBody, &responsesResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	}
+	if strings.TrimSpace(responsesResponse.ID) == "" && strings.TrimSpace(responsesResponse.Object) == "" {
+		return nil, unexpectedUpstreamPayloadError("responses", responseBody)
 	}
 	if info != nil {
 		info.ResponseText = service.ExtractOutputTextFromResponses(&responsesResponse)
@@ -81,8 +87,20 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
+	var streamErr *types.NewAPIError
+	var streamErrHandled bool
+	var clientDataSent bool
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		detectedErr := parseUpstreamStreamError(data, sr.Event())
+		if detectedErr == nil {
+			detectedErr = validateResponsesStreamPayload(data)
+		}
+		if detectedErr != nil {
+			streamErr = detectedErr
+			streamErrHandled = handleUpstreamStreamError(c, info, sr, detectedErr, safeStreamErrorResponses, clientDataSent)
+			return
+		}
 
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
@@ -92,6 +110,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			return
 		}
 		sendResponsesStreamData(c, streamResponse, data)
+		clientDataSent = helper.HasStreamResponseStarted(c)
 		switch streamResponse.Type {
 		case "response.completed":
 			if streamResponse.Response != nil {
@@ -132,6 +151,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+
+	if streamErr != nil && !streamErrHandled {
+		return nil, streamErr
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量

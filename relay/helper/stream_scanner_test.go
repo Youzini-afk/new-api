@@ -210,6 +210,47 @@ func TestStreamScannerHandler_DataWithExtraSpaces(t *testing.T) {
 	assert.Equal(t, "{\"trimmed\":true}", got)
 }
 
+func TestStreamScannerHandler_PreservesEventNameAndMultilineData(t *testing.T) {
+	t.Parallel()
+
+	body := "event: error\n" +
+		"data: {\"message\":\"first line\",\n" +
+		"data: \"code\":503}\n\n" +
+		"data: [DONE]\n\n"
+	c, resp, info := setupStreamTest(t, strings.NewReader(body))
+
+	var gotEvent string
+	var gotData string
+	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+		gotEvent = sr.Event()
+		gotData = data
+	})
+
+	assert.Equal(t, "error", gotEvent)
+	assert.Equal(t, "{\"message\":\"first line\",\n\"code\":503}", gotData)
+}
+
+func TestStreamScannerHandler_PreservesMultilineJSONWithoutEventName(t *testing.T) {
+	t.Parallel()
+
+	body := "data: {\"choices\":[\n" +
+		"data: {\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+		"data: {\"error\":{\"message\":\"provider secret\",\n" +
+		"data: \"type\":\"upstream_error\"}}\n\n" +
+		"data: [DONE]\n\n"
+	c, resp, info := setupStreamTest(t, strings.NewReader(body))
+
+	var got []string
+	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+		got = append(got, data)
+	})
+
+	require.Equal(t, []string{
+		"{\"choices\":[\n{\"delta\":{\"content\":\"ok\"}}]}",
+		"{\"error\":{\"message\":\"provider secret\",\n\"type\":\"upstream_error\"}}",
+	}, got)
+}
+
 // ---------- Ping tests ----------
 
 func TestStreamScannerHandler_PingSentDuringSlowUpstream(t *testing.T) {

@@ -429,6 +429,43 @@ func TestFormatUserLogsKeepsIPWhenUserAllowsIt(t *testing.T) {
 	assert.Equal(t, "203.0.113.10", logs[0].Ip)
 }
 
+func TestFormatUserLogsHidesHistoricalRawErrorContentAndUpstreamRequestID(t *testing.T) {
+	logs := []*Log{{
+		Id:                99,
+		Type:              LogTypeError,
+		Content:           "all nodes failed at https://private.example with sk-provider",
+		RequestId:         "local-request-id",
+		UpstreamRequestId: "upstream-private-id",
+		Other:             common.MapToJsonStr(map[string]interface{}{"error_type": "upstream_error"}),
+	}}
+
+	formatUserLogs(logs, 0, false)
+
+	assert.Equal(t, "请求失败（请求 ID: local-request-id）", logs[0].Content)
+	assert.Empty(t, logs[0].UpstreamRequestId)
+	assert.NotContains(t, logs[0].Content, "private.example")
+}
+
+func TestFormatUserLogsKeepsGovernedSafeErrorContent(t *testing.T) {
+	logs := []*Log{{
+		Id:      99,
+		Type:    LogTypeError,
+		Content: "status code: 502, 服务暂时不可用",
+		Other: common.MapToJsonStr(map[string]interface{}{
+			"error_safe":    true,
+			"error_message": "服务暂时不可用",
+		}),
+	}}
+
+	formatUserLogs(logs, 0, false)
+
+	assert.Equal(t, "status code: 502, 服务暂时不可用", logs[0].Content)
+	otherMap, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	assert.NotContains(t, otherMap, "error_safe")
+	assert.Equal(t, "服务暂时不可用", otherMap["error_message"])
+}
+
 func TestGetAllLogsEnrichesUserProfile(t *testing.T) {
 	truncateLogsTable(t)
 	truncateLogUsersTable(t)

@@ -213,7 +213,22 @@ func ExtractRelayErrorInput(err *types.NewAPIError) RelayErrorInput {
 // error. This determines the unmatched-reason classification.
 func isUpstreamErrorInput(in RelayErrorInput) bool {
 	switch in.ErrorCode {
-	case types.ErrorCodeBadResponseStatusCode, types.ErrorCodeDoRequestFailed:
+	case types.ErrorCodeBadResponseStatusCode,
+		types.ErrorCodeDoRequestFailed,
+		types.ErrorCodeReadResponseBodyFailed,
+		types.ErrorCodeBadResponse,
+		types.ErrorCodeBadResponseBody,
+		types.ErrorCodeEmptyResponse,
+		types.ErrorCodeAwsInvokeError:
+		return true
+	}
+	switch in.ErrorType {
+	case types.ErrorTypeOpenAIError,
+		types.ErrorTypeClaudeError,
+		types.ErrorTypeGeminiError,
+		types.ErrorTypeMidjourneyError,
+		types.ErrorTypeRerankError,
+		types.ErrorTypeUpstreamError:
 		return true
 	}
 	return false
@@ -239,16 +254,42 @@ func (s SafeErrorPayload) ClaudeError() types.ClaudeError {
 	}
 }
 
+// GeminiError converts the safe payload to the Google/Gemini error schema.
+// Only governance-derived fields are used; no upstream status text or detail is
+// copied into the client response.
+func (s SafeErrorPayload) GeminiError() map[string]any {
+	status := "INTERNAL"
+	switch s.StatusCode {
+	case http.StatusBadRequest:
+		status = "INVALID_ARGUMENT"
+	case http.StatusUnauthorized:
+		status = "UNAUTHENTICATED"
+	case http.StatusForbidden:
+		status = "PERMISSION_DENIED"
+	case http.StatusNotFound:
+		status = "NOT_FOUND"
+	case http.StatusTooManyRequests:
+		status = "RESOURCE_EXHAUSTED"
+	case http.StatusServiceUnavailable:
+		status = "UNAVAILABLE"
+	}
+	return map[string]any{
+		"code":    s.StatusCode,
+		"message": s.OpenAIError.Message,
+		"status":  status,
+	}
+}
+
 // SanitizeRelayErrorForClient classifies the original error against the rule
 // table and returns a SafeErrorPayload containing only the governance-classified
 // status/type/code/param/message. The original *types.NewAPIError is never
 // mutated and remains usable for retry, channel-disable, and billing.
 //
-// When governance is disabled (RELAY_ERROR_GOVERNANCE_ENABLED=false), a minimal
-// fallback is used: the error is still masked (ToOpenAIError already applies
-// MaskSensitiveInfo) and the status code is preserved, but no rule-based
-// message replacement happens. This ensures governance-off never leaks more
-// than the pre-existing behavior.
+// When governance is disabled (RELAY_ERROR_GOVERNANCE_ENABLED=false), preserve
+// the pre-existing pass-through behavior for both local and upstream errors.
+// This still uses NewAPIError.ToOpenAIError(), including the project's existing
+// sensitive-information masking, and replaces an upstream request id with the
+// local request id when one is available.
 func SanitizeRelayErrorForClient(c *gin.Context, err *types.NewAPIError) SafeErrorPayload {
 	if err == nil {
 		return SafeErrorPayload{
@@ -265,8 +306,6 @@ func SanitizeRelayErrorForClient(c *gin.Context, err *types.NewAPIError) SafeErr
 
 	governanceSetting := system_setting.GetRelayErrorGovernanceSetting()
 	if !governanceEnabled(governanceSetting) {
-		// Governance disabled: preserve pre-existing behavior (masked message +
-		// original status), but strip upstream request-ids and attach local one.
 		oai := err.ToOpenAIError()
 		oai.Message = withLocalRequestID(c, oai.Message)
 		return SafeErrorPayload{StatusCode: normalizedStatusFallback(in), OpenAIError: oai}
@@ -676,7 +715,11 @@ func withLocalRequestID(c *gin.Context, message string) string {
 	if c == nil {
 		return message
 	}
-	return common.MessageWithRequestId(message, c.GetString(common.RequestIdKey))
+	requestID := strings.TrimSpace(c.GetString(common.RequestIdKey))
+	if requestID == "" {
+		return message
+	}
+	return common.MessageWithRequestId(message, requestID)
 }
 
 // --- Analytics normalization (for EG-2 error insight) ---
@@ -800,9 +843,8 @@ func containsAny(value string, needles ...string) bool {
 // --- Config toggle ---
 
 // governanceEnabled returns the global governance toggle from the system
-// setting. When false, governance falls back to masked original messages
-// (pre-existing behavior). Default is true: upstream error details must not
-// reach downstream clients.
+// setting. When false, rule-based rewriting is skipped for both local and
+// upstream errors, restoring the project's pre-existing pass-through behavior.
 //
 // The RELAY_ERROR_GOVERNANCE_ENABLED=false env var still overrides to disable
 // for emergency rollback scenarios.

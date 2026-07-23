@@ -14,6 +14,23 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const contextKeyStreamResponseStarted = "stream_response_started"
+
+// MarkStreamResponseStarted records that application-level stream data (as
+// opposed to a keepalive ping) has been written to the downstream client.
+// Relay retry/error handling uses this distinction to avoid concatenating
+// responses from different upstream channels while still allowing retries
+// after ping-only output.
+func MarkStreamResponseStarted(c *gin.Context) {
+	if c != nil {
+		c.Set(contextKeyStreamResponseStarted, true)
+	}
+}
+
+func HasStreamResponseStarted(c *gin.Context) bool {
+	return c != nil && c.GetBool(contextKeyStreamResponseStarted)
+}
+
 func FlushWriter(c *gin.Context) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -61,6 +78,7 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 	} else {
 		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
+		MarkStreamResponseStarted(c)
 	}
 	_ = FlushWriter(c)
 	return nil
@@ -69,12 +87,14 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
+	MarkStreamResponseStarted(c)
 	_ = FlushWriter(c)
 }
 
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) {
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
+	MarkStreamResponseStarted(c)
 	_ = FlushWriter(c)
 }
 
@@ -88,6 +108,7 @@ func StringData(c *gin.Context, str string) error {
 	}
 
 	c.Render(-1, common.CustomEvent{Data: "data: " + str})
+	MarkStreamResponseStarted(c)
 	return FlushWriter(c)
 }
 
@@ -152,7 +173,9 @@ func WssError(c *gin.Context, ws *websocket.Conn, openaiError types.OpenAIError)
 		EventId: GetLocalRealtimeID(c),
 		Error:   &openaiError,
 	}
-	_ = WssObject(c, ws, errorObj)
+	if err := WssObject(c, ws, errorObj); err == nil {
+		MarkStreamResponseStarted(c)
+	}
 }
 
 func GetResponseID(c *gin.Context) string {

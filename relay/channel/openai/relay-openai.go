@@ -114,19 +114,39 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var systemFingerprint string
 	var containStreamUsage bool
 	var responseTextBuilder strings.Builder
+	var sentResponseTextBuilder strings.Builder
 	var toolCount int
+	var sentToolCount int
 	var usage = &dto.Usage{}
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+	var streamErr *types.NewAPIError
+	var streamErrHandled bool
+	var clientDataSent bool
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		detectedErr := parseUpstreamStreamError(data, sr.Event())
+		if detectedErr == nil {
+			detectedErr = validateOpenAIChatStreamPayload(data)
+		}
+		if detectedErr != nil {
+			streamErr = detectedErr
+			streamErrHandled = handleUpstreamStreamError(c, info, sr, detectedErr, safeStreamErrorChat, clientDataSent)
+			return
+		}
 		if lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
 				sr.Error(err)
+			} else {
+				clientDataSent = helper.HasStreamResponseStarted(c)
+				if err := processTokenData(info.RelayMode, lastStreamData, &sentResponseTextBuilder, &sentToolCount); err != nil {
+					logger.LogError(c, "error processing sent stream token data: "+err.Error())
+					sr.Error(err)
+				}
 			}
 		}
 		if len(data) > 0 {
@@ -161,6 +181,19 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		}
 	}
 
+	if streamErr != nil {
+		if !streamErrHandled {
+			return nil, streamErr
+		}
+		if !containStreamUsage {
+			usage = service.ResponseText2Usage(c, sentResponseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+			usage.CompletionTokens += sentToolCount * 7
+		}
+		applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
+		info.ResponseText = sentResponseTextBuilder.String()
+		return usage, nil
+	}
+
 	// 处理最后的响应
 	shouldSendLastResp := true
 	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
@@ -170,7 +203,9 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	if info.RelayFormat == types.RelayFormatOpenAI {
 		if shouldSendLastResp {
-			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
+			if err := sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+				logger.LogError(c, "error sending final stream data: "+err.Error())
+			}
 		}
 	}
 
@@ -211,6 +246,9 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			return nil, types.NewOpenAIError(fmt.Errorf("openrouter response success=false"), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 	}
+	if upstreamErr := parseUpstreamErrorEnvelope(responseBody); upstreamErr != nil {
+		return nil, upstreamErr
+	}
 
 	err = common.Unmarshal(responseBody, &simpleResponse)
 	if err != nil {
@@ -219,6 +257,9 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 
 	if oaiError := simpleResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	}
+	if len(simpleResponse.Choices) == 0 {
+		return nil, unexpectedUpstreamPayloadError("chat completion", responseBody)
 	}
 
 	for _, choice := range simpleResponse.Choices {

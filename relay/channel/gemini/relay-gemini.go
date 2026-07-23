@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1342,12 +1343,73 @@ func handleFinalStream(c *gin.Context, info *relaycommon.RelayInfo, resp *dto.Ch
 	return nil
 }
 
+func writeSafeGeminiStreamError(c *gin.Context, info *relaycommon.RelayInfo, err *types.NewAPIError) {
+	safe := governance.SanitizeRelayErrorForClient(c, err)
+	if info != nil && info.RelayFormat == types.RelayFormatClaude {
+		_ = helper.ClaudeData(c, dto.ClaudeResponse{Type: "error", Error: safe.ClaudeError()})
+		return
+	}
+	if info != nil && info.RelayFormat == types.RelayFormatGemini {
+		_ = helper.ObjectData(c, map[string]any{"error": safe.GeminiError()})
+		return
+	}
+	_ = helper.ObjectData(c, map[string]any{"error": safe.OpenAIError})
+}
+
+func unexpectedGeminiPayloadError(scope string, data []byte) *types.NewAPIError {
+	preview := data
+	if len(preview) > 64<<10 {
+		preview = preview[:64<<10]
+	}
+	return types.NewOpenAIError(
+		fmt.Errorf("upstream Gemini %s returned an unexpected payload: %s", scope, preview),
+		types.ErrorCodeBadResponseBody,
+		http.StatusBadGateway,
+	)
+}
+
+func geminiPayloadHasAnyField(data []byte, fields ...string) bool {
+	var payload map[string]json.RawMessage
+	if common.Unmarshal(data, &payload) != nil {
+		return false
+	}
+	for _, field := range fields {
+		if raw, ok := payload[field]; ok && len(bytes.TrimSpace(raw)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, callback func(data string, geminiResponse *dto.GeminiChatResponse) bool) (*dto.Usage, *types.NewAPIError) {
 	var usage = &dto.Usage{}
 	var imageCount int
+	var upstreamStreamErr *types.NewAPIError
 	responseText := strings.Builder{}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		if upstreamErr := governance.ParseUpstreamStreamEvent(sr.Event(), data); upstreamErr != nil {
+			sr.Stop(upstreamErr)
+			if helper.HasStreamResponseStarted(c) {
+				writeSafeGeminiStreamError(c, info, upstreamErr)
+				governance.MarkHandledStreamError(c, upstreamErr)
+			} else {
+				upstreamStreamErr = upstreamErr
+			}
+			return
+		}
+		if !geminiPayloadHasAnyField([]byte(data), "candidates", "promptFeedback", "usageMetadata") {
+			upstreamErr := unexpectedGeminiPayloadError("stream", []byte(data))
+			sr.Stop(upstreamErr)
+			if helper.HasStreamResponseStarted(c) {
+				writeSafeGeminiStreamError(c, info, upstreamErr)
+				governance.MarkHandledStreamError(c, upstreamErr)
+			} else {
+				upstreamStreamErr = upstreamErr
+			}
+			return
+		}
+
 		var geminiResponse dto.GeminiChatResponse
 		if err := common.UnmarshalJsonStr(data, &geminiResponse); err != nil {
 			sr.Stop(fmt.Errorf("unmarshal: %w", err))
@@ -1396,6 +1458,9 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 	if info != nil {
 		info.ResponseText = responseText.String()
+	}
+	if upstreamStreamErr != nil {
+		return nil, upstreamStreamErr
 	}
 
 	return usage, nil
@@ -1492,6 +1557,12 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 	if err != nil {
 		return usage, err
 	}
+	if governance.HandledStreamError(c) != nil {
+		// The stream handler already emitted a protocol-compatible safe error.
+		// Do not append a usage/stop frame that would make the failed stream look
+		// successfully completed.
+		return usage, nil
+	}
 
 	response := helper.GenerateFinalUsageResponse(id, createAt, info.UpstreamModelName, *usage)
 	if info.RelayFormat == types.RelayFormatClaude && info.ClaudeConvertInfo != nil && !info.ClaudeConvertInfo.Done {
@@ -1512,6 +1583,12 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	}
 	service.CloseResponseBodyGracefully(resp)
 	logger.LogDebug(c, "Gemini response body: %s", responseBody)
+	if upstreamErr := governance.ParseUpstreamErrorEnvelope(responseBody); upstreamErr != nil {
+		return nil, upstreamErr
+	}
+	if !geminiPayloadHasAnyField(responseBody, "candidates", "promptFeedback", "usageMetadata") {
+		return nil, unexpectedGeminiPayloadError("chat", responseBody)
+	}
 	var geminiResponse dto.GeminiChatResponse
 	err = common.Unmarshal(responseBody, &geminiResponse)
 	if err != nil {
@@ -1606,10 +1683,19 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	if readErr != nil {
 		return nil, types.NewOpenAIError(readErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
+	if upstreamErr := governance.ParseUpstreamErrorEnvelope(responseBody); upstreamErr != nil {
+		return nil, upstreamErr
+	}
+	if !geminiPayloadHasAnyField(responseBody, "embeddings") {
+		return nil, unexpectedGeminiPayloadError("embedding", responseBody)
+	}
 
 	var geminiResponse dto.GeminiBatchEmbeddingResponse
 	if jsonErr := common.Unmarshal(responseBody, &geminiResponse); jsonErr != nil {
 		return nil, types.NewOpenAIError(jsonErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	if len(geminiResponse.Embeddings) == 0 {
+		return nil, unexpectedGeminiPayloadError("embedding", responseBody)
 	}
 
 	// convert to openai format response
@@ -1650,6 +1736,12 @@ func GeminiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 		return nil, types.NewOpenAIError(readErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	_ = resp.Body.Close()
+	if upstreamErr := governance.ParseUpstreamErrorEnvelope(responseBody); upstreamErr != nil {
+		return nil, upstreamErr
+	}
+	if !geminiPayloadHasAnyField(responseBody, "predictions") {
+		return nil, unexpectedGeminiPayloadError("image", responseBody)
+	}
 
 	var geminiResponse dto.GeminiImageResponse
 	if jsonErr := common.Unmarshal(responseBody, &geminiResponse); jsonErr != nil {

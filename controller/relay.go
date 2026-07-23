@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -68,6 +67,42 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 	return err
 }
 
+func writeCommittedSafeRelayError(c *gin.Context, relayFormat types.RelayFormat, safe governance.SafeErrorPayload) {
+	switch relayFormat {
+	case types.RelayFormatClaude:
+		_ = helper.ClaudeData(c, dto.ClaudeResponse{Type: "error", Error: safe.ClaudeError()})
+	case types.RelayFormatOpenAIResponses:
+		payload := gin.H{"type": "response.error", "error": safe.OpenAIError}
+		if data, err := common.Marshal(payload); err == nil {
+			helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: "response.error"}, string(data))
+		}
+	case types.RelayFormatOpenAIImage:
+		payload := gin.H{"type": "error", "error": safe.OpenAIError}
+		if data, err := common.Marshal(payload); err == nil {
+			helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: "error"}, string(data))
+		}
+	case types.RelayFormatGemini:
+		_ = helper.ObjectData(c, gin.H{"error": safe.GeminiError()})
+	default:
+		_ = helper.ObjectData(c, gin.H{"error": safe.OpenAIError})
+	}
+}
+
+func resetUncommittedStreamHeaders(c *gin.Context) {
+	if c == nil || c.Writer == nil || c.Writer.Written() {
+		return
+	}
+	for _, name := range []string{
+		"Content-Type",
+		"Cache-Control",
+		"Connection",
+		"Transfer-Encoding",
+		"X-Accel-Buffering",
+	} {
+		c.Writer.Header().Del(name)
+	}
+}
+
 func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	//group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
@@ -75,6 +110,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	var (
 		newAPIError *types.NewAPIError
+		relayInfo   *relaycommon.RelayInfo
 		ws          *websocket.Conn
 	)
 
@@ -101,6 +137,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			// The original error is classified + fingerprinted; the safe payload
 			// carries the client-facing fields. This is idempotent per-request.
 			governance.RecordRelayErrorInsight(c, newAPIError, safe, "relay_error", "relay_response", 0, 0)
+			if relayInfo != nil && relayInfo.IsStream && !c.Writer.Written() {
+				// A scanner sets SSE headers before reading its first frame. When
+				// that frame is an error, clear the uncommitted stream headers so
+				// the retry-exhausted response is valid HTTP JSON.
+				resetUncommittedStreamHeaders(c)
+			}
+			if relayFormat != types.RelayFormatOpenAIRealtime && relayInfo != nil && relayInfo.IsStream && c.Writer.Written() {
+				// Headers/body are already committed (for example by a keepalive
+				// ping), so appending a JSON HTTP error would corrupt the SSE
+				// response. Emit only a protocol-compatible safe stream error.
+				writeCommittedSafeRelayError(c, relayFormat, safe)
+				return
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, safe.OpenAIError)
@@ -109,6 +158,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					"type":  "error",
 					"error": safe.ClaudeError(),
 				})
+			case types.RelayFormatGemini:
+				c.JSON(safe.StatusCode, gin.H{"error": safe.GeminiError()})
 			default:
 				c.JSON(safe.StatusCode, gin.H{
 					"error": safe.OpenAIError,
@@ -128,7 +179,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
+	relayInfo, err = relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
@@ -262,6 +313,30 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			if handledStreamErr := governance.HandledStreamError(c); handledStreamErr != nil {
+				handledStreamErr = service.NormalizeViolationFeeError(handledStreamErr)
+				relayInfo.LastError = handledStreamErr
+				service.ChargeViolationFeeIfNeeded(c, relayInfo, handledStreamErr)
+				processChannelError(c, *types.NewChannelError(
+					channel.Id,
+					channel.Type,
+					channel.Name,
+					channel.ChannelInfo.IsMultiKey,
+					common.GetContextKeyString(c, constant.ContextKeyChannelKey),
+					channel.GetAutoBan(),
+				), handledStreamErr)
+				safe := governance.SanitizeRelayErrorForClient(c, handledStreamErr)
+				governance.RecordRelayErrorInsight(c, handledStreamErr, safe, "relay_stream_error", "stream_response", 0, retryParam.GetRetry())
+				logger.LogError(c, fmt.Sprintf("handled upstream stream error: %s", common.LocalLogPreview(handledStreamErr.Error())))
+				// Text/audio settlement already records this handled stream as one
+				// failed sample. Realtime uses its own quota path, so record it here.
+				if relayInfo.RelayMode == relayconstant.RelayModeRealtime {
+					gopool.Go(func() {
+						perfmetrics.RecordRelaySample(relayInfo, false, 0)
+					})
+				}
+				return
+			}
 			relayInfo.LastError = nil
 			return
 		}
@@ -651,6 +726,11 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr == nil {
 		return false
 	}
+	if helper.HasStreamResponseStarted(c) {
+		// Never append a second upstream response after model/application data
+		// has already reached the client. Keepalive pings do not set this flag.
+		return false
+	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
 	}
@@ -714,8 +794,15 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		other["channel_id"] = channelId
 		other["channel_name"] = c.GetString("channel_name")
 		other["channel_type"] = c.GetInt("channel_type")
+		safe := governance.SanitizeRelayErrorForClient(c, err)
+		other["error_safe"] = true
+		other["error_status_code"] = safe.StatusCode
+		other["error_code"] = safe.OpenAIError.Code
+		other["error_type"] = safe.OpenAIError.Type
+		other["error_message"] = safe.OpenAIError.Message
 		adminInfo := make(map[string]interface{})
 		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
+		adminInfo["original_error"] = err.MaskSensitiveErrorWithStatusCode()
 		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
 		if isMultiKey {
 			adminInfo["is_multi_key"] = true
@@ -733,7 +820,8 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
-		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+		safeContent := fmt.Sprintf("status code: %d, %s", safe.StatusCode, safe.OpenAIError.Message)
+		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, safeContent, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 
 }
@@ -742,9 +830,11 @@ func RelayMidjourney(c *gin.Context) {
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatMjProxy, nil, nil)
 
 	if err != nil {
+		logger.LogError(c, "generate Midjourney relay info failed: "+common.LocalLogPreview(err.Error()))
+		safe := governance.SanitizeRelayErrorForClient(c, nil)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"description": fmt.Sprintf("failed to generate relay info: %s", err.Error()),
-			"type":        "upstream_error",
+			"description": safe.OpenAIError.Message,
+			"type":        safe.OpenAIError.Type,
 			"code":        4,
 		})
 		return
@@ -763,21 +853,37 @@ func RelayMidjourney(c *gin.Context) {
 	default:
 		mjErr = relay.RelayMidjourneySubmit(c, relayInfo)
 	}
-	//err = relayMidjourneySubmit(c, relayMode)
-	log.Println(mjErr)
 	if mjErr != nil {
-		statusCode := http.StatusBadRequest
-		if mjErr.Code == 30 {
-			mjErr.Result = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
+		statusCode := c.GetInt(service.ContextKeyMidjourneyUpstreamStatus)
+		if statusCode < 400 || statusCode > 599 {
+			statusCode = http.StatusBadRequest
+		}
+		if mjErr.Code == 30 && statusCode == http.StatusBadRequest {
 			statusCode = http.StatusTooManyRequests
 		}
-		c.JSON(statusCode, gin.H{
-			"description": fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result),
+		originalMessage := ""
+		if value, exists := c.Get(service.ContextKeyMidjourneyUpstreamError); exists {
+			if upstreamErr, ok := value.(error); ok && upstreamErr != nil {
+				originalMessage = strings.TrimSpace(upstreamErr.Error())
+			}
+		}
+		if originalMessage == "" {
+			originalMessage = strings.TrimSpace(fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result))
+		}
+		originalErr := types.WithOpenAIError(types.OpenAIError{
+			Message: originalMessage,
+			Type:    "upstream_error",
+			Code:    fmt.Sprint(mjErr.Code),
+		}, statusCode)
+		safe := governance.SanitizeRelayErrorForClient(c, originalErr)
+		governance.RecordRelayErrorInsight(c, originalErr, safe, "midjourney_upstream", "relay_response", 0, 0)
+		c.JSON(safe.StatusCode, gin.H{
+			"description": safe.OpenAIError.Message,
 			"type":        "upstream_error",
 			"code":        mjErr.Code,
 		})
 		channelId := c.GetInt("channel_id")
-		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
+		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, common.LocalLogPreview(originalErr.MaskSensitiveError())))
 	}
 }
 
@@ -808,11 +914,7 @@ func RelayNotFound(c *gin.Context) {
 func RelayTaskFetch(c *gin.Context) {
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, &dto.TaskError{
-			Code:       "gen_relay_info_failed",
-			Message:    err.Error(),
-			StatusCode: http.StatusInternalServerError,
-		})
+		respondTaskRelaySetupError(c, err)
 		return
 	}
 	if taskErr := relay.RelayTaskFetch(c, relayInfo.RelayMode); taskErr != nil {
@@ -823,11 +925,7 @@ func RelayTaskFetch(c *gin.Context) {
 func RelayTask(c *gin.Context) {
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, &dto.TaskError{
-			Code:       "gen_relay_info_failed",
-			Message:    err.Error(),
-			StatusCode: http.StatusInternalServerError,
-		})
+		respondTaskRelaySetupError(c, err)
 		return
 	}
 	taskSensitiveCheck := setting.ShouldCheckPromptSensitive() ||
@@ -953,12 +1051,59 @@ func RelayTask(c *gin.Context) {
 	}
 }
 
-// respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
-func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
-	if taskErr.StatusCode == http.StatusTooManyRequests {
-		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
+func respondTaskRelaySetupError(c *gin.Context, err error) {
+	if err != nil {
+		logger.LogError(c, "generate task relay info failed: "+common.LocalLogPreview(err.Error()))
 	}
-	c.JSON(taskErr.StatusCode, taskErr)
+	safe := governance.SanitizeRelayErrorForClient(c, nil)
+	c.JSON(http.StatusInternalServerError, &dto.TaskError{
+		Code:       string(types.ErrorCodeGenRelayInfoFailed),
+		Message:    safe.OpenAIError.Message,
+		StatusCode: http.StatusInternalServerError,
+		LocalError: true,
+	})
+}
+
+// respondTaskError returns local task errors as-is and forces every upstream
+// task failure through the client-safe governance boundary.
+func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
+	if taskErr == nil {
+		return
+	}
+	if taskErr.LocalError {
+		c.JSON(taskErr.StatusCode, taskErr)
+		return
+	}
+
+	statusCode := taskErr.StatusCode
+	if statusCode < 400 || statusCode > 599 {
+		statusCode = http.StatusBadGateway
+	}
+	originalMessage := ""
+	if taskErr.Error != nil {
+		originalMessage = strings.TrimSpace(taskErr.Error.Error())
+	}
+	if originalMessage == "" {
+		originalMessage = strings.TrimSpace(taskErr.Message)
+	}
+	if originalMessage == "" {
+		originalMessage = "upstream task request failed"
+	}
+	originalErr := types.WithOpenAIError(types.OpenAIError{
+		Message: originalMessage,
+		Type:    "upstream_error",
+		Code:    taskErr.Code,
+	}, statusCode)
+	safe := governance.SanitizeRelayErrorForClient(c, originalErr)
+	governance.RecordRelayErrorInsight(c, originalErr, safe, "task_upstream", "relay_response", 0, 0)
+
+	safeTaskErr := *taskErr
+	safeTaskErr.Code = fmt.Sprint(safe.OpenAIError.Code)
+	safeTaskErr.Message = safe.OpenAIError.Message
+	safeTaskErr.Data = nil
+	safeTaskErr.StatusCode = safe.StatusCode
+	safeTaskErr.Error = nil
+	c.JSON(safe.StatusCode, &safeTaskErr)
 }
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError, retryTimes int) bool {

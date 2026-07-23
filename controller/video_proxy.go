@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,8 +16,10 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/governance"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,6 +32,100 @@ func videoProxyError(c *gin.Context, status int, errType, message string) {
 			"type":    errType,
 		},
 	})
+}
+
+const (
+	videoProxyPrefixLimit     = 4 << 10
+	videoProxyMinInspectBytes = 64
+)
+
+func videoProxyUpstreamError(c *gin.Context, err error, code types.ErrorCode) {
+	upstreamErr := types.NewOpenAIError(err, code, http.StatusBadGateway)
+	safe := governance.SanitizeRelayErrorForClient(c, upstreamErr)
+	governance.RecordRelayErrorInsight(c, upstreamErr, safe, "video_proxy", "fetch_response", 0, 0)
+	logger.LogError(c.Request.Context(), "video proxy upstream error: "+common.LocalLogPreview(upstreamErr.MaskSensitiveError()))
+	videoProxyError(c, safe.StatusCode, safe.OpenAIError.Type, safe.OpenAIError.Message)
+}
+
+func readVideoProxyPrefix(body io.Reader) ([]byte, error) {
+	if body == nil {
+		return nil, io.ErrUnexpectedEOF
+	}
+	prefix := make([]byte, 0, videoProxyPrefixLimit)
+	for len(prefix) < videoProxyPrefixLimit {
+		buffer := make([]byte, videoProxyPrefixLimit-len(prefix))
+		n, err := body.Read(buffer)
+		if n > 0 {
+			prefix = append(prefix, buffer[:n]...)
+			trimmed := bytes.TrimSpace(prefix)
+			// Structured error bodies can be rejected from their first significant
+			// byte. Otherwise collect a small sample so a transport that happens to
+			// return one byte at a time cannot bypass plain-text detection.
+			if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[' || trimmed[0] == '<') {
+				return prefix, nil
+			}
+			if len(prefix) >= videoProxyMinInspectBytes {
+				return prefix, nil
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return prefix, nil
+			}
+			return prefix, err
+		}
+		if n == 0 {
+			return prefix, io.ErrNoProgress
+		}
+	}
+	return prefix, nil
+}
+
+func validateVideoProxyPayload(contentType string, prefix []byte) error {
+	trimmed := bytes.TrimSpace(prefix)
+	if len(trimmed) == 0 {
+		return fmt.Errorf("upstream video response was empty")
+	}
+
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
+	}
+	mediaType = strings.ToLower(mediaType)
+	if mediaType == "" {
+		mediaType = strings.ToLower(strings.TrimSpace(strings.Split(http.DetectContentType(prefix), ";")[0]))
+	}
+	allowedMediaType := strings.HasPrefix(mediaType, "video/") ||
+		mediaType == "application/octet-stream" || mediaType == "binary/octet-stream" ||
+		mediaType == "application/mp4" || mediaType == "application/mpeg4" ||
+		mediaType == "application/vnd.apple.mpegurl" || mediaType == "application/x-mpegurl" ||
+		mediaType == "application/x-binary"
+	if !allowedMediaType {
+		return fmt.Errorf("upstream video returned unexpected content type %q", mediaType)
+	}
+
+	// A provider can incorrectly label a JSON/HTML/plain-text error as video.
+	// Reject obvious text before any headers or bytes are committed downstream.
+	if bytes.HasPrefix(bytes.ToUpper(trimmed), []byte("#EXTM3U")) {
+		return nil
+	}
+	if trimmed[0] == '{' || trimmed[0] == '[' || trimmed[0] == '<' {
+		return fmt.Errorf("upstream video returned a textual error payload: %s", trimmed)
+	}
+	sample := trimmed
+	if len(sample) > 512 {
+		sample = sample[:512]
+	}
+	printable := 0
+	for _, value := range sample {
+		if value == '\n' || value == '\r' || value == '\t' || (value >= 0x20 && value <= 0x7e) {
+			printable++
+		}
+	}
+	if len(sample) >= 8 && printable*100/len(sample) >= 90 {
+		return fmt.Errorf("upstream video returned a plain-text payload: %s", sample)
+	}
+	return nil
 }
 
 func VideoProxy(c *gin.Context) {
@@ -123,7 +221,7 @@ func VideoProxy(c *gin.Context) {
 
 	if strings.HasPrefix(videoURL, "data:") {
 		if err := writeVideoDataURL(c, videoURL); err != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to decode video data URL for task %s: %s", taskID, err.Error()))
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to decode video data URL for task %s: %s", taskID, common.MaskSensitiveInfo(err.Error())))
 			videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to fetch video content")
 		}
 		return
@@ -155,13 +253,27 @@ func VideoProxy(c *gin.Context) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned status %d for %s", resp.StatusCode, videoURL))
-		videoProxyError(c, http.StatusBadGateway, "server_error",
-			fmt.Sprintf("Upstream service returned status %d", resp.StatusCode))
+		videoProxyUpstreamError(c,
+			fmt.Errorf("upstream video returned status %d for %s", resp.StatusCode, videoURL),
+			types.ErrorCodeBadResponseStatusCode,
+		)
+		return
+	}
+
+	prefix, err := readVideoProxyPrefix(resp.Body)
+	if err != nil {
+		videoProxyUpstreamError(c, fmt.Errorf("failed to read upstream video response: %w", err), types.ErrorCodeReadResponseBodyFailed)
+		return
+	}
+	if err := validateVideoProxyPayload(resp.Header.Get("Content-Type"), prefix); err != nil {
+		videoProxyUpstreamError(c, err, types.ErrorCodeBadResponseBody)
 		return
 	}
 
 	for key, values := range resp.Header {
+		if !service.ShouldCopyUpstreamHeader(c, key, values) {
+			continue
+		}
 		for _, value := range values {
 			c.Writer.Header().Add(key, value)
 		}
@@ -169,7 +281,7 @@ func VideoProxy(c *gin.Context) {
 
 	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
 	c.Writer.WriteHeader(resp.StatusCode)
-	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
+	if _, err = io.Copy(c.Writer, io.MultiReader(bytes.NewReader(prefix), resp.Body)); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
 	}
 }
@@ -198,6 +310,13 @@ func writeVideoDataURL(c *gin.Context, dataURL string) error {
 		if err != nil {
 			return err
 		}
+	}
+	inspect := videoBytes
+	if len(inspect) > videoProxyPrefixLimit {
+		inspect = inspect[:videoProxyPrefixLimit]
+	}
+	if err := validateVideoProxyPayload(mimeType, inspect); err != nil {
+		return err
 	}
 
 	c.Writer.Header().Set("Content-Type", mimeType)

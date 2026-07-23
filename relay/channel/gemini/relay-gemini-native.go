@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/governance"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
@@ -25,6 +26,12 @@ func GeminiTextGenerationHandler(c *gin.Context, info *relaycommon.RelayInfo, re
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
+	if upstreamErr := governance.ParseUpstreamErrorEnvelope(responseBody); upstreamErr != nil {
+		return nil, upstreamErr
+	}
+	if !geminiPayloadHasAnyField(responseBody, "candidates", "promptFeedback") {
+		return nil, unexpectedGeminiPayloadError("native chat", responseBody)
+	}
 
 	logger.LogDebug(c, "Gemini native response body: %s", responseBody)
 
@@ -33,6 +40,10 @@ func GeminiTextGenerationHandler(c *gin.Context, info *relaycommon.RelayInfo, re
 	err = common.Unmarshal(responseBody, &geminiResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	if len(geminiResponse.Candidates) == 0 && (geminiResponse.PromptFeedback == nil ||
+		(geminiResponse.PromptFeedback.BlockReason == nil && len(geminiResponse.PromptFeedback.SafetyRatings) == 0)) {
+		return nil, unexpectedGeminiPayloadError("native chat", responseBody)
 	}
 
 	if len(geminiResponse.Candidates) == 0 && geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
@@ -54,6 +65,16 @@ func NativeGeminiEmbeddingHandler(c *gin.Context, resp *http.Response, info *rel
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
+	if upstreamErr := governance.ParseUpstreamErrorEnvelope(responseBody); upstreamErr != nil {
+		return nil, upstreamErr
+	}
+	expectedField := "embedding"
+	if info.IsGeminiBatchEmbedding {
+		expectedField = "embeddings"
+	}
+	if !geminiPayloadHasAnyField(responseBody, expectedField) {
+		return nil, unexpectedGeminiPayloadError("native embedding", responseBody)
+	}
 
 	logger.LogDebug(c, "Gemini native embedding response body: %s", responseBody)
 
@@ -65,11 +86,17 @@ func NativeGeminiEmbeddingHandler(c *gin.Context, resp *http.Response, info *rel
 		if err != nil {
 			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
+		if len(geminiResponse.Embeddings) == 0 {
+			return nil, unexpectedGeminiPayloadError("native batch embedding", responseBody)
+		}
 	} else {
 		var geminiResponse dto.GeminiEmbeddingResponse
 		err = common.Unmarshal(responseBody, &geminiResponse)
 		if err != nil {
 			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		}
+		if len(geminiResponse.Embedding.Values) == 0 {
+			return nil, unexpectedGeminiPayloadError("native embedding", responseBody)
 		}
 	}
 

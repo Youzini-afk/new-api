@@ -1,7 +1,6 @@
 package zhipu
 
 import (
-	"bufio"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/governance"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
@@ -155,71 +155,132 @@ func streamMetaResponseZhipu2OpenAI(zhipuResponse *ZhipuStreamMetaResponse) (*dt
 	return &response, &zhipuResponse.Usage
 }
 
+func handleZhipuStreamError(c *gin.Context, upstreamErr *types.NewAPIError) *types.NewAPIError {
+	if !helper.HasStreamResponseStarted(c) {
+		return upstreamErr
+	}
+	safe := governance.SanitizeRelayErrorForClient(c, upstreamErr)
+	_ = helper.ObjectData(c, map[string]any{"error": safe.OpenAIError})
+	governance.MarkHandledStreamError(c, upstreamErr)
+	return nil
+}
+
+func zhipuStreamEventSignalsError(event string) bool {
+	event = strings.ToLower(strings.TrimSpace(event))
+	return event == "error" || event == "upstream_error" || event == "response.error" || event == "response.failed" ||
+		strings.HasSuffix(event, ".error") || strings.HasSuffix(event, ".failed")
+}
+
+func parseZhipuStreamError(event, data string) *types.NewAPIError {
+	if zhipuStreamEventSignalsError(event) {
+		return governance.ParseUpstreamStreamEvent(event, data)
+	}
+	// Legacy Zhipu streams use raw text tokens as their normal data payload, so
+	// non-JSON data cannot be classified as an error unless the SSE event says so.
+	return governance.ParseUpstreamErrorEnvelope([]byte(data))
+}
+
 func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
-	var usage *dto.Usage
+	defer service.CloseResponseBodyGracefully(resp)
+
+	usage := &dto.Usage{}
+	var responseText strings.Builder
+	finalizeUsage := func() *dto.Usage {
+		if usage.TotalTokens == 0 && responseText.Len() > 0 {
+			usage = service.ResponseText2Usage(c, responseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		}
+		info.ResponseText = responseText.String()
+		return usage
+	}
 	scanner := helper.NewStreamScanner(resp.Body)
-	scanner.Split(bufio.ScanLines)
-	dataChan := make(chan string)
-	metaChan := make(chan string)
-	stopChan := make(chan bool)
-	go func() {
-		for scanner.Scan() {
-			data := scanner.Text()
-			lines := strings.Split(data, "\n")
-			for i, line := range lines {
-				if len(line) < 5 {
-					continue
-				}
-				if line[:5] == "data:" {
-					dataChan <- line[5:]
-					if i != len(lines)-1 {
-						dataChan <- "\n"
-					}
-				} else if line[:5] == "meta:" {
-					metaChan <- line[5:]
-				}
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			common.SysLog("error reading stream: " + err.Error())
-		}
-		stopChan <- true
-	}()
 	helper.SetEventStreamHeaders(c)
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case data := <-dataChan:
-			response := streamResponseZhipu2OpenAI(data)
-			jsonResponse, err := json.Marshal(response)
-			if err != nil {
-				common.SysLog("error marshalling stream response: " + err.Error())
-				return true
+	currentEvent := ""
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			currentEvent = ""
+			continue
+		}
+		if len(line) < 5 {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(line, "event:"):
+			currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		case strings.HasPrefix(line, "error:"):
+			data := strings.TrimSpace(strings.TrimPrefix(line, "error:"))
+			upstreamErr := governance.ParseUpstreamStreamEvent("error", data)
+			clientErr := handleZhipuStreamError(c, upstreamErr)
+			if clientErr != nil {
+				return nil, clientErr
 			}
-			c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonResponse)})
-			return true
-		case data := <-metaChan:
+			return finalizeUsage(), nil
+		case strings.HasPrefix(line, "data:"):
+			data := line[5:]
+			event := currentEvent
+			currentEvent = ""
+			if strings.TrimSpace(data) == "[DONE]" {
+				helper.Done(c)
+				return finalizeUsage(), nil
+			}
+			if upstreamErr := parseZhipuStreamError(event, data); upstreamErr != nil {
+				clientErr := handleZhipuStreamError(c, upstreamErr)
+				if clientErr != nil {
+					return nil, clientErr
+				}
+				return finalizeUsage(), nil
+			}
+
+			response := streamResponseZhipu2OpenAI(data)
+			if err := helper.ObjectData(c, response); err != nil {
+				return usage, types.NewError(err, types.ErrorCodeBadResponse)
+			}
+			responseText.WriteString(data)
+			info.SendResponseCount++
+
+		case strings.HasPrefix(line, "meta:"):
+			data := line[5:]
+			event := currentEvent
+			currentEvent = ""
+			if upstreamErr := parseZhipuStreamError(event, data); upstreamErr != nil {
+				clientErr := handleZhipuStreamError(c, upstreamErr)
+				if clientErr != nil {
+					return nil, clientErr
+				}
+				return finalizeUsage(), nil
+			}
+
 			var zhipuResponse ZhipuStreamMetaResponse
-			err := json.Unmarshal([]byte(data), &zhipuResponse)
-			if err != nil {
-				common.SysLog("error unmarshalling stream response: " + err.Error())
-				return true
+			if err := json.Unmarshal([]byte(data), &zhipuResponse); err != nil {
+				upstreamErr := types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+				clientErr := handleZhipuStreamError(c, upstreamErr)
+				if clientErr != nil {
+					return nil, clientErr
+				}
+				return finalizeUsage(), nil
 			}
 			response, zhipuUsage := streamMetaResponseZhipu2OpenAI(&zhipuResponse)
-			jsonResponse, err := json.Marshal(response)
-			if err != nil {
-				common.SysLog("error marshalling stream response: " + err.Error())
-				return true
+			if err := helper.ObjectData(c, response); err != nil {
+				return usage, types.NewError(err, types.ErrorCodeBadResponse)
 			}
-			usage = zhipuUsage
-			c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonResponse)})
-			return true
-		case <-stopChan:
-			c.Render(-1, common.CustomEvent{Data: "data: [DONE]"})
-			return false
+			*usage = *zhipuUsage
+			info.SendResponseCount++
 		}
-	})
-	service.CloseResponseBodyGracefully(resp)
-	return usage, nil
+	}
+
+	if err := scanner.Err(); err != nil {
+		upstreamErr := types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		clientErr := handleZhipuStreamError(c, upstreamErr)
+		if clientErr != nil {
+			return nil, clientErr
+		}
+		return finalizeUsage(), nil
+	}
+	helper.Done(c)
+	return finalizeUsage(), nil
 }
 
 func zhipuHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {

@@ -50,6 +50,9 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
+	if upstreamErr := parseUpstreamErrorEnvelope(body); upstreamErr != nil {
+		return nil, upstreamErr
+	}
 
 	if err := common.Unmarshal(body, &responsesResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -102,13 +105,14 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	model := info.UpstreamModelName
 
 	var (
-		usage       = &dto.Usage{}
-		outputText  strings.Builder
-		usageText   strings.Builder
-		sentStart   bool
-		sentStop    bool
-		sawToolCall bool
-		streamErr   *types.NewAPIError
+		usage            = &dto.Usage{}
+		outputText       strings.Builder
+		usageText        strings.Builder
+		sentStart        bool
+		sentStop         bool
+		sawToolCall      bool
+		streamErr        *types.NewAPIError
+		streamErrHandled bool
 	)
 
 	toolCallIndexByID := make(map[string]int)
@@ -299,6 +303,22 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		if streamErr != nil {
 			sr.Stop(streamErr)
+			return
+		}
+		detectedErr := parseUpstreamStreamError(data, sr.Event())
+		if detectedErr == nil {
+			detectedErr = validateResponsesStreamPayload(data)
+		}
+		if detectedErr != nil {
+			streamErr = detectedErr
+			streamErrHandled = handleUpstreamStreamError(
+				c,
+				info,
+				sr,
+				detectedErr,
+				safeStreamErrorChat,
+				sentStart || helper.HasStreamResponseStarted(c),
+			)
 			return
 		}
 
@@ -495,24 +515,19 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				sentStop = true
 			}
 
-		case "response.error", "response.failed":
-			if streamResp.Response != nil {
-				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
-					sr.Stop(streamErr)
-					return
-				}
-			}
-			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
-			sr.Stop(streamErr)
-			return
-
 		default:
 		}
 	})
 
 	if streamErr != nil {
-		return nil, streamErr
+		if !streamErrHandled {
+			return nil, streamErr
+		}
+		if usage.TotalTokens == 0 {
+			usage = service.ResponseText2Usage(c, usageText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		}
+		info.ResponseText = outputText.String()
+		return usage, nil
 	}
 
 	if usage.TotalTokens == 0 {

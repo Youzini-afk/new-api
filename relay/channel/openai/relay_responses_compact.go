@@ -1,8 +1,10 @@
 package openai
 
 import (
+	"bytes"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -19,6 +21,9 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
+	if upstreamErr := parseUpstreamErrorEnvelope(responseBody); upstreamErr != nil {
+		return nil, upstreamErr
+	}
 
 	var compactResp dto.OpenAIResponsesCompactionResponse
 	if err := common.Unmarshal(responseBody, &compactResp); err != nil {
@@ -26,6 +31,9 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 	}
 	if oaiError := compactResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	}
+	if strings.TrimSpace(compactResp.ID) == "" && strings.TrimSpace(compactResp.Object) == "" && len(bytes.TrimSpace(compactResp.Output)) == 0 {
+		return nil, unexpectedUpstreamPayloadError("responses compaction", responseBody)
 	}
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)

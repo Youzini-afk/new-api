@@ -176,7 +176,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	}
 
 	if vResp.State == "failed" {
-		taskErr = service.TaskErrorWrapperLocal(fmt.Errorf("task failed"), "task_failed", http.StatusBadRequest)
+		taskErr = service.TaskErrorWrapper(fmt.Errorf("task failed"), "task_failed", http.StatusBadRequest)
 		return
 	}
 

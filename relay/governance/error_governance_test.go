@@ -104,6 +104,21 @@ func TestSanitizeRelayErrorForClientDoesNotLeakUpstreamMessage(t *testing.T) {
 	assert.Equal(t, http.StatusBadGateway, safe.StatusCode)
 }
 
+func TestSanitizeRelayErrorForClientPreservesUpstreamErrorWhenGovernanceDisabled(t *testing.T) {
+	t.Setenv("RELAY_ERROR_GOVERNANCE_ENABLED", "false")
+	upstreamErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "provider capacity exhausted on node alpha",
+		Type:    "upstream_error",
+		Code:    "provider_node_failed",
+	}, http.StatusBadGateway)
+
+	safe := SanitizeRelayErrorForClient(nil, upstreamErr)
+	assert.Equal(t, http.StatusBadGateway, safe.StatusCode)
+	assert.Equal(t, "provider capacity exhausted on node alpha", safe.OpenAIError.Message)
+	assert.Equal(t, "upstream_error", safe.OpenAIError.Type)
+	assert.Equal(t, "provider_node_failed", safe.OpenAIError.Code)
+}
+
 func TestSanitizeRelayErrorForClientPreservesLocalActionableMessage(t *testing.T) {
 	// A local quota error should get the actionable rule message, not a
 	// generic "internal error".

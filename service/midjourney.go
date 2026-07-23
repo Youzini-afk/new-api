@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,6 +18,11 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	ContextKeyMidjourneyUpstreamStatus = "midjourney_upstream_status"
+	ContextKeyMidjourneyUpstreamError  = "midjourney_upstream_error"
 )
 
 func CovertMjpActionToModelName(mjAction string) string {
@@ -217,9 +223,6 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "do_request_failed", http.StatusInternalServerError), nullBytes, err
 	}
 	statusCode := resp.StatusCode
-	//if statusCode != 200  {
-	//	return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "bad_response_status_code", statusCode), nullBytes, nil
-	//}
 	err = req.Body.Close()
 	if err != nil {
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "close_request_body_failed", statusCode), nullBytes, err
@@ -237,21 +240,51 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	CloseResponseBodyGracefully(resp)
 	logger.LogDebug(c, "midjourney response body: %s", responseBody)
 	if len(responseBody) == 0 {
-		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "empty_response_body", statusCode), responseBody, nil
+		upstreamErr := fmt.Errorf("midjourney upstream returned an empty response (http=%d)", statusCode)
+		c.Set(ContextKeyMidjourneyUpstreamStatus, statusCode)
+		c.Set(ContextKeyMidjourneyUpstreamError, upstreamErr)
+		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "empty_response_body", statusCode), responseBody, upstreamErr
 	} else {
 		err = json.Unmarshal(responseBody, &midjResponse)
 		if err != nil {
 			err2 := json.Unmarshal(responseBody, &midjourneyUploadsResponse)
 			if err2 != nil {
-				return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "unmarshal_response_body_failed", statusCode), responseBody, err
+				preview := responseBody
+				if len(preview) > 64<<10 {
+					preview = preview[:64<<10]
+				}
+				upstreamErr := fmt.Errorf("midjourney upstream returned invalid JSON (http=%d): %s", statusCode, preview)
+				c.Set(ContextKeyMidjourneyUpstreamStatus, statusCode)
+				c.Set(ContextKeyMidjourneyUpstreamError, upstreamErr)
+				return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "unmarshal_response_body_failed", statusCode), responseBody, upstreamErr
+			}
+			midjResponse.Code = midjourneyUploadsResponse.Code
+			midjResponse.Description = midjourneyUploadsResponse.Description
+			if len(midjourneyUploadsResponse.Result) > 0 {
+				midjResponse.Result = midjourneyUploadsResponse.Result[0]
 			}
 		}
+	}
+	result := &dto.MidjourneyResponseWithStatusCode{
+		StatusCode: statusCode,
+		Response:   midjResponse,
+	}
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices || !isSuccessfulMidjourneyCode(midjResponse.Code) {
+		preview := responseBody
+		if len(preview) > 64<<10 {
+			preview = preview[:64<<10]
+		}
+		upstreamErr := fmt.Errorf("midjourney upstream failed (http=%d, code=%d): %s", statusCode, midjResponse.Code, preview)
+		c.Set(ContextKeyMidjourneyUpstreamStatus, statusCode)
+		c.Set(ContextKeyMidjourneyUpstreamError, upstreamErr)
+		return result, responseBody, upstreamErr
 	}
 	//for k, v := range resp.Header {
 	//	c.Writer.Header().Set(k, v[0])
 	//}
-	return &dto.MidjourneyResponseWithStatusCode{
-		StatusCode: statusCode,
-		Response:   midjResponse,
-	}, responseBody, nil
+	return result, responseBody, nil
+}
+
+func isSuccessfulMidjourneyCode(code int) bool {
+	return code == 1 || code == 21 || code == 22
 }

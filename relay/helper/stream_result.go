@@ -10,6 +10,7 @@ import (
 type StreamResult struct {
 	status  *relaycommon.StreamStatus
 	stopped bool
+	event   string
 }
 
 func newStreamResult(status *relaycommon.StreamStatus) *StreamResult {
@@ -46,7 +47,14 @@ func (r *StreamResult) IsStopped() bool {
 	return r.stopped
 }
 
+// Event returns the SSE event name associated with the current data payload.
+// It is empty for the common OpenAI-compatible `data:`-only streams.
+func (r *StreamResult) Event() string {
+	return r.event
+}
+
 // reset clears the per-chunk stopped flag so the object can be reused.
 func (r *StreamResult) reset() {
 	r.stopped = false
+	r.event = ""
 }

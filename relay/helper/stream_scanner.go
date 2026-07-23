@@ -3,6 +3,7 @@ package helper
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -180,7 +181,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		})
 	}
 
-	dataChan := make(chan string, 10)
+	type sseEvent struct {
+		name string
+		data string
+	}
+	dataChan := make(chan sseEvent, 10)
 
 	wg.Add(1)
 	gopool.Go(func() {
@@ -193,10 +198,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			common.SafeSendBool(stopChan, true)
 		}()
 		sr := newStreamResult(info.StreamStatus)
-		for data := range dataChan {
+		for event := range dataChan {
 			sr.reset()
+			sr.event = event.name
 			writeMutex.Lock()
-			dataHandler(data, sr)
+			dataHandler(event.data, sr)
 			writeMutex.Unlock()
 			if sr.IsStopped() {
 				return
@@ -218,6 +224,43 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			logger.LogDebug(c, "scanner goroutine exited")
 		}()
 
+		var currentEvent string
+		var pendingData []string
+
+		dispatch := func(eventName, data string) bool {
+			data = strings.TrimSpace(data)
+			if data == "" {
+				return true
+			}
+			if strings.HasPrefix(data, "[DONE]") {
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+				logger.LogDebug(c, "received [DONE], stopping scanner")
+				return false
+			}
+			info.SetFirstResponseTime()
+			info.ReceivedResponseCount++
+			select {
+			case dataChan <- sseEvent{name: strings.TrimSpace(eventName), data: data}:
+				return true
+			case <-ctx.Done():
+				return false
+			case <-stopChan:
+				return false
+			}
+		}
+
+		flushPending := func() bool {
+			if len(pendingData) == 0 {
+				currentEvent = ""
+				return true
+			}
+			data := strings.Join(pendingData, "\n")
+			pendingData = nil
+			eventName := currentEvent
+			currentEvent = ""
+			return dispatch(eventName, data)
+		}
+
 		for scanner.Scan() {
 			// 检查是否需要停止
 			select {
@@ -232,36 +275,89 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}
 
 			ticker.Reset(streamingTimeout)
-			data := scanner.Text()
-			logger.LogDebug(c, "stream scanner data: %s", data)
+			line := scanner.Text()
+			logger.LogDebug(c, "stream scanner data: %s", line)
 
-			if len(data) < 6 {
+			if line == "" {
+				if !flushPending() {
+					return
+				}
 				continue
 			}
-			if data[:5] != "data:" && data[:6] != "[DONE]" {
+			if line == "[DONE]" {
+				if !flushPending() {
+					return
+				}
+				_ = dispatch("", line)
+				return
+			}
+			if strings.HasPrefix(line, ":") {
+				// Several legacy providers omit the SSE blank separator and use a
+				// comment as a frame boundary. Preserve that compatibility while
+				// still assembling standards-compliant multi-line data events.
+				if len(pendingData) > 0 && !flushPending() {
+					return
+				}
 				continue
 			}
-			data = data[5:]
-			data = strings.TrimSpace(data)
+			if strings.HasPrefix(line, "event:") {
+				if len(pendingData) > 0 && !flushPending() {
+					return
+				}
+				currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+				continue
+			}
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+
+			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if data == "" {
 				continue
 			}
-			if !strings.HasPrefix(data, "[DONE]") {
-				info.SetFirstResponseTime()
-				info.ReceivedResponseCount++
-
-				select {
-				case dataChan <- data:
-				case <-ctx.Done():
-					return
-				case <-stopChan:
+			if strings.HasPrefix(data, "[DONE]") {
+				if !flushPending() {
 					return
 				}
-			} else {
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
-				logger.LogDebug(c, "received [DONE], stopping scanner")
+				_ = dispatch("", data)
 				return
 			}
+			if currentEvent != "" {
+				pendingData = append(pendingData, data)
+				continue
+			}
+
+			// Standards-compliant SSE joins every data line until the blank event
+			// delimiter. A number of legacy model providers omit that delimiter and
+			// emit one complete JSON/text payload per line, so blindly buffering all
+			// no-event data would collapse their entire stream into one frame. Keep
+			// that compatibility, but recognize an incomplete structured payload and
+			// buffer it until it becomes valid JSON (or a real boundary is reached).
+			// This covers multi-line JSON success/error events without misclassifying
+			// each partial line as a malformed upstream response.
+			if len(pendingData) > 0 {
+				pendingData = append(pendingData, data)
+				joined := strings.Join(pendingData, "\n")
+				if json.Valid([]byte(joined)) {
+					pendingData = nil
+					if !dispatch("", joined) {
+						return
+					}
+				}
+				continue
+			}
+			trimmedData := strings.TrimSpace(data)
+			if trimmedData != "" && (trimmedData[0] == '{' || trimmedData[0] == '[' || trimmedData[0] == '"') && !json.Valid([]byte(trimmedData)) {
+				pendingData = append(pendingData, data)
+				continue
+			}
+			if !dispatch("", data) {
+				return
+			}
+		}
+
+		if !flushPending() {
+			return
 		}
 
 		if err := scanner.Err(); err != nil {

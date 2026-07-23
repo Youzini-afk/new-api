@@ -18,10 +18,12 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relay/governance"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -66,9 +68,21 @@ func RelayMidjourneyImage(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		responseBody, _ := io.ReadAll(resp.Body)
-		c.JSON(resp.StatusCode, gin.H{
-			"error": string(responseBody),
+		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		if readErr != nil {
+			responseBody = []byte("failed to read upstream image error body: " + readErr.Error())
+		}
+		upstreamErr := types.NewOpenAIError(
+			fmt.Errorf("midjourney image upstream returned status %d: %s", resp.StatusCode, responseBody),
+			types.ErrorCodeBadResponseStatusCode,
+			resp.StatusCode,
+		)
+		safe := governance.SanitizeRelayErrorForClient(c, upstreamErr)
+		governance.RecordRelayErrorInsight(c, upstreamErr, safe, "midjourney_image", "fetch_response", 0, 0)
+		logger.LogError(c, "midjourney image upstream error: "+common.LocalLogPreview(upstreamErr.Error()))
+		c.JSON(safe.StatusCode, gin.H{
+			"error": safe.OpenAIError.Message,
+			"code":  safe.OpenAIError.Code,
 		})
 		return
 	}

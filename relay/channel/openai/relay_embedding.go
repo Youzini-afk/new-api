@@ -41,6 +41,9 @@ func OpenaiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		}
 		responseBody = enterpriseResponse.Data
 	}
+	if upstreamErr := parseUpstreamErrorEnvelope(responseBody); upstreamErr != nil {
+		return nil, upstreamErr
+	}
 
 	var simpleResponse dto.OpenAITextResponse
 	if err := common.Unmarshal(responseBody, &simpleResponse); err != nil {

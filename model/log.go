@@ -256,12 +256,20 @@ func formatUserLogs(logs []*Log, startIdx int, showIp bool) {
 	for i := range logs {
 		logs[i].ChannelName = ""
 		logs[i].UserAgent = ""
+		logs[i].UpstreamRequestId = ""
 		if !showIp {
 			logs[i].Ip = ""
 		}
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
+			errorSafe := otherMap["error_safe"] == true
+			if logs[i].Type == LogTypeError && !errorSafe {
+				logs[i].Content = "请求失败"
+				if logs[i].RequestId != "" {
+					logs[i].Content += "（请求 ID: " + logs[i].RequestId + "）"
+				}
+			}
 			// Remove admin-only debug fields.
 			delete(otherMap, "admin_info")
 			// Remove operation-audit details (operator/route info), admin-only.
@@ -279,6 +287,12 @@ func formatUserLogs(logs []*Log, startIdx int, showIp bool) {
 			// fingerprints in their logs. These are admin-only diagnostic fields
 			// written by the error governance system.
 			sanitizeUserLogErrorMetadata(otherMap)
+		}
+		if logs[i].Type == LogTypeError && otherMap == nil {
+			logs[i].Content = "请求失败"
+			if logs[i].RequestId != "" {
+				logs[i].Content += "（请求 ID: " + logs[i].RequestId + "）"
+			}
 		}
 		logs[i].Other = common.MapToJsonStr(otherMap)
 	}
