@@ -47,6 +47,8 @@ func TestMain(m *testing.M) {
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&UserOAuthBinding{},
+		&ExternalAppAuthCode{},
+		&ExternalQuotaOperation{},
 		&PerfMetric{},
 		&SystemInstance{},
 		&SystemTask{},
@@ -89,6 +91,8 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM user_subscriptions")
 		DB.Exec("DELETE FROM user_oauth_bindings")
+		DB.Exec("DELETE FROM external_app_auth_codes")
+		DB.Exec("DELETE FROM external_quota_operations")
 		DB.Exec("DELETE FROM perf_metrics")
 		DB.Exec("DELETE FROM system_instances")
 		DB.Exec("DELETE FROM system_task_locks")

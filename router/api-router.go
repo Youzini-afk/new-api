@@ -52,6 +52,17 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/oauth/telegram/bind", middleware.CriticalRateLimit(), controller.TelegramBind)
 		// Standard OAuth providers (GitHub, Discord, OIDC, LinuxDO) - unified route
 		apiRouter.GET("/oauth/:provider", middleware.CriticalRateLimit(), controller.HandleOAuth)
+		// Trusted external game integration. Browser authorization uses the
+		// existing session cookie; all server-to-server calls use app HMAC.
+		apiRouter.GET("/external-app/authorize", middleware.BrowserSessionAuth(), controller.ExternalAppAuthorize)
+		externalAppRoute := apiRouter.Group("/external-app")
+		externalAppRoute.Use(middleware.ExternalAppHMAC())
+		{
+			externalAppRoute.POST("/token", controller.ExternalAppExchangeToken)
+			externalAppRoute.POST("/quota/debit", controller.ExternalAppDebitQuota)
+			externalAppRoute.POST("/quota/credit", controller.ExternalAppCreditQuota)
+			externalAppRoute.POST("/quota/status", controller.ExternalAppQuotaStatus)
+		}
 		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), controller.GetRatioConfig)
 
 		apiRouter.POST("/stripe/webhook", anonymousRequestBodyLimit, controller.StripeWebhook)
