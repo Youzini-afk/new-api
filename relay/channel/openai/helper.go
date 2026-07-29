@@ -37,6 +37,7 @@ func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
 		return err
 	}
+	streamResponse.Model = info.ResponseModelName(streamResponse.Model)
 
 	if streamResponse.Usage != nil {
 		info.ClaudeConvertInfo.Usage = streamResponse.Usage
@@ -151,7 +152,7 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
 		if info.ShouldIncludeUsage && !containStreamUsage {
-			response := helper.GenerateFinalUsageResponse(responseId, createAt, model, *usage)
+			response := helper.GenerateFinalUsageResponse(responseId, createAt, info.ResponseModelName(model), *usage)
 			response.SetSystemFingerprint(systemFingerprint)
 			helper.ObjectData(c, response)
 		}
@@ -163,6 +164,7 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 			common.SysLog("error unmarshalling stream response: " + err.Error())
 			return
 		}
+		streamResponse.Model = info.ResponseModelName(streamResponse.Model)
 
 		info.ClaudeConvertInfo.Usage = usage
 

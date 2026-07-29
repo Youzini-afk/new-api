@@ -96,6 +96,10 @@ func OpenaiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 	}
+	responseBody, err = info.RewriteResponseModel(responseBody)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 	return &embeddingResponse.Usage, nil

@@ -101,6 +101,40 @@ func TestOpenaiHandlerRejectsMessageOnlyUnexpectedPayload(t *testing.T) {
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestOpenaiHandlerRestoresMappedResponseModel(t *testing.T) {
+	body := `{"id":"chatcmpl-mapped","object":"chat.completion","created":1,"model":"z-ai/glm-5.2","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"provider_extra":{"model":"provider-owned-value"}}`
+	c, recorder, resp, info := newOpenAIStreamTestContext(t, "/v1/chat/completions", body, relayconstant.RelayModeChatCompletions)
+	info.IsStream = false
+	info.OriginModelName = "NV"
+	info.UpstreamModelName = "z-ai/glm-5.2"
+	info.IsModelMapped = true
+	resp.Header.Set("Content-Type", "application/json")
+
+	usage, err := OpenaiHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+
+	var response map[string]any
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, "NV", response["model"])
+	providerExtra, ok := response["provider_extra"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "provider-owned-value", providerExtra["model"])
+}
+
+func TestSendStreamDataRestoresMappedResponseModel(t *testing.T) {
+	c, recorder, _, info := newOpenAIStreamTestContext(t, "/v1/chat/completions", "", relayconstant.RelayModeChatCompletions)
+	info.OriginModelName = "NV"
+	info.UpstreamModelName = "z-ai/glm-5.2"
+	info.IsModelMapped = true
+	data := `{"id":"chatcmpl-mapped","object":"chat.completion.chunk","model":"z-ai/glm-5.2","choices":[{"index":0,"delta":{"content":"ok"}}],"metadata":{"model":"provider-owned-value"}}`
+
+	require.NoError(t, sendStreamData(c, info, data, false, false))
+	clientBody := recorder.Body.String()
+	require.Contains(t, clientBody, `"model":"NV"`)
+	require.Contains(t, clientBody, `"metadata":{"model":"provider-owned-value"}`)
+}
+
 func TestOaiStreamHandlerSanitizesMidStreamError(t *testing.T) {
 	configureStreamTest(t)
 	body := strings.Join([]string{

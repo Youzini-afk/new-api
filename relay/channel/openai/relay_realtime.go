@@ -241,7 +241,12 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 			if stopped.Load() {
 				return
 			}
-			if err = helper.WssString(c, clientConn, string(message)); err != nil {
+			rewrittenMessage, rewriteErr := info.RewriteResponseModel(message)
+			if rewriteErr != nil {
+				reportError(fmt.Errorf("error rewriting realtime response model: %w", rewriteErr))
+				return
+			}
+			if err = helper.WssString(c, clientConn, string(rewrittenMessage)); err != nil {
 				reportError(fmt.Errorf("error writing to realtime client: %w", err))
 				return
 			}

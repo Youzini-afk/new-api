@@ -23,6 +23,11 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	if data == "" {
 		return nil
 	}
+	rewrittenData, err := info.RewriteResponseModel([]byte(data))
+	if err != nil {
+		return err
+	}
+	data = string(rewrittenData)
 
 	if !forceFormat && !thinkToContent {
 		return helper.StringData(c, data)
@@ -303,6 +308,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	}
 
 	applyUsagePostProcessing(info, &simpleResponse.Usage, responseBody)
+	simpleResponse.Model = info.ResponseModelName(simpleResponse.Model)
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
@@ -337,6 +343,10 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
 		responseBody = geminiRespStr
+	}
+	responseBody, err = info.RewriteResponseModel(responseBody)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)

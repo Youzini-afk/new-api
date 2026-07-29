@@ -50,6 +50,10 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 
 	// 写入新的 response body
+	responseBody, err = info.RewriteResponseModel(responseBody)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	// compute usage
@@ -109,7 +113,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		rewrittenData, rewriteErr := info.RewriteResponseModel([]byte(data))
+		if rewriteErr != nil {
+			logger.LogError(c, "failed to rewrite response model: "+rewriteErr.Error())
+			sr.Error(rewriteErr)
+			return
+		}
+		sendResponsesStreamData(c, streamResponse, string(rewrittenData))
 		clientDataSent = helper.HasStreamResponseStarted(c)
 		switch streamResponse.Type {
 		case "response.completed":

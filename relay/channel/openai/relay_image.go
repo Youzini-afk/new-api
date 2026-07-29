@@ -46,6 +46,10 @@ func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	}
 
 	// 写入新的 response body
+	responseBody, err = info.RewriteResponseModel(responseBody)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	normalizeOpenAIUsage(&usageResp.Usage)
@@ -127,7 +131,12 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 				usage = &usageResp.Usage
 			}
 		}
-		writeOpenaiImageStreamChunk(c, raw)
+		rewrittenData, rewriteErr := info.RewriteResponseModel(raw)
+		if rewriteErr != nil {
+			sr.Error(rewriteErr)
+			return
+		}
+		writeOpenaiImageStreamChunk(c, rewrittenData)
 		clientDataSent = helper.HasStreamResponseStarted(c)
 	})
 

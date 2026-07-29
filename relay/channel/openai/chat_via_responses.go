@@ -73,6 +73,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		chatResp.Usage = *usage
 	}
+	chatResp.Model = info.ResponseModelName(chatResp.Model)
 
 	var responseBody []byte
 	switch info.RelayFormat {
@@ -102,7 +103,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 	responseId := helper.GetResponseID(c)
 	createAt := time.Now().Unix()
-	model := info.UpstreamModelName
+	model := info.ResponseModelName(info.UpstreamModelName)
 
 	var (
 		usage            = &dto.Usage{}
@@ -333,7 +334,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		case "response.created":
 			if streamResp.Response != nil {
 				if streamResp.Response.Model != "" {
-					model = streamResp.Response.Model
+					model = info.ResponseModelName(streamResp.Response.Model)
 				}
 				if streamResp.Response.CreatedAt != 0 {
 					createAt = int64(streamResp.Response.CreatedAt)
@@ -465,7 +466,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		case "response.completed":
 			if streamResp.Response != nil {
 				if streamResp.Response.Model != "" {
-					model = streamResp.Response.Model
+					model = info.ResponseModelName(streamResp.Response.Model)
 				}
 				if streamResp.Response.CreatedAt != 0 {
 					createAt = int64(streamResp.Response.CreatedAt)

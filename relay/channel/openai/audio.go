@@ -57,7 +57,12 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 					usage.TotalTokens = simpleResponse.TotalTokens
 				}
 			}
-			if err := helper.StringData(c, data); err != nil {
+			rewrittenData, rewriteErr := info.RewriteResponseModel([]byte(data))
+			if rewriteErr != nil {
+				sr.Error(rewriteErr)
+				return
+			}
+			if err := helper.StringData(c, string(rewrittenData)); err != nil {
 				sr.Error(err)
 				return
 			}
@@ -251,6 +256,10 @@ func OpenaiSTTHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 		return payloadErr, nil
 	}
 	// 写入新的 response body
+	responseBody, err = info.RewriteResponseModel(responseBody)
+	if err != nil {
+		return types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError), nil
+	}
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	var responseData struct {
