@@ -23,6 +23,7 @@ import type {
   DiscordGatePatrolEligibilityResponse,
   DiscordGatePatrolTask,
   EnabledModelsResponse,
+  ExternalGameSettingsResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
   SystemOptionsResponse,
@@ -30,6 +31,7 @@ import type {
   SystemTaskResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
+  UpdateExternalGameSettingsRequest,
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
 } from './types'
@@ -41,6 +43,23 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function getExternalGameSettings() {
+  const res = await api.get<ExternalGameSettingsResponse>(
+    '/api/option/external-game'
+  )
+  return res.data
+}
+
+export async function updateExternalGameSettings(
+  request: UpdateExternalGameSettingsRequest
+) {
+  const res = await api.put<ExternalGameSettingsResponse>(
+    '/api/option/external-game',
+    request
+  )
   return res.data
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/external_app_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -279,6 +280,12 @@ func UpdateOption(key string, value string) error {
 		common.SysLog("rejecting deprecated ban_sync option key on update: " + key)
 		return nil
 	}
+	if strings.HasPrefix(key, external_app_setting.OptionPrefix) {
+		if !external_app_setting.IsOptionKey(key) {
+			return fmt.Errorf("unsupported external game option %q", key)
+		}
+		return UpdateOptionsBulk(map[string]string{key: value})
+	}
 	// Relay error governance is a multi-key configuration. Route every aggregate
 	// or dotted write through the bulk snapshot path so a caller cannot update one
 	// runtime field while leaving the persisted aggregate stale.
@@ -334,6 +341,21 @@ func UpdateOption(key string, value string) error {
 func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
+	}
+	hasExternalGame := false
+	for key := range values {
+		if strings.HasPrefix(key, external_app_setting.OptionPrefix) {
+			hasExternalGame = true
+			break
+		}
+	}
+	if hasExternalGame {
+		for key := range values {
+			if !external_app_setting.IsOptionKey(key) {
+				return fmt.Errorf("external game options cannot be mixed with unrelated option %q", key)
+			}
+		}
+		return updateExternalGameOptionsAtomic(values)
 	}
 	hasRelayErrorGovernance := false
 	for key := range values {

@@ -39,6 +39,42 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type ExternalGameEnvironmentOverrides = {
+  enabled: boolean
+  app_id: boolean
+  app_secret: boolean
+  redirect_uri: boolean
+  code_ttl_seconds: boolean
+  signature_tolerance_seconds: boolean
+}
+
+export type ExternalGameSettings = {
+  enabled: boolean
+  app_id: string
+  redirect_uri: string
+  code_ttl_seconds: number
+  signature_tolerance_seconds: number
+  app_secret_configured: boolean
+  app_secret_source: 'environment' | 'database' | 'unset'
+  environment_managed: boolean
+  environment_overrides: ExternalGameEnvironmentOverrides
+}
+
+export type ExternalGameSettingsResponse = {
+  success: boolean
+  message: string
+  data?: ExternalGameSettings
+}
+
+export type UpdateExternalGameSettingsRequest = {
+  enabled?: boolean
+  app_id?: string
+  app_secret?: string
+  redirect_uri?: string
+  code_ttl_seconds?: number
+  signature_tolerance_seconds?: number
+}
+
 export type EnabledModelsResponse = {
   success: boolean
   message: string
