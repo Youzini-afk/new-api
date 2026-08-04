@@ -209,6 +209,9 @@ func validateOptionValue(key string, value string) error {
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}
+	if err := operation_setting.ValidateLogCleanupOption(key, value); err != nil {
+		return err
+	}
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
 	}
@@ -216,6 +219,11 @@ func validateOptionValue(key string, value string) error {
 }
 
 func UpdateOption(key string, value string) error {
+	normalizedValue, err := system_setting.NormalizeRelayBatchSplitOption(key, value)
+	if err != nil {
+		return err
+	}
+	value = normalizedValue
 	if err := validateOptionValue(key, value); err != nil {
 		return err
 	}
@@ -243,13 +251,19 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
+	normalizedValues := make(map[string]string, len(values))
 	for key, value := range values {
-		if err := validateOptionValue(key, value); err != nil {
+		normalizedValue, err := system_setting.NormalizeRelayBatchSplitOption(key, value)
+		if err != nil {
 			return err
 		}
+		if err := validateOptionValue(key, normalizedValue); err != nil {
+			return err
+		}
+		normalizedValues[key] = normalizedValue
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		for k, v := range values {
+		for k, v := range normalizedValues {
 			option := Option{Key: k}
 			if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
 				return err
@@ -264,7 +278,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if err != nil {
 		return err
 	}
-	for k, v := range values {
+	for k, v := range normalizedValues {
 		if err := updateOptionMap(k, v); err != nil {
 			return err
 		}
@@ -636,6 +650,10 @@ func handleConfigUpdate(key, value string) bool {
 	} else if configName == "billing_setting" {
 		InvalidatePricingCache()
 		ratio_setting.InvalidateExposedDataCache()
+	} else if configName == "relay_batch_split" {
+		system_setting.RebuildRelayBatchSplitRuntime()
+	} else if configName == "log_cleanup_setting" {
+		operation_setting.RebuildLogCleanupSettingRuntime()
 	}
 
 	return true // 已处理

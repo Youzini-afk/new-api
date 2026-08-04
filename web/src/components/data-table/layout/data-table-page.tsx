@@ -230,6 +230,12 @@ export type DataTablePageProps<TData> = {
    */
   tableClassName?: string
 
+  /** Ref for the desktop table's scrollable body. */
+  tableBodyRef?: React.Ref<HTMLDivElement>
+
+  /** Class name for the desktop table body. */
+  tableBodyClassName?: string
+
   /**
    * Desktop `<TableHeader>` className override.
    * Use for header color/spacing overrides. Fixed-height pages keep the header
@@ -429,6 +435,8 @@ function renderMobile<TData>(
           skeletonKeyPrefix={props.skeletonKeyPrefix}
           renderRow={props.renderRow}
           applyHeaderSize={props.applyHeaderSize}
+          bodyContainerRef={props.tableBodyRef}
+          tableBodyClassName={props.tableBodyClassName}
           tableHeaderClassName={cn(
             '[background-color:var(--table-header)]',
             props.tableHeaderClassName
@@ -527,6 +535,8 @@ function renderDesktop<TData>(
       skeletonKeyPrefix={props.skeletonKeyPrefix}
       renderRow={props.renderRow}
       applyHeaderSize={props.applyHeaderSize}
+      bodyContainerRef={props.tableBodyRef}
+      tableBodyClassName={props.tableBodyClassName}
       splitHeader={fixedHeight}
       tableContainerClassName={fixedHeight ? 'h-full min-h-0' : undefined}
       tableHeaderClassName={cn(

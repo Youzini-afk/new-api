@@ -87,6 +87,23 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	if a.request == nil {
 		return nil, types.NewError(errors.New("request is nil"), types.ErrorCodeInvalidRequest)
 	}
+	// Xunfei opens its real upstream WebSocket in the response handler; the
+	// dummy response returned by DoRequest never reaches the shared HTTP path.
+	// Hold one channel admission for the lifetime of that WebSocket exchange so
+	// concurrency, RPM, and queue settings have the same meaning as other
+	// adaptors.
+	trafficLease, trafficErr := channel.AcquireChannelTraffic(c, info)
+	if trafficErr != nil {
+		var apiErr *types.NewAPIError
+		if errors.As(trafficErr, &apiErr) {
+			return nil, apiErr
+		}
+		return nil, types.NewError(trafficErr, types.ErrorCodeDoRequestFailed)
+	}
+	if trafficLease != nil {
+		defer trafficLease.Release()
+	}
+
 	if info.IsStream {
 		usage, err = xunfeiStreamHandler(c, *a.request, splits[0], splits[1], splits[2])
 	} else {

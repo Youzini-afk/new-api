@@ -24,6 +24,7 @@ import { ClaudeSettingsCard } from './claude-settings-card'
 import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
 import { GrokSettingsCard } from './grok-settings-card'
+import { RelayBatchSplitSection } from './relay-batch-split-section'
 import { RoutingReliabilitySection } from './routing-reliability-section'
 
 function formatJsonForEditor(value: string, fallback: string) {
@@ -164,6 +165,15 @@ const MODELS_SECTIONS = [
           'channel_affinity_setting.rules':
             settings['channel_affinity_setting.rules'],
         }}
+      />
+    ),
+  },
+  {
+    id: 'relay-batch-split',
+    titleKey: 'Embedding & Rerank Batching',
+    build: (settings: ModelSettings) => (
+      <RelayBatchSplitSection
+        defaultValue={settings['relay_batch_split.config']}
       />
     ),
   },

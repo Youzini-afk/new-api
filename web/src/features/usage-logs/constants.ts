@@ -44,6 +44,10 @@ export const DEFAULT_LOGS_DATA = {
   total: 0,
 }
 
+/** Polling intervals used by the opt-in live log view. */
+export const USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS = 3_000
+export const USAGE_LOG_STATS_AUTO_REFRESH_INTERVAL_MS = 10_000
+
 // ============================================================================
 // Log Type Enum
 // ============================================================================

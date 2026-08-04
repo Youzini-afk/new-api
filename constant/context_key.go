@@ -7,8 +7,12 @@ const (
 	ContextKeyPromptTokens    ContextKey = "prompt_tokens"
 	ContextKeyEstimatedTokens ContextKey = "estimated_tokens"
 
-	ContextKeyOriginalModel    ContextKey = "original_model"
-	ContextKeyRequestStartTime ContextKey = "request_start_time"
+	ContextKeyOriginalModel ContextKey = "original_model"
+	// ContextKeyResponseModelName stores the public model alias that should be
+	// exposed in downstream responses after channel model mapping. Routing,
+	// billing, and internal logs must continue to use the upstream model name.
+	ContextKeyResponseModelName ContextKey = "response_model_name"
+	ContextKeyRequestStartTime  ContextKey = "request_start_time"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

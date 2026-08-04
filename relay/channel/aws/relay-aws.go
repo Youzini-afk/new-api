@@ -47,6 +47,18 @@ func newAwsInvokeContext(parent context.Context) (context.Context, context.Cance
 	return context.WithTimeout(parent, time.Duration(common.RelayTimeout)*time.Second)
 }
 
+func acquireAwsChannelTraffic(c *gin.Context, info *relaycommon.RelayInfo) (*service.ChannelTrafficLease, *types.NewAPIError) {
+	lease, err := channel.AcquireChannelTraffic(c, info)
+	if err == nil {
+		return lease, nil
+	}
+	var apiErr *types.NewAPIError
+	if errors.As(err, &apiErr) {
+		return nil, apiErr
+	}
+	return nil, types.NewError(err, types.ErrorCodeChannelAwsClientError)
+}
+
 func newAwsInvokeError(requestContext context.Context, err error, operation string) *types.NewAPIError {
 	options := make([]types.NewAPIErrorOptions, 0, 1)
 	if requestContext.Err() != nil {
@@ -227,6 +239,13 @@ func getAwsModelID(requestModel string) string {
 }
 
 func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	trafficLease, trafficErr := acquireAwsChannelTraffic(c, info)
+	if trafficErr != nil {
+		return trafficErr, nil
+	}
+	if trafficLease != nil {
+		defer trafficLease.Release()
+	}
 
 	requestContext := c.Request.Context()
 	ctx, cancel := newAwsInvokeContext(requestContext)
@@ -258,6 +277,14 @@ func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types
 }
 
 func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	trafficLease, trafficErr := acquireAwsChannelTraffic(c, info)
+	if trafficErr != nil {
+		return trafficErr, nil
+	}
+	if trafficLease != nil {
+		defer trafficLease.Release()
+	}
+
 	requestContext := c.Request.Context()
 	ctx, cancel := newAwsInvokeContext(requestContext)
 	defer cancel()
@@ -315,6 +342,13 @@ streamLoop:
 
 // Nova模型处理函数
 func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	trafficLease, trafficErr := acquireAwsChannelTraffic(c, info)
+	if trafficErr != nil {
+		return trafficErr, nil
+	}
+	if trafficLease != nil {
+		defer trafficLease.Release()
+	}
 
 	requestContext := c.Request.Context()
 	ctx, cancel := newAwsInvokeContext(requestContext)
@@ -350,7 +384,7 @@ func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) 
 		Id:      helper.GetResponseID(c),
 		Object:  "chat.completion",
 		Created: common.GetTimestamp(),
-		Model:   info.UpstreamModelName,
+		Model:   info.ResponseModelName(info.UpstreamModelName),
 		Choices: []dto.OpenAITextResponseChoice{{
 			Index: 0,
 			Message: dto.Message{

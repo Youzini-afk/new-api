@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
@@ -67,6 +68,10 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 	if err != nil {
 		common.SysError("error marshalling stream response: " + err.Error())
 	} else {
+		jsonData, err = relaycommon.RewriteResponseModelFromContext(c, jsonData)
+		if err != nil {
+			return fmt.Errorf("restore response model alias: %w", err)
+		}
 		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
 	}
@@ -78,6 +83,12 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 	if requestContextDone(c) {
 		return
 	}
+	rewritten, err := relaycommon.RewriteResponseModelFromContext(c, []byte(data))
+	if err != nil {
+		logger.LogError(c, "failed to restore response model alias: "+err.Error())
+		return
+	}
+	data = string(rewritten)
 
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
@@ -89,6 +100,11 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
+	rewritten, err := relaycommon.RewriteResponseModelFromContext(c, []byte(data))
+	if err != nil {
+		return fmt.Errorf("restore response model alias: %w", err)
+	}
+	data = string(rewritten)
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
 	return FlushWriter(c)
@@ -103,6 +119,11 @@ func StringData(c *gin.Context, str string) error {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
+	rewritten, err := relaycommon.RewriteResponseModelFromContext(c, []byte(str))
+	if err != nil {
+		return fmt.Errorf("restore response model alias: %w", err)
+	}
+	str = string(rewritten)
 	c.Render(-1, common.CustomEvent{Data: "data: " + str})
 	return FlushWriter(c)
 }

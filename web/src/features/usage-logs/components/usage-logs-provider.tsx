@@ -36,6 +36,8 @@ interface UsageLogsContextValue {
   setAffinityDialogOpen: (open: boolean) => void
   sensitiveVisible: boolean
   setSensitiveVisible: (visible: boolean) => void
+  autoRefreshEnabled: boolean
+  setAutoRefreshEnabled: (enabled: boolean) => void
   viewScope: LogsViewScope
   setViewScope: (scope: LogsViewScope) => void
 }
@@ -51,6 +53,7 @@ export function UsageLogsProvider({ children }: { children: ReactNode }) {
     useState<ChannelAffinityInfo | null>(null)
   const [affinityDialogOpen, setAffinityDialogOpen] = useState(false)
   const [sensitiveVisible, setSensitiveVisible] = useState(true)
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false)
   const [viewScope, setViewScope] = useState<LogsViewScope>('all')
 
   return (
@@ -66,6 +69,8 @@ export function UsageLogsProvider({ children }: { children: ReactNode }) {
         setAffinityDialogOpen,
         sensitiveVisible,
         setSensitiveVisible,
+        autoRefreshEnabled,
+        setAutoRefreshEnabled,
         viewScope,
         setViewScope,
       }}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -18,12 +19,27 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 		info.ChannelMeta = &common.ChannelMeta{}
 	}
 
-	isResponsesCompact := info.RelayMode == relayconstant.RelayModeResponsesCompact
-	originModelName := info.OriginModelName
-	mappingModelName := originModelName
-	if isResponsesCompact && strings.HasSuffix(originModelName, ratio_setting.CompactModelSuffix) {
-		mappingModelName = strings.TrimSuffix(originModelName, ratio_setting.CompactModelSuffix)
+	// A RelayInfo can be reused while retrying another channel. Always clear
+	// the previous channel's mapping state so an unmapped retry cannot inherit
+	// either its upstream model or its public response alias.
+	c.Set(string(constant.ContextKeyResponseModelName), "")
+	info.IsModelMapped = false
+
+	publicModelName := strings.TrimSpace(c.GetString(string(constant.ContextKeyOriginalModel)))
+	if publicModelName == "" {
+		publicModelName = strings.TrimSpace(info.ResponseModelAlias)
 	}
+	if publicModelName == "" {
+		publicModelName = strings.TrimSpace(info.OriginModelName)
+	}
+	info.ResponseModelAlias = publicModelName
+
+	isResponsesCompact := info.RelayMode == relayconstant.RelayModeResponsesCompact
+	mappingModelName := publicModelName
+	if isResponsesCompact && strings.HasSuffix(mappingModelName, ratio_setting.CompactModelSuffix) {
+		mappingModelName = strings.TrimSuffix(mappingModelName, ratio_setting.CompactModelSuffix)
+	}
+	info.UpstreamModelName = mappingModelName
 
 	// map model name
 	modelMapping := c.GetString("model_mapping")
@@ -44,9 +60,9 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 				// 模型重定向循环检测，避免无限循环
 				if visitedModels[mappedModel] {
 					if mappedModel == currentModel {
-						if currentModel == info.OriginModelName {
+						if currentModel == mappingModelName {
 							info.IsModelMapped = false
-							return nil
+							break
 						} else {
 							info.IsModelMapped = true
 							break
@@ -73,6 +89,9 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 		}
 		info.UpstreamModelName = finalUpstreamModelName
 		info.OriginModelName = ratio_setting.WithCompactModelSuffix(finalUpstreamModelName)
+	}
+	if info.IsModelMapped && publicModelName != "" {
+		c.Set(string(constant.ContextKeyResponseModelName), publicModelName)
 	}
 	if request != nil {
 		request.SetModelName(info.UpstreamModelName)

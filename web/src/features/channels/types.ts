@@ -108,7 +108,16 @@ export interface ChannelOtherSettings {
   upstream_model_update_ignored_models?: string[]
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
+  traffic_control?: ChannelTrafficControl
   advanced_custom?: AdvancedCustomConfig
+}
+
+export interface ChannelTrafficControl {
+  enabled?: boolean
+  max_concurrency?: number
+  rpm?: number
+  queue_size?: number
+  queue_timeout_seconds?: number
 }
 
 export interface AdvancedCustomConfig {

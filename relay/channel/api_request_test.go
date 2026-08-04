@@ -6,9 +6,47 @@ import (
 	"testing"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAcquireChannelTraffic_InternalRequestBypassesAdmissionControl(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		BypassChannelTrafficControl: true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 73,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				TrafficControl: &dto.ChannelTrafficControl{
+					Enabled:        true,
+					MaxConcurrency: dto.MaxChannelTrafficConcurrency + 1,
+				},
+			},
+		},
+	}
+
+	lease, err := AcquireChannelTraffic(nil, info)
+	require.NoError(t, err)
+	require.Nil(t, lease)
+}
+
+func TestAcquireChannelTraffic_OrdinaryRequestStillValidatesAdmissionControl(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 74,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				TrafficControl: &dto.ChannelTrafficControl{
+					Enabled:        true,
+					MaxConcurrency: dto.MaxChannelTrafficConcurrency + 1,
+				},
+			},
+		},
+	}
+
+	lease, err := AcquireChannelTraffic(nil, info)
+	require.Error(t, err)
+	require.Nil(t, lease)
+}
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()

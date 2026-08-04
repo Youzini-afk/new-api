@@ -187,7 +187,12 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					localUsage.OutputTokenDetails.AudioTokens += audioToken
 				}
 
-				err = helper.WssString(c, clientConn, string(message))
+				rewrittenMessage, rewriteErr := relaycommon.RewriteResponseModelFromContext(c, message)
+				if rewriteErr != nil {
+					errChan <- fmt.Errorf("error restoring response model alias: %v", rewriteErr)
+					return
+				}
+				err = helper.WssString(c, clientConn, string(rewrittenMessage))
 				if err != nil {
 					errChan <- fmt.Errorf("error writing to client: %v", err)
 					return

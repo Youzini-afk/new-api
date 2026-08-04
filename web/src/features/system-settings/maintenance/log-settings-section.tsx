@@ -80,12 +80,15 @@ import type { LogCleanupTask } from '../types'
 
 const logSettingsSchema = z.object({
   LogConsumeEnabled: z.boolean(),
+  'log_cleanup_setting.enabled': z.boolean(),
+  'log_cleanup_setting.retention_days': z.number().int().min(1).max(3650),
+  'log_cleanup_setting.interval_hours': z.number().int().min(1).max(168),
 })
 
 type LogSettingsFormValues = z.infer<typeof logSettingsSchema>
 
 type LogSettingsSectionProps = {
-  defaultEnabled: boolean
+  defaultValues: LogSettingsFormValues
 }
 
 type ServerLogInfo = {
@@ -139,16 +142,12 @@ function isActiveLogCleanupTask(task: LogCleanupTask | null) {
   return task?.status === 'pending' || task?.status === 'running'
 }
 
-export function LogSettingsSection({
-  defaultEnabled,
-}: LogSettingsSectionProps) {
+export function LogSettingsSection({ defaultValues }: LogSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
   const form = useForm<LogSettingsFormValues>({
     resolver: zodResolver(logSettingsSchema),
-    defaultValues: {
-      LogConsumeEnabled: defaultEnabled,
-    },
+    defaultValues,
   })
 
   const [purgeDate, setPurgeDate] = useState<Date | undefined>(() =>
@@ -174,8 +173,8 @@ export function LogSettingsSection({
   }, [])
 
   useEffect(() => {
-    form.reset({ LogConsumeEnabled: defaultEnabled })
-  }, [defaultEnabled, form])
+    form.reset(defaultValues)
+  }, [defaultValues, form])
 
   useEffect(() => {
     fetchServerLogInfo()
@@ -257,11 +256,27 @@ export function LogSettingsSection({
   }, [logCleanupActive, logCleanupTaskId, t])
 
   const onSubmit = async (values: LogSettingsFormValues) => {
-    if (values.LogConsumeEnabled === defaultEnabled) return
-    await updateOption.mutateAsync({
-      key: 'LogConsumeEnabled',
-      value: values.LogConsumeEnabled,
-    })
+    const cleanupWillBeEnabled = values['log_cleanup_setting.enabled']
+    const cleanupKeys: Array<keyof LogSettingsFormValues> = [
+      'log_cleanup_setting.retention_days',
+      'log_cleanup_setting.interval_hours',
+    ]
+    // When enabling, persist retention/interval first so the scheduler can
+    // never observe "enabled" with stale defaults. When disabling, stop the
+    // scheduler before changing any other cleanup value.
+    const keys: Array<keyof LogSettingsFormValues> = cleanupWillBeEnabled
+      ? ['LogConsumeEnabled', ...cleanupKeys, 'log_cleanup_setting.enabled']
+      : ['log_cleanup_setting.enabled', 'LogConsumeEnabled', ...cleanupKeys]
+    for (const key of keys) {
+      if (values[key] === defaultValues[key]) continue
+      const response = await updateOption.mutateAsync({
+        key,
+        value: values[key],
+      })
+      if (!response.success) return
+    }
+
+    form.reset(values)
   }
 
   const handleRequestCleanLogs = () => {
@@ -366,6 +381,83 @@ export function LogSettingsSection({
               </SettingsSwitchItem>
             )}
           />
+
+          <SettingsControlGroup className='space-y-4'>
+            <FormField
+              control={form.control}
+              name='log_cleanup_setting.enabled'
+              render={({ field }) => (
+                <div className='flex items-start justify-between gap-4'>
+                  <div>
+                    <FormLabel>{t('Automatic log cleanup')}</FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Periodically remove old usage logs through the system task runner. Manual and automatic cleanup never run at the same time.'
+                      )}
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </div>
+              )}
+            />
+            <div className='grid gap-4 sm:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='log_cleanup_setting.retention_days'
+                render={({ field }) => (
+                  <div className='space-y-2'>
+                    <FormLabel>{t('Retention days')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={1}
+                        max={3650}
+                        value={field.value}
+                        onChange={(event) =>
+                          field.onChange(Number(event.target.value))
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Logs newer than this value are retained.')}
+                    </FormDescription>
+                    <FormMessage />
+                  </div>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='log_cleanup_setting.interval_hours'
+                render={({ field }) => (
+                  <div className='space-y-2'>
+                    <FormLabel>{t('Cleanup interval (hours)')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={1}
+                        max={168}
+                        value={field.value}
+                        onChange={(event) =>
+                          field.onChange(Number(event.target.value))
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'The scheduler checks this interval across all nodes.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </div>
+                )}
+              />
+            </div>
+          </SettingsControlGroup>
 
           <SettingsControlGroup className='space-y-3'>
             <div>

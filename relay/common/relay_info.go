@@ -45,6 +45,43 @@ type RerankerInfo struct {
 	ReturnDocuments bool
 }
 
+const ContextKeyBatchSplitInfo = "relay_batch_split_info"
+
+// BatchSplitInfo contains admin-only operational metadata. It deliberately
+// excludes input text, queries, and documents. Content auditing continues to
+// read RelayInfo.Request, which always points at the original client request.
+type BatchSplitInfo struct {
+	Kind            string
+	ChannelID       int
+	ItemCount       int
+	BatchSize       int
+	ChunkCount      int
+	Concurrency     int
+	CompletedChunks int
+	FailedChunk     int
+	DurationMs      int64
+}
+
+func (info *BatchSplitInfo) AdminMap() map[string]interface{} {
+	if info == nil {
+		return nil
+	}
+	result := map[string]interface{}{
+		"kind":             info.Kind,
+		"channel_id":       info.ChannelID,
+		"item_count":       info.ItemCount,
+		"batch_size":       info.BatchSize,
+		"chunk_count":      info.ChunkCount,
+		"concurrency":      info.Concurrency,
+		"completed_chunks": info.CompletedChunks,
+		"duration_ms":      info.DurationMs,
+	}
+	if info.FailedChunk > 0 {
+		result["failed_chunk"] = info.FailedChunk
+	}
+	return result
+}
+
 type BuildInToolInfo struct {
 	ToolName          string
 	CallCount         int
@@ -98,25 +135,29 @@ type RelayInfo struct {
 	UsePrice               bool
 	RelayMode              int
 	OriginModelName        string
-	RequestURLPath         string
-	RequestHeaders         map[string]string
-	ShouldIncludeUsage     bool
-	DisablePing            bool // 是否禁止向下游发送自定义 Ping
-	ClientWs               *websocket.Conn
-	TargetWs               *websocket.Conn
-	InputAudioFormat       string
-	OutputAudioFormat      string
-	RealtimeTools          []dto.RealTimeTool
-	IsFirstRequest         bool
-	AudioUsage             bool
-	ReasoningEffort        string
-	UserSetting            dto.UserSetting
-	UserEmail              string
-	UserQuota              int
-	RelayFormat            types.RelayFormat
-	SendResponseCount      int
-	ReceivedResponseCount  int
-	FinalPreConsumedQuota  int // 最终预消耗的配额
+	// ResponseModelAlias is the model name requested by the client before
+	// channel model mapping. It is only exposed when IsModelMapped is true.
+	ResponseModelAlias    string
+	RequestURLPath        string
+	RequestHeaders        map[string]string
+	ShouldIncludeUsage    bool
+	DisablePing           bool // 是否禁止向下游发送自定义 Ping
+	ClientWs              *websocket.Conn
+	TargetWs              *websocket.Conn
+	ChannelTrafficRelease func()
+	InputAudioFormat      string
+	OutputAudioFormat     string
+	RealtimeTools         []dto.RealTimeTool
+	IsFirstRequest        bool
+	AudioUsage            bool
+	ReasoningEffort       string
+	UserSetting           dto.UserSetting
+	UserEmail             string
+	UserQuota             int
+	RelayFormat           types.RelayFormat
+	SendResponseCount     int
+	ReceivedResponseCount int
+	FinalPreConsumedQuota int // 最终预消耗的配额
 	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。
@@ -143,11 +184,15 @@ type RelayInfo struct {
 	SubscriptionAmountUsedAfterPreConsume int64
 	IsClaudeBetaQuery                     bool // /v1/messages?beta=true
 	IsChannelTest                         bool // channel test request
-	RetryIndex                            int
-	LastError                             *types.NewAPIError
-	RuntimeHeadersOverride                map[string]interface{}
-	UseRuntimeHeadersOverride             bool
-	ParamOverrideAudit                    []string
+	// BypassChannelTrafficControl is reserved for trusted internal workflows,
+	// such as channel diagnostics. It must never be derived from client input.
+	BypassChannelTrafficControl bool
+	RetryIndex                  int
+	LastError                   *types.NewAPIError
+	RuntimeHeadersOverride      map[string]interface{}
+	UseRuntimeHeadersOverride   bool
+	ParamOverrideAudit          []string
+	BatchSplit                  *BatchSplitInfo
 
 	// UpstreamRequestBodySize is the byte size of the marshaled upstream request
 	// body. It is set when the body is wrapped in a BodyStorage (see
@@ -482,7 +527,8 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		UserQuota:  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
 		UserEmail:  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 
-		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		OriginModelName:    common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		ResponseModelAlias: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 
 		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),

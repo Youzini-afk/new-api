@@ -80,6 +80,23 @@ const defaultModelSettings: ModelSettings = {
   'channel_affinity_setting.max_entries': 100000,
   'channel_affinity_setting.default_ttl_seconds': 3600,
   'channel_affinity_setting.rules': '[]',
+  'relay_batch_split.config': JSON.stringify({
+    version: 1,
+    enabled: false,
+    channel_ids: [],
+    embedding: {
+      enabled: true,
+      batch_size: 25,
+      concurrency: 2,
+      max_items: 1000,
+    },
+    rerank: {
+      enabled: false,
+      batch_size: 25,
+      concurrency: 1,
+      max_items: 200,
+    },
+  }),
   'model_deployment.ionet.api_key': '',
   'model_deployment.ionet.enabled': false,
 }

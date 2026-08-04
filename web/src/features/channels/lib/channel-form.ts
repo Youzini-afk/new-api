@@ -73,6 +73,24 @@ function isOptionalProxyURL(value: string | undefined): boolean {
 export const HTTP_PROTOCOL_AUTO = 'auto'
 export const HTTP_PROTOCOL_HTTP1 = 'http1'
 export const MAX_HTTP2_CONNECTION_SHARDS = 8
+export const MAX_CHANNEL_TRAFFIC_CONCURRENCY = 100_000
+export const MAX_CHANNEL_TRAFFIC_RPM = 10_000_000
+export const MAX_CHANNEL_TRAFFIC_QUEUE_SIZE = 10_000
+export const MAX_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS = 3_600
+export const DEFAULT_CHANNEL_TRAFFIC_QUEUE_SIZE = 100
+export const DEFAULT_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS = 30
+
+function normalizeNonNegativeInteger(
+  value: unknown,
+  fallback: number,
+  maximum: number
+): number {
+  const normalized = Number(value)
+  if (!Number.isInteger(normalized) || normalized < 0 || normalized > maximum) {
+    return fallback
+  }
+  return normalized
+}
 
 export function normalizeHttpProtocol(
   value: string | undefined | null
@@ -279,6 +297,32 @@ export const channelFormSchema = z
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),
+    // Channel traffic control (stored in settings JSON)
+    traffic_control_enabled: z.boolean().optional(),
+    traffic_max_concurrency: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CHANNEL_TRAFFIC_CONCURRENCY)
+      .optional(),
+    traffic_rpm: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CHANNEL_TRAFFIC_RPM)
+      .optional(),
+    traffic_queue_size: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CHANNEL_TRAFFIC_QUEUE_SIZE)
+      .optional(),
+    traffic_queue_timeout_seconds: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS)
+      .optional(),
   })
   .superRefine((data, ctx) => {
     if (
@@ -390,6 +434,26 @@ export const channelFormSchema = z
         ERROR_MESSAGES.INVALID_HTTP1_WITH_SHARDS
       )
     }
+
+    if (data.traffic_control_enabled) {
+      if (!data.traffic_max_concurrency && !data.traffic_rpm) {
+        addRequiredIssue(
+          ctx,
+          'traffic_max_concurrency',
+          'Set maximum concurrency or requests per minute when traffic control is enabled.'
+        )
+      }
+      if (
+        (data.traffic_queue_size || 0) > 0 &&
+        (data.traffic_queue_timeout_seconds || 0) <= 0
+      ) {
+        addRequiredIssue(
+          ctx,
+          'traffic_queue_timeout_seconds',
+          'Queue timeout must be greater than 0 when queue capacity is enabled.'
+        )
+      }
+    }
   })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -450,6 +514,11 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
+  traffic_control_enabled: false,
+  traffic_max_concurrency: 0,
+  traffic_rpm: 0,
+  traffic_queue_size: DEFAULT_CHANNEL_TRAFFIC_QUEUE_SIZE,
+  traffic_queue_timeout_seconds: DEFAULT_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS,
   advanced_custom: '',
 }
 
@@ -487,8 +556,7 @@ export function transformChannelToFormDefaults(
         thinking_to_content: parsed.thinking_to_content || false,
         proxy: parsed.proxy || '',
         http_protocol: protocol,
-        http2_connection_shards:
-          protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
+        http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
@@ -515,6 +583,11 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
+  let trafficControlEnabled = false
+  let trafficMaxConcurrency = 0
+  let trafficRpm = 0
+  let trafficQueueSize = DEFAULT_CHANNEL_TRAFFIC_QUEUE_SIZE
+  let trafficQueueTimeoutSeconds = DEFAULT_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS
   let advancedCustom = ''
 
   if (channel.settings) {
@@ -541,6 +614,29 @@ export function transformChannelToFormDefaults(
       )
         ? parsed.upstream_model_update_ignored_models.join(',')
         : ''
+      if (isJsonObjectValue(parsed.traffic_control)) {
+        trafficControlEnabled = parsed.traffic_control.enabled === true
+        trafficMaxConcurrency = normalizeNonNegativeInteger(
+          parsed.traffic_control.max_concurrency,
+          0,
+          MAX_CHANNEL_TRAFFIC_CONCURRENCY
+        )
+        trafficRpm = normalizeNonNegativeInteger(
+          parsed.traffic_control.rpm,
+          0,
+          MAX_CHANNEL_TRAFFIC_RPM
+        )
+        trafficQueueSize = normalizeNonNegativeInteger(
+          parsed.traffic_control.queue_size,
+          DEFAULT_CHANNEL_TRAFFIC_QUEUE_SIZE,
+          MAX_CHANNEL_TRAFFIC_QUEUE_SIZE
+        )
+        trafficQueueTimeoutSeconds = normalizeNonNegativeInteger(
+          parsed.traffic_control.queue_timeout_seconds,
+          DEFAULT_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS,
+          MAX_CHANNEL_TRAFFIC_QUEUE_TIMEOUT_SECONDS
+        )
+      }
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
@@ -594,6 +690,11 @@ export function transformChannelToFormDefaults(
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
+    traffic_control_enabled: trafficControlEnabled,
+    traffic_max_concurrency: trafficMaxConcurrency,
+    traffic_rpm: trafficRpm,
+    traffic_queue_size: trafficQueueSize,
+    traffic_queue_timeout_seconds: trafficQueueTimeoutSeconds,
     advanced_custom: advancedCustom,
   }
 }
@@ -718,6 +819,19 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
 
   settingsObj.disable_task_polling_sleep =
     formData.disable_task_polling_sleep === true
+
+  const hadTrafficControl = isJsonObjectValue(settingsObj.traffic_control)
+  if (formData.traffic_control_enabled || hadTrafficControl) {
+    settingsObj.traffic_control = {
+      enabled: formData.traffic_control_enabled === true,
+      max_concurrency: Number(formData.traffic_max_concurrency || 0),
+      rpm: Number(formData.traffic_rpm || 0),
+      queue_size: Number(formData.traffic_queue_size || 0),
+      queue_timeout_seconds: Number(
+        formData.traffic_queue_timeout_seconds || 0
+      ),
+    }
+  }
 
   // Upstream model update settings (for model-fetchable channel types)
   if (MODEL_FETCHABLE_TYPES.has(formData.type)) {

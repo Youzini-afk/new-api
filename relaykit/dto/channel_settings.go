@@ -66,25 +66,76 @@ const (
 )
 
 type ChannelOtherSettings struct {
-	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
-	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"` // "json" or "api_key"
-	OpenRouterEnterprise                  *bool                 `json:"openrouter_enterprise,omitempty"`
-	ClaudeBetaQuery                       bool                  `json:"claude_beta_query,omitempty"`          // Claude 渠道是否强制追加 ?beta=true
-	AllowServiceTier                      bool                  `json:"allow_service_tier,omitempty"`         // 是否允许 service_tier 透传（默认过滤以避免额外计费）
-	AllowInferenceGeo                     bool                  `json:"allow_inference_geo,omitempty"`        // 是否允许 inference_geo 透传（仅 Claude，默认过滤以满足数据驻留合规
-	AllowSpeed                            bool                  `json:"allow_speed,omitempty"`                // 是否允许 speed 透传（仅 Claude，默认过滤以避免意外切换推理速度模式）
-	AllowSafetyIdentifier                 bool                  `json:"allow_safety_identifier,omitempty"`    // 是否允许 safety_identifier 透传（默认过滤以保护用户隐私）
-	DisableStore                          bool                  `json:"disable_store,omitempty"`              // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
-	AllowIncludeObfuscation               bool                  `json:"allow_include_obfuscation,omitempty"`  // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
-	DisableTaskPollingSleep               bool                  `json:"disable_task_polling_sleep,omitempty"` // 是否跳过异步任务轮询间隔
-	AwsKeyType                            AwsKeyType            `json:"aws_key_type,omitempty"`
-	UpstreamModelUpdateCheckEnabled       bool                  `json:"upstream_model_update_check_enabled,omitempty"`        // 是否检测上游模型更新
-	UpstreamModelUpdateAutoSyncEnabled    bool                  `json:"upstream_model_update_auto_sync_enabled,omitempty"`    // 是否自动同步上游模型更新
-	UpstreamModelUpdateLastCheckTime      int64                 `json:"upstream_model_update_last_check_time,omitempty"`      // 上次检测时间
-	UpstreamModelUpdateLastDetectedModels []string              `json:"upstream_model_update_last_detected_models,omitempty"` // 上次检测到的可加入模型
-	UpstreamModelUpdateLastRemovedModels  []string              `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
-	UpstreamModelUpdateIgnoredModels      []string              `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
-	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
+	AzureResponsesVersion                 string                 `json:"azure_responses_version,omitempty"`
+	VertexKeyType                         VertexKeyType          `json:"vertex_key_type,omitempty"` // "json" or "api_key"
+	OpenRouterEnterprise                  *bool                  `json:"openrouter_enterprise,omitempty"`
+	ClaudeBetaQuery                       bool                   `json:"claude_beta_query,omitempty"`          // Claude 渠道是否强制追加 ?beta=true
+	AllowServiceTier                      bool                   `json:"allow_service_tier,omitempty"`         // 是否允许 service_tier 透传（默认过滤以避免额外计费）
+	AllowInferenceGeo                     bool                   `json:"allow_inference_geo,omitempty"`        // 是否允许 inference_geo 透传（仅 Claude，默认过滤以满足数据驻留合规
+	AllowSpeed                            bool                   `json:"allow_speed,omitempty"`                // 是否允许 speed 透传（仅 Claude，默认过滤以避免意外切换推理速度模式）
+	AllowSafetyIdentifier                 bool                   `json:"allow_safety_identifier,omitempty"`    // 是否允许 safety_identifier 透传（默认过滤以保护用户隐私）
+	DisableStore                          bool                   `json:"disable_store,omitempty"`              // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
+	AllowIncludeObfuscation               bool                   `json:"allow_include_obfuscation,omitempty"`  // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
+	DisableTaskPollingSleep               bool                   `json:"disable_task_polling_sleep,omitempty"` // 是否跳过异步任务轮询间隔
+	AwsKeyType                            AwsKeyType             `json:"aws_key_type,omitempty"`
+	UpstreamModelUpdateCheckEnabled       bool                   `json:"upstream_model_update_check_enabled,omitempty"`        // 是否检测上游模型更新
+	UpstreamModelUpdateAutoSyncEnabled    bool                   `json:"upstream_model_update_auto_sync_enabled,omitempty"`    // 是否自动同步上游模型更新
+	UpstreamModelUpdateLastCheckTime      int64                  `json:"upstream_model_update_last_check_time,omitempty"`      // 上次检测时间
+	UpstreamModelUpdateLastDetectedModels []string               `json:"upstream_model_update_last_detected_models,omitempty"` // 上次检测到的可加入模型
+	UpstreamModelUpdateLastRemovedModels  []string               `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
+	UpstreamModelUpdateIgnoredModels      []string               `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
+	AdvancedCustom                        *AdvancedCustomConfig  `json:"advanced_custom,omitempty"`
+	TrafficControl                        *ChannelTrafficControl `json:"traffic_control,omitempty"`
+}
+
+const (
+	MaxChannelTrafficConcurrency = 100000
+	MaxChannelTrafficRPM         = 10000000
+	MaxChannelTrafficQueueSize   = 10000
+	MaxChannelTrafficQueueWait   = 3600
+)
+
+// ChannelTrafficControl limits actual upstream requests for one channel. A
+// zero concurrency or RPM value disables only that dimension. QueueSize zero
+// makes admission fail fast instead of waiting.
+type ChannelTrafficControl struct {
+	Enabled             bool `json:"enabled,omitempty"`
+	MaxConcurrency      int  `json:"max_concurrency,omitempty"`
+	RPM                 int  `json:"rpm,omitempty"`
+	QueueSize           int  `json:"queue_size,omitempty"`
+	QueueTimeoutSeconds int  `json:"queue_timeout_seconds,omitempty"`
+}
+
+func (c *ChannelTrafficControl) Effective() bool {
+	return c != nil && c.Enabled && (c.MaxConcurrency > 0 || c.RPM > 0)
+}
+
+func (c *ChannelTrafficControl) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if c.MaxConcurrency < 0 || c.MaxConcurrency > MaxChannelTrafficConcurrency {
+		return fmt.Errorf("traffic_control.max_concurrency must be between 0 and %d", MaxChannelTrafficConcurrency)
+	}
+	if c.RPM < 0 || c.RPM > MaxChannelTrafficRPM {
+		return fmt.Errorf("traffic_control.rpm must be between 0 and %d", MaxChannelTrafficRPM)
+	}
+	if c.QueueSize < 0 || c.QueueSize > MaxChannelTrafficQueueSize {
+		return fmt.Errorf("traffic_control.queue_size must be between 0 and %d", MaxChannelTrafficQueueSize)
+	}
+	if c.QueueTimeoutSeconds < 0 || c.QueueTimeoutSeconds > MaxChannelTrafficQueueWait {
+		return fmt.Errorf("traffic_control.queue_timeout_seconds must be between 0 and %d", MaxChannelTrafficQueueWait)
+	}
+	if !c.Enabled {
+		return nil
+	}
+	if c.MaxConcurrency == 0 && c.RPM == 0 {
+		return fmt.Errorf("traffic_control requires max_concurrency or rpm")
+	}
+	if c.QueueSize > 0 && c.QueueTimeoutSeconds == 0 {
+		return fmt.Errorf("traffic_control.queue_timeout_seconds is required when queue_size is greater than 0")
+	}
+	return nil
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

@@ -123,6 +123,10 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			delete(otherMap, "admin_info")
 			// Remove operation-audit details (operator/route info), admin-only.
 			delete(otherMap, "audit_info")
+			// A mapped request exposes the public model alias to regular users.
+			// Keep the actual routed model available only in admin log views.
+			delete(otherMap, "is_model_mapped")
+			delete(otherMap, "upstream_model_name")
 			// delete(otherMap, "reject_reason")
 			// delete(otherMap, "stream_status")
 		}

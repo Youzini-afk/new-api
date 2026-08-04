@@ -383,6 +383,19 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 					http.StatusInternalServerError,
 				)
 			}
+			// Streaming Volcengine TTS skips DoApiRequest and opens its own
+			// WebSocket below, so it needs an explicit channel admission lease.
+			trafficLease, trafficErr := channel.AcquireChannelTraffic(c, info)
+			if trafficErr != nil {
+				var apiErr *types.NewAPIError
+				if errors.As(trafficErr, &apiErr) {
+					return nil, apiErr
+				}
+				return nil, types.NewError(trafficErr, types.ErrorCodeDoRequestFailed)
+			}
+			if trafficLease != nil {
+				defer trafficLease.Release()
+			}
 			return handleTTSWebSocketResponse(c, requestURL, volcRequest, info, encoding)
 		}
 		return handleTTSResponse(c, resp, info, encoding)

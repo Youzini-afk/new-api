@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQueryClient, useIsFetching } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Radio } from 'lucide-react'
 import { useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -37,10 +37,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 
-import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
+import {
+  LOG_TYPE_ALL_VALUE,
+  LOG_TYPE_FILTERS,
+  USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS,
+} from '../constants'
 import { buildSearchParams } from '../lib/filter'
-import { getDefaultTimeRange } from '../lib/utils'
+import { getDefaultTimeRange, getLogQueryEndTime } from '../lib/utils'
 import type { CommonLogFilters } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
@@ -117,7 +122,12 @@ export function CommonLogsFilterBar<TData>(
   const queryClient = useQueryClient()
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
-  const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
+  const {
+    sensitiveVisible,
+    setSensitiveVisible,
+    autoRefreshEnabled,
+    setAutoRefreshEnabled,
+  } = useUsageLogsContext()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
 
   const searchState = useMemo<CommonLogDraft>(() => {
@@ -192,13 +202,16 @@ export function CommonLogsFilterBar<TData>(
       params: { section: 'common' },
       search: {
         ...filterParams,
+        ...(autoRefreshEnabled
+          ? { endTime: getLogQueryEndTime().getTime() }
+          : {}),
         type: [logType],
         page: 1,
       },
     })
     queryClient.invalidateQueries({ queryKey: ['logs'] })
     queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
-  }, [filters, logType, navigate, queryClient])
+  }, [autoRefreshEnabled, filters, logType, navigate, queryClient])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
@@ -225,6 +238,21 @@ export function CommonLogsFilterBar<TData>(
     queryClient.invalidateQueries({ queryKey: ['logs'] })
     queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
   }, [navigate, queryClient])
+
+  const handleAutoRefreshToggle = useCallback(() => {
+    const nextEnabled = !autoRefreshEnabled
+    setAutoRefreshEnabled(nextEnabled)
+    navigate({
+      to: '/usage-logs/$section',
+      params: { section: 'common' },
+      replace: true,
+      search: {
+        ...searchParams,
+        page: 1,
+        endTime: nextEnabled ? getLogQueryEndTime().getTime() : Date.now(),
+      },
+    })
+  }, [autoRefreshEnabled, navigate, searchParams, setAutoRefreshEnabled])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -287,6 +315,39 @@ export function CommonLogsFilterBar<TData>(
         {sensitiveVisible ? t('Hide') : t('Show')}
       </TooltipContent>
     </Tooltip>
+  )
+  const autoRefreshToggle = (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type='button'
+            variant={autoRefreshEnabled ? 'secondary' : 'ghost'}
+            size='sm'
+            onClick={handleAutoRefreshToggle}
+            aria-label={t('Live feed')}
+            aria-pressed={autoRefreshEnabled}
+            className={cn(
+              'text-muted-foreground hover:text-foreground h-7 gap-1.5 px-2 text-xs',
+              autoRefreshEnabled &&
+                'bg-sky-500/10 text-sky-600 hover:bg-sky-500/15 hover:text-sky-600 dark:text-sky-400 dark:hover:text-sky-400'
+            )}
+          />
+        }
+      >
+        <Radio className='size-3.5' />
+        <span className='hidden sm:inline'>{t('Live feed')}</span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {t('Live feed')} · {USAGE_LOGS_AUTO_REFRESH_INTERVAL_MS / 1000}s
+      </TooltipContent>
+    </Tooltip>
+  )
+  const toolbarActions = (
+    <>
+      {autoRefreshToggle}
+      {sensitiveToggle}
+    </>
   )
 
   const dateRangeFilter = (
@@ -413,7 +474,7 @@ export function CommonLogsFilterBar<TData>(
     <LogsFilterToolbar
       table={props.table}
       stats={statsBar}
-      actionStart={sensitiveToggle}
+      actionStart={toolbarActions}
       primaryFilters={
         <>
           {dateRangeFilter}
@@ -440,7 +501,7 @@ export function CommonLogsFilterBar<TData>(
       advancedFilterCount={expandedFilterCount}
       hasActiveFilters={hasAdditionalFilters}
       onSearch={handleApply}
-      searchLoading={fetchingLogs > 0}
+      searchLoading={fetchingLogs > 0 && !autoRefreshEnabled}
       onReset={handleReset}
     />
   )

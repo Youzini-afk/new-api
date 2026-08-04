@@ -254,6 +254,16 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case system_setting.RelayBatchSplitOptionKey:
+		_, normalized, parseErr := system_setting.ParseAndValidateRelayBatchSplitConfig(option.Value.(string))
+		if parseErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": parseErr.Error(),
+			})
+			return
+		}
+		option.Value = normalized
 	case operation_setting.ToolPriceOptionKey:
 		err = operation_setting.ValidateToolPricesJSON(option.Value.(string))
 		if err != nil {

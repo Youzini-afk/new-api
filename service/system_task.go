@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 )
@@ -73,14 +74,31 @@ func registeredSystemTaskHandlers() []SystemTaskHandler {
 	return handlers
 }
 
-// logCleanupHandler wraps the existing on-demand log cleanup task as a
-// registered (non-scheduled) handler. It is created via StartLogCleanupTask.
+// logCleanupHandler runs both manual and scheduled cleanup through the same
+// task type. The active task key and DB lease therefore prevent overlap across
+// nodes and between manual and automatic cleanup.
 type logCleanupHandler struct{}
 
 func (logCleanupHandler) Type() string { return model.SystemTaskTypeLogCleanup }
 
 func (logCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
 	runLogCleanupTask(ctx, task, runnerID)
+}
+
+func (logCleanupHandler) Enabled() bool {
+	return operation_setting.GetLogCleanupSetting().Enabled
+}
+
+func (logCleanupHandler) Interval() time.Duration {
+	return operation_setting.GetLogCleanupSetting().Interval()
+}
+
+func (logCleanupHandler) NewPayload() any {
+	setting := operation_setting.GetLogCleanupSetting()
+	return LogCleanupPayload{
+		TargetTimestamp: setting.TargetTimestamp(time.Now()),
+		BatchSize:       logCleanupBatchSize,
+	}
 }
 
 func init() {

@@ -59,6 +59,8 @@ const (
 	ErrorCodeChannelAwsClientError        ErrorCode = "channel:aws_client_error"
 	ErrorCodeChannelInvalidKey            ErrorCode = "channel:invalid_key"
 	ErrorCodeChannelResponseTimeExceeded  ErrorCode = "channel:response_time_exceeded"
+	ErrorCodeChannelTrafficQueueFull      ErrorCode = "channel_traffic_queue_full"
+	ErrorCodeChannelTrafficQueueTimeout   ErrorCode = "channel_traffic_queue_timeout"
 
 	// client request error
 	ErrorCodeReadRequestBodyFailed ErrorCode = "read_request_body_failed"
@@ -368,6 +370,18 @@ func IsChannelError(err *NewAPIError) bool {
 		return false
 	}
 	return strings.HasPrefix(string(err.errorCode), "channel:")
+}
+
+func IsChannelTrafficControlError(err *NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	switch err.errorCode {
+	case ErrorCodeChannelTrafficQueueFull, ErrorCodeChannelTrafficQueueTimeout:
+		return true
+	default:
+		return false
+	}
 }
 
 func IsSkipRetryError(err *NewAPIError) bool {

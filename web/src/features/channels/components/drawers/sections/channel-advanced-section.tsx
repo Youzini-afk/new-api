@@ -45,6 +45,8 @@ import {
 } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
 
+import { ChannelTrafficControlSection } from './channel-traffic-control-section'
+
 type ChannelAdvancedSectionProps = {
   children: ReactNode
   open: boolean
@@ -92,6 +94,7 @@ export function ChannelAdvancedSection(props: ChannelAdvancedSectionProps) {
       </CollapsibleTrigger>
 
       <CollapsibleContent className='mt-5 flex flex-col gap-5'>
+        <ChannelTrafficControlSection />
         {props.children}
       </CollapsibleContent>
     </Collapsible>

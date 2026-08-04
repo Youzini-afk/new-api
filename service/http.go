@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,6 +47,16 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 		return
 	}
 
+	rewritten, err := relaycommon.RewriteResponseModelFromContext(c, data)
+	if err != nil {
+		// The paths used by the rewriter are static and valid, so this is only a
+		// defensive fallback. Preserve response availability and surface the
+		// exceptional condition to administrators.
+		logger.LogError(c, fmt.Sprintf("failed to restore response model alias: %s", err.Error()))
+	} else {
+		data = rewritten
+	}
+
 	body := io.NopCloser(bytes.NewBuffer(data))
 
 	// We shouldn't set the header before we parse the response body, because the parse part may fail.
@@ -71,7 +82,7 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 		c.Writer.WriteHeader(http.StatusOK)
 	}
 
-	_, err := io.Copy(c.Writer, body)
+	_, err = io.Copy(c.Writer, body)
 	if err != nil {
 		logger.LogError(c, fmt.Sprintf("failed to copy response body: %s", err.Error()))
 	}
