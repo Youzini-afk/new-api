@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/constant"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -21,11 +22,16 @@ var responseModelPaths = []string{
 // ResponseModelName returns the model name that may be exposed to the client.
 // Internal routing, billing, and logging must continue to use UpstreamModelName.
 func (info *RelayInfo) ResponseModelName(upstreamModel string) string {
-	if info == nil || info.ChannelMeta == nil || !info.ChannelMeta.IsModelMapped {
+	if info == nil || info.ChannelMeta == nil {
 		return upstreamModel
 	}
 	if publicModel := strings.TrimSpace(info.ResponseModelAlias); publicModel != "" {
-		return publicModel
+		if info.ChannelMeta.IsModelMapped || info.RelayMode == relayconstant.RelayModeResponsesCompact {
+			return publicModel
+		}
+	}
+	if !info.ChannelMeta.IsModelMapped {
+		return upstreamModel
 	}
 	if originModel := strings.TrimSpace(info.OriginModelName); originModel != "" {
 		return originModel
@@ -44,9 +50,9 @@ func ResponseModelNameFromContext(c *gin.Context) string {
 }
 
 // RewriteResponseModel restores a mapped request's public model alias in known
-// protocol response locations while preserving unrelated JSON fields. Non-JSON
-// bodies (for example TTS audio) and payloads without a known model field are
-// returned byte-identical.
+// protocol response locations. For compact requests this is the suffix-free
+// model submitted by the client. Unrelated JSON fields are preserved; non-JSON
+// bodies and payloads without a known model field remain byte-identical.
 func RewriteResponseModel(body []byte, publicModel string) ([]byte, error) {
 	publicModel = strings.TrimSpace(publicModel)
 	if publicModel == "" || !gjson.ValidBytes(body) {

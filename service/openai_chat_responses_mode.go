@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"sync"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 )
 
@@ -51,4 +52,18 @@ func ShouldChatCompletionsUseResponsesGlobal(channelID int, channelType int, mod
 		channelType,
 		model,
 	)
+}
+
+// ShouldChatCompletionsUseResponses applies the channel-level routing policy
+// for an external Chat Completions request. The persisted OpenAI Responses
+// channel is intentionally always upgraded, even when either passthrough
+// switch is enabled; ordinary OpenAI channels retain the existing policy.
+func ShouldChatCompletionsUseResponses(channelID int, channelType int, model string, passThroughGlobal bool, passThroughChannel bool) bool {
+	if channelType == constant.ChannelTypeResponses {
+		return true
+	}
+	if passThroughGlobal || passThroughChannel {
+		return false
+	}
+	return ShouldChatCompletionsUseResponsesGlobal(channelID, channelType, model)
 }

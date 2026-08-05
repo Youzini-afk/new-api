@@ -49,13 +49,13 @@ func TestModelMappedHelperPreservesCompactPublicAlias(t *testing.T) {
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
 		ChannelMeta:     &relaycommon.ChannelMeta{},
 	}
-	request := &dto.GeneralOpenAIRequest{Model: "public-model-openai-compact"}
+	request := &dto.GeneralOpenAIRequest{Model: "public-model"}
 	require.NoError(t, ModelMappedHelper(c, info, request))
 
 	assert.Equal(t, "provider/model-v2", request.Model)
 	assert.Equal(t, "provider/model-v2-openai-compact", info.OriginModelName)
-	assert.Equal(t, "public-model-openai-compact", info.ResponseModelName(info.UpstreamModelName))
-	assert.Equal(t, "public-model-openai-compact", c.GetString(string(constant.ContextKeyResponseModelName)))
+	assert.Equal(t, "public-model", info.ResponseModelName(info.UpstreamModelName))
+	assert.Equal(t, "public-model", c.GetString(string(constant.ContextKeyResponseModelName)))
 }
 
 func TestModelMappedHelperTreatsCompactSelfMappingAsUnmapped(t *testing.T) {
@@ -68,11 +68,61 @@ func TestModelMappedHelperTreatsCompactSelfMappingAsUnmapped(t *testing.T) {
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
 		ChannelMeta:     &relaycommon.ChannelMeta{},
 	}
-	request := &dto.GeneralOpenAIRequest{Model: "public-model-openai-compact"}
+	request := &dto.GeneralOpenAIRequest{Model: "public-model"}
 	require.NoError(t, ModelMappedHelper(c, info, request))
 
 	assert.False(t, info.IsModelMapped)
 	assert.Equal(t, "public-model", request.Model)
 	assert.Equal(t, "public-model-openai-compact", info.OriginModelName)
-	assert.Empty(t, c.GetString(string(constant.ContextKeyResponseModelName)))
+	assert.Equal(t, "public-model", info.ResponseModelName(info.UpstreamModelName))
+	assert.Equal(t, "public-model", c.GetString(string(constant.ContextKeyResponseModelName)))
+}
+
+func TestModelMappedHelperRestoresUnmappedCompactPublicAlias(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	c.Set(string(constant.ContextKeyOriginalModel), "public-model-openai-compact")
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "public-model-openai-compact",
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+	}
+	request := &dto.GeneralOpenAIRequest{Model: "public-model"}
+	require.NoError(t, ModelMappedHelper(c, info, request))
+
+	assert.False(t, info.IsModelMapped)
+	assert.Equal(t, "public-model", request.Model)
+	assert.Equal(t, "public-model-openai-compact", info.OriginModelName)
+	assert.Equal(t, "public-model", c.GetString(string(constant.ContextKeyResponseModelName)))
+
+	body := []byte(`{"model":"public-model","metadata":{"model":"keep-me"},"future_field":{"value":1}}`)
+	rewritten, err := relaycommon.RewriteResponseModelFromContext(c, body)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"public-model","metadata":{"model":"keep-me"},"future_field":{"value":1}}`, string(rewritten))
+}
+
+func TestModelMappedHelperRebuildsCompactMappingForRetry(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	c.Set(string(constant.ContextKeyOriginalModel), "public-model-openai-compact")
+	c.Set("model_mapping", `{"public-model":"provider-a"}`)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "public-model-openai-compact",
+		RelayMode:       relayconstant.RelayModeResponsesCompact,
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+	}
+
+	firstRequest := &dto.GeneralOpenAIRequest{Model: "public-model"}
+	require.NoError(t, ModelMappedHelper(c, info, firstRequest))
+	assert.Equal(t, "provider-a", firstRequest.Model)
+
+	// The retry selector restores ContextKeyOriginalModel from its immutable
+	// RetryParam.ModelName before the second channel's mapping is applied.
+	c.Set(string(constant.ContextKeyOriginalModel), "public-model-openai-compact")
+	c.Set("model_mapping", `{"public-model":"provider-b"}`)
+	secondRequest := &dto.GeneralOpenAIRequest{Model: "public-model"}
+	require.NoError(t, ModelMappedHelper(c, info, secondRequest))
+
+	assert.Equal(t, "provider-b", secondRequest.Model)
+	assert.Equal(t, "provider-b-openai-compact", info.OriginModelName)
+	assert.Equal(t, "public-model", c.GetString(string(constant.ContextKeyResponseModelName)))
 }

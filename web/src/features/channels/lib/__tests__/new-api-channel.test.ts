@@ -21,6 +21,7 @@ import { describe, test } from 'node:test'
 
 import {
   CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_OPENAI_RESPONSES,
   CHANNEL_TYPE_OPTIONS,
   MODEL_FETCHABLE_TYPES,
 } from '../../constants'
@@ -93,5 +94,34 @@ describe('New API channel', () => {
     })
 
     assert.equal(result.success, true)
+  })
+})
+
+describe('OpenAI Responses channel', () => {
+  test('uses OpenAI-compatible defaults and appears next to OpenAI', () => {
+    const option = CHANNEL_TYPE_OPTIONS.find(
+      (item) => item.value === CHANNEL_TYPE_OPENAI_RESPONSES
+    )
+
+    assert.deepEqual(option, {
+      value: CHANNEL_TYPE_OPENAI_RESPONSES,
+      label: 'OpenAI Responses',
+    })
+    assert.equal(
+      CHANNEL_TYPE_OPTIONS.findIndex(
+        (item) => item.value === CHANNEL_TYPE_OPENAI_RESPONSES
+      ),
+      CHANNEL_TYPE_OPTIONS.findIndex((item) => item.value === 1) + 1
+    )
+    assert.equal(MODEL_FETCHABLE_TYPES.has(CHANNEL_TYPE_OPENAI_RESPONSES), true)
+    assert.equal(getChannelTypeIcon(CHANNEL_TYPE_OPENAI_RESPONSES), 'OpenAI')
+    assert.equal(
+      getChannelTypeConfig(CHANNEL_TYPE_OPENAI_RESPONSES).icon,
+      'openai'
+    )
+    assert.equal(
+      getChannelTypeConfig(CHANNEL_TYPE_OPENAI_RESPONSES).defaultBaseUrl,
+      'https://api.openai.com'
+    )
   })
 })

@@ -41,6 +41,23 @@ func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
 }
 
+func TestRelayInfoResetRequestConversionForAttempt(t *testing.T) {
+	info := &RelayInfo{
+		RelayFormat:             types.RelayFormatOpenAI,
+		RequestConversionChain:  []types.RelayFormat{types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses},
+		FinalRequestRelayFormat: types.RelayFormatClaude,
+	}
+
+	info.ResetRequestConversionForAttempt()
+
+	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAI}, info.RequestConversionChain)
+	require.Empty(t, info.FinalRequestRelayFormat)
+	require.Equal(t, types.RelayFormatOpenAI, info.GetFinalRequestRelayFormat())
+
+	var nilInfo *RelayInfo
+	require.NotPanics(t, nilInfo.ResetRequestConversionForAttempt)
+}
+
 func TestRelayInfoMetaTypedNilReceiver(t *testing.T) {
 	var info *RelayInfo
 	var meta convmeta.Meta = info

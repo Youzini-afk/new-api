@@ -313,15 +313,18 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 	if err != nil {
-		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, retryParam.ModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 	if channel == nil {
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, retryParam.ModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+	// OriginModelName may be rewritten for the previous attempt's internal
+	// billing (notably Responses Compact). Always seed the next channel from the
+	// immutable client-routing model captured before the retry loop.
+	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, retryParam.ModelName)
 	if newAPIError != nil {
 		return nil, newAPIError
 	}

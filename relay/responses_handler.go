@@ -17,7 +17,23 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
+
+func rewritePassThroughResponsesModel(body []byte, upstreamModel string) ([]byte, error) {
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if upstreamModel == "" {
+		return body, nil
+	}
+	if !gjson.ValidBytes(body) {
+		return nil, fmt.Errorf("invalid responses passthrough request body")
+	}
+	if !gjson.GetBytes(body, "model").Exists() {
+		return body, nil
+	}
+	return sjson.SetBytes(body, "model", upstreamModel)
+}
 
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
@@ -82,7 +98,21 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
-		requestBody = common.ReaderOnly(storage)
+		jsonData, err := storage.Bytes()
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+		jsonData, err = rewritePassThroughResponsesModel(jsonData, info.UpstreamModelName)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		defer closer.Close()
+		info.UpstreamRequestBodySize = size
+		requestBody = body
 	} else {
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
 		if err != nil {

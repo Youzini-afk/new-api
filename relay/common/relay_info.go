@@ -136,7 +136,8 @@ type RelayInfo struct {
 	RelayMode              int
 	OriginModelName        string
 	// ResponseModelAlias is the model name requested by the client before
-	// channel model mapping. It is only exposed when IsModelMapped is true.
+	// channel model mapping. Responses compact also exposes it for unmapped
+	// requests so the public compact suffix is restored in the response.
 	ResponseModelAlias    string
 	RequestURLPath        string
 	RequestHeaders        map[string]string
@@ -238,6 +239,7 @@ type RelayInfo struct {
 }
 
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
+	info.ResetRequestConversionForAttempt()
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)
@@ -392,6 +394,7 @@ var streamSupportedChannels = map[int]bool{
 	constant.ChannelTypeAdvancedCustom: true,
 	constant.ChannelTypeSub2API:        true,
 	constant.ChannelTypeNewAPI:         true,
+	constant.ChannelTypeResponses:      true,
 	constant.ChannelTypeTencent:        true,
 }
 
@@ -664,6 +667,17 @@ func (info *RelayInfo) InitRequestConversionChain() {
 		return
 	}
 	info.RequestConversionChain = []types.RelayFormat{info.RelayFormat}
+}
+
+// ResetRequestConversionForAttempt prevents a failed upstream attempt from
+// leaking its final protocol into the next channel's billing and audit data.
+func (info *RelayInfo) ResetRequestConversionForAttempt() {
+	if info == nil {
+		return
+	}
+	info.FinalRequestRelayFormat = ""
+	info.RequestConversionChain = nil
+	info.InitRequestConversionChain()
 }
 
 func (info *RelayInfo) AppendRequestConversion(format types.RelayFormat) {

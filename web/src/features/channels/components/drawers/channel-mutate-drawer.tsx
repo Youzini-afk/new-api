@@ -138,6 +138,7 @@ import {
 } from '../../api'
 import {
   ADD_MODE_OPTIONS,
+  CHANNEL_TYPE_OPENAI_RESPONSES,
   CHANNEL_STATUS_LABELS,
   CHANNEL_TYPE_OPTIONS,
   CHANNEL_TYPE_WARNINGS,
@@ -720,6 +721,8 @@ export function ChannelMutateDrawer({
   const keyMode = form.watch('key_mode')
   const currentGroups = form.watch('group')
   const currentType = form.watch('type')
+  const isOpenAIChannelType =
+    currentType === 1 || currentType === CHANNEL_TYPE_OPENAI_RESPONSES
   const currentStatus = form.watch('status')
   const currentBaseUrl = form.watch('base_url')
   const currentKey = form.watch('key')
@@ -890,13 +893,13 @@ export function ChannelMutateDrawer({
   const basicModels = useMemo(() => {
     if (!allModelsList.length) return []
     // Filter models based on common patterns for specific types
-    if (currentType === 1) {
+    if (isOpenAIChannelType) {
       return allModelsList.filter(
         (model) => model.startsWith('gpt-') || model.startsWith('text-')
       )
     }
     return allModelsList
-  }, [allModelsList, currentType])
+  }, [allModelsList, isOpenAIChannelType])
 
   // Get prefill groups
   const prefillGroups = useMemo(
@@ -1026,7 +1029,7 @@ export function ChannelMutateDrawer({
     (currentHttp2ConnectionShards != null && currentHttp2ConnectionShards > 1)
   )
   let fieldPassthroughConfigured = false
-  if (currentType === 1 || currentType === 57) {
+  if (isOpenAIChannelType || currentType === 57) {
     fieldPassthroughConfigured = Boolean(
       currentAllowServiceTier ||
       currentDisableStore ||
@@ -1077,7 +1080,7 @@ export function ChannelMutateDrawer({
       configured: extraSettingsConfigured,
     },
   ]
-  if (currentType === 1 || currentType === 14 || currentType === 57) {
+  if (isOpenAIChannelType || currentType === 14 || currentType === 57) {
     advancedNavChildren.push({
       id: ADVANCED_SETTINGS_SECTION_IDS.fieldPassthrough,
       title: t('Field passthrough controls'),
@@ -2068,7 +2071,7 @@ export function ChannelMutateDrawer({
                           />
                         )}
 
-                        {currentType === 1 && (
+                        {isOpenAIChannelType && (
                           <fieldset
                             disabled={sensitiveLocked}
                             className='disabled:opacity-60'
@@ -4067,7 +4070,7 @@ export function ChannelMutateDrawer({
                             className='space-y-4 disabled:opacity-60'
                           >
                             <div className='divide-border space-y-0 divide-y border-y'>
-                              {currentType === 1 && (
+                              {isOpenAIChannelType && (
                                 <FormField
                                   control={form.control}
                                   name='force_format'
@@ -4233,9 +4236,7 @@ export function ChannelMutateDrawer({
                                         <SelectValue />
                                       </SelectTrigger>
                                     </FormControl>
-                                    <SelectContent
-                                      alignItemWithTrigger={false}
-                                    >
+                                    <SelectContent alignItemWithTrigger={false}>
                                       <SelectGroup>
                                         <SelectItem value='auto'>
                                           {t('Auto')}
@@ -4369,7 +4370,7 @@ export function ChannelMutateDrawer({
                           </fieldset>
                         </div>
 
-                        {(currentType === 1 ||
+                        {(isOpenAIChannelType ||
                           currentType === 14 ||
                           currentType === 57) && (
                           <div
@@ -4416,7 +4417,8 @@ export function ChannelMutateDrawer({
                                   )}
                                 />
 
-                                {(currentType === 1 || currentType === 57) && (
+                                {(isOpenAIChannelType ||
+                                  currentType === 57) && (
                                   <>
                                     <FormField
                                       control={form.control}

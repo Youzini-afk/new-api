@@ -25,20 +25,24 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 	c.Set(string(constant.ContextKeyResponseModelName), "")
 	info.IsModelMapped = false
 
-	publicModelName := strings.TrimSpace(c.GetString(string(constant.ContextKeyOriginalModel)))
-	if publicModelName == "" {
-		publicModelName = strings.TrimSpace(info.ResponseModelAlias)
+	routingModelName := strings.TrimSpace(c.GetString(string(constant.ContextKeyOriginalModel)))
+	if routingModelName == "" {
+		routingModelName = strings.TrimSpace(info.ResponseModelAlias)
 	}
-	if publicModelName == "" {
-		publicModelName = strings.TrimSpace(info.OriginModelName)
+	if routingModelName == "" {
+		routingModelName = strings.TrimSpace(info.OriginModelName)
 	}
-	info.ResponseModelAlias = publicModelName
 
 	isResponsesCompact := info.RelayMode == relayconstant.RelayModeResponsesCompact
-	mappingModelName := publicModelName
+	publicModelName := routingModelName
+	mappingModelName := routingModelName
 	if isResponsesCompact && strings.HasSuffix(mappingModelName, ratio_setting.CompactModelSuffix) {
 		mappingModelName = strings.TrimSuffix(mappingModelName, ratio_setting.CompactModelSuffix)
+		// The distributor adds this suffix only for routing and billing. Restore
+		// the model name that was actually present in the client's compact request.
+		publicModelName = mappingModelName
 	}
+	info.ResponseModelAlias = publicModelName
 	info.UpstreamModelName = mappingModelName
 
 	// map model name
@@ -90,7 +94,11 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 		info.UpstreamModelName = finalUpstreamModelName
 		info.OriginModelName = ratio_setting.WithCompactModelSuffix(finalUpstreamModelName)
 	}
-	if info.IsModelMapped && publicModelName != "" {
+	// Responses compact always needs the public model restored on the response,
+	// including unmapped and self-mapped requests. Both the upstream request and
+	// client-visible response use the suffix-free model; only internal billing
+	// keeps the compact suffix.
+	if (info.IsModelMapped || isResponsesCompact) && publicModelName != "" {
 		c.Set(string(constant.ContextKeyResponseModelName), publicModelName)
 	}
 	if request != nil {
